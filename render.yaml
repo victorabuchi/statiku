@@ -1,0 +1,32 @@
+# Render Blueprint: the ingest service and its Postgres, both in Frankfurt so the data stays in the EU.
+# In the Render dashboard: New, Blueprint, then pick this repo.
+services:
+  - type: web
+    name: waymark-ingest
+    runtime: node
+    region: frankfurt
+    # Starter, not free: a free service sleeps, and the events sent while it wakes up are lost.
+    plan: starter
+    branch: main
+    buildCommand: npm ci --omit=dev && npm run geo
+    preDeployCommand: npm run migrate
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      # The client IP comes from Render's proxy headers. It is used in memory only.
+      - key: TRUST_PROXY
+        value: "1"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: waymark-db
+          property: connectionString
+
+databases:
+  - name: waymark-db
+    region: frankfurt
+    plan: basic-256mb
+    postgresMajorVersion: "17"
+    # Reachable only from Render services in this account; use the service's Shell for npm run project.
+    ipAllowList: []

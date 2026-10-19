@@ -1,0 +1,33 @@
+{
+  "name": "waymark",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Privacy-first analytics for websites and apps, from first visit to purchase.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "node tracker/build.ts",
+    "geo": "node scripts/geo.ts",
+    "migrate": "node db/migrate.ts",
+    "start": "node ingest/server.ts",
+    "dev": "node --watch --env-file-if-exists=.env ingest/server.ts",
+    "project": "node --env-file-if-exists=.env scripts/project.ts",
+    "stats": "node --env-file-if-exists=.env scripts/stats.ts",
+    "test": "node --test --env-file-if-exists=.env test/",
+    "e2e": "node --env-file-if-exists=.env scripts/e2e-notchlight.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "esbuild": "^0.28.2",
+    "mmdb-lib": "^3.0.3",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/pg": "^8.23.1",
+    "puppeteer-core": "^25.14.0",
+    "typescript": "^7.0.2"
+  }
+}
