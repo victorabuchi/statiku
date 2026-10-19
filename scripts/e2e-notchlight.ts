@@ -3,20 +3,18 @@
 // the snippet added the way it will be on the live site. Chrome resolves notchlight.com to this machine, so the
 // pages run under their real hostname. Nothing leaves the machine: requests to other hosts are answered locally.
 //   npm run e2e [-- --docs ../lockwidgets/docs --chrome <path to Chrome>]
-import { readFileSync, statSync } from "node:fs";
-import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { extname, join, normalize } from "node:path";
 import { parseArgs } from "node:util";
 import pg from "pg";
 import puppeteer, { type Page } from "puppeteer-core";
 import { createApp } from "../ingest/server.ts";
+import { serveDocs, DEFAULT_DOCS } from "./notchlight-site.ts";
 import { createProject } from "./project.ts";
 import { report } from "./stats.ts";
 
 const { values } = parseArgs({
   options: {
-    docs: { type: "string", default: new URL("../../lockwidgets/docs", import.meta.url).pathname },
+    docs: { type: "string", default: DEFAULT_DOCS },
     chrome: { type: "string", default: "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary" },
   },
 });
@@ -31,7 +29,7 @@ const IPS = { fi: "193.166.3.2", de: "141.30.1.1", us: "8.8.8.8" };
 
 // The test project, emptied each run.
 const pool = new pg.Pool({ connectionString: databaseUrl });
-const NAME = "Notchlight (local test)";
+const NAME = "Notchlight (browser test)";
 let project = (await pool.query("select id, key from projects where name = $1", [NAME])).rows[0];
 project ??= await createProject(pool, NAME, ["notchlight.com"], "Europe/Helsinki");
 for (const table of ["events", "sessions", "usage_daily"]) await pool.query(`delete from ${table} where project_id = $1`, [project.id]);
@@ -40,37 +38,8 @@ const app = await createApp({ databaseUrl, trustProxy: true, geoPath: new URL(".
 await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
 const ingest = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
 
-// The snippet in every page's head, and the download page reporting the download it starts: the same edits that
-// go into notchlight.com.
-const snippet = `<script defer data-project="${project.key}" src="${ingest}/s.js"></script>`;
-const AUTO_START = "setTimeout(() => { window.location.href = link.href; }, 700);";
-function addSnippet(html: string, path: string) {
-  html = html.replace("</head>", `${snippet}\n</head>`);
-  if (path.endsWith("download/index.html")) {
-    if (!html.includes(AUTO_START)) throw new Error("The download page's auto-start changed; update this test and the live edit.");
-    html = html.replace(
-      AUTO_START,
-      `window.waymark = window.waymark || function () { (waymark.q = waymark.q || []).push(arguments) };
-  setTimeout(() => { waymark("download", { props: { file: "Notchlight.dmg" } }); window.location.href = link.href; }, 700);`,
-    );
-  }
-  return html;
-}
-
-const TYPES: Record<string, string> = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".svg": "image/svg+xml", ".mp4": "video/mp4" };
-const site = createServer((req, res) => {
-  let path = normalize(join(docs, decodeURIComponent((req.url ?? "/").split("?")[0])));
-  if (!path.startsWith(docs)) return res.writeHead(403).end();
-  try {
-    if (statSync(path).isDirectory()) path = join(path, "index.html");
-    const body = readFileSync(path);
-    const type = TYPES[extname(path)] ?? "application/octet-stream";
-    res.writeHead(200, { "content-type": type, "referrer-policy": "strict-origin-when-cross-origin" });
-    res.end(type === "text/html" ? addSnippet(body.toString("utf8"), path) : body);
-  } catch {
-    res.writeHead(404).end("not found");
-  }
-});
+// The snippet as it will be on notchlight.com.
+const site = serveDocs(docs, `<script defer data-project="${project.key}" src="${ingest}/s.js"></script>`);
 await new Promise<void>((resolve) => site.listen(0, "127.0.0.1", resolve));
 const origin = `http://notchlight.com:${(site.address() as AddressInfo).port}`;
 

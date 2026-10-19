@@ -13,10 +13,13 @@
     "migrate": "node db/migrate.ts",
     "start": "node ingest/server.ts",
     "dev": "node --watch --env-file-if-exists=.env ingest/server.ts",
+    "dashboard": "node --env-file-if-exists=.env dashboard/server.ts",
     "project": "node --env-file-if-exists=.env scripts/project.ts",
     "stats": "node --env-file-if-exists=.env scripts/stats.ts",
+    "seed": "node --env-file-if-exists=.env scripts/seed-demo.ts",
     "test": "node --test --env-file-if-exists=.env test/",
     "e2e": "node --env-file-if-exists=.env scripts/e2e-notchlight.ts",
+    "notchlight": "node --env-file-if-exists=.env scripts/notchlight-site.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

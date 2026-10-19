@@ -28,7 +28,7 @@ Notchlight (notchlight.com) is the first customer.
 | Country lookup | DB-IP Country Lite (`.mmdb`, CC BY 4.0), downloaded at build time, read with `mmdb-lib` | Country only, offline, no third-party calls |
 | Website script | `tracker/`: plain JS, minified with esbuild, served at `/s.js` | Under 2 KB |
 | App SDK (next) | Swift package for macOS and iOS | Notchlight first |
-| Dashboard (later) | Next.js app on Render, Pursecast-style UI | Same as Avamod |
+| Dashboard | `dashboard/`: one page and a JSON API on `node:http`, Pursecast-style UI; local only until sign-in exists | Small, no build step, same stack as ingest |
 | SaaS billing (later) | Polar as merchant of record | It handles EU VAT, and you already use it |
 | Hosting | Render Blueprint (`render.yaml`): ingest web service + Postgres, both in Frankfurt | Your current host |
 

@@ -1,0 +1,786 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Waymark</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Crect x='1' y='1' width='18' height='18' rx='5' fill='%233b5bdb'/%3E%3Crect x='6' y='5' width='8' height='4' rx='1.2' fill='white'/%3E%3Crect x='6' y='11' width='8' height='4' rx='1.2' fill='white' opacity='.55'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: a sticky bar, one row of filters, then the summary (tiles + chart) before the detail (the journey, then
+   two-up panels). Compact, hairline-bordered panels in the Pursecast manner. */
+:root {
+  --bg: #f6f6f4;
+  --surface: #ffffff;
+  --ink: #16171b;
+  --ink-2: #565963;
+  --muted: #7d8089;
+  --line: #e6e6e2;
+  --line-2: #d6d6d0;
+  --hover: rgba(22, 23, 27, 0.04);
+  --accent: #3b5bdb;
+  --accent-bg: #3b5bdb;
+  --on-accent: #ffffff;
+  --accent-wash: rgba(59, 91, 219, 0.08);
+  /* Chart marks (validated pair) and the chart chrome. */
+  --s1: #2a78d6;
+  --s1-wash: rgba(42, 120, 214, 0.10);
+  --s1-bar: rgba(42, 120, 214, 0.14);
+  --s3: #1baf7a;
+  --lapsed: #c9c8c1;
+  --grid: #eeeeea;
+  --axis: #c9c8c1;
+  --good: #006300;
+  --bad: #c22f2f;
+  --live: #0ca30c;
+  --font: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e0f11; --surface: #17181b; --ink: #eeeef0; --ink-2: #b3b6be; --muted: #868991; --line: #26282c; --line-2: #34373c;
+    --hover: rgba(255, 255, 255, 0.04); --accent: #8aa0f7; --accent-bg: #4263eb; --on-accent: #ffffff; --accent-wash: rgba(138, 160, 247, 0.12);
+    --s1: #3987e5; --s1-wash: rgba(57, 135, 229, 0.16); --s1-bar: rgba(57, 135, 229, 0.22); --s3: #199e70; --lapsed: #4a4b48;
+    --grid: #232427; --axis: #3a3b3a; --good: #3cc23c; --bad: #ef7070; --live: #0ca30c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e0f11; --surface: #17181b; --ink: #eeeef0; --ink-2: #b3b6be; --muted: #868991; --line: #26282c; --line-2: #34373c;
+  --hover: rgba(255, 255, 255, 0.04); --accent: #8aa0f7; --accent-bg: #4263eb; --on-accent: #ffffff; --accent-wash: rgba(138, 160, 247, 0.12);
+  --s1: #3987e5; --s1-wash: rgba(57, 135, 229, 0.16); --s1-bar: rgba(57, 135, 229, 0.22); --s3: #199e70; --lapsed: #4a4b48;
+  --grid: #232427; --axis: #3a3b3a; --good: #3cc23c; --bad: #ef7070; --live: #0ca30c;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { color-scheme: light; }
+
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--font); -webkit-font-smoothing: antialiased; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+p { margin: 0; }
+.num { font-variant-numeric: tabular-nums; }
+.gutter { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.wrap { max-width: 1180px; margin: 0 auto; }
+
+/* Top bar */
+.topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); }
+.topbar .wrap { display: flex; align-items: center; gap: 14px; min-height: 52px; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; letter-spacing: -0.01em; }
+.brand svg { width: 20px; height: 20px; flex: none; }
+.project { display: flex; align-items: center; gap: 8px; padding: 5px 10px 5px 8px; border: 1px solid var(--line); border-radius: 8px; background: none; cursor: pointer; min-width: 0; }
+.project:hover { background: var(--hover); }
+.project .dot { width: 18px; height: 18px; border-radius: 5px; background: var(--accent-bg); color: var(--on-accent); display: grid; place-items: center; font-size: 11px; font-weight: 700; flex: none; }
+.project b { font-weight: 600; }
+.project span.meta { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav { display: flex; gap: 2px; margin-left: 6px; }
+.nav button { border: 0; background: none; padding: 6px 10px; border-radius: 7px; color: var(--ink-2); cursor: pointer; font-weight: 500; }
+.nav button:hover { background: var(--hover); color: var(--ink); }
+.nav button[aria-current="page"] { color: var(--ink); background: var(--accent-wash); }
+.spacer { flex: 1; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--line-2); color: var(--ink-2); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: var(--surface); display: grid; place-items: center; font-size: 11px; font-weight: 700; flex: none; }
+
+/* Empty states */
+.empty { padding: 18px 16px; color: var(--ink-2); display: grid; gap: 6px; }
+.empty b { color: var(--ink); font-weight: 600; }
+.empty p { max-width: 70ch; }
+.stage.off .name, .stage.off .count { color: var(--muted); }
+.stage.off .track { border: 1px dashed var(--line-2); border-radius: 4px; }
+select.project { appearance: none; font: inherit; color: var(--ink); background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%237d8089' stroke-width='1.5' fill='none'/%3E%3C/svg%3E") no-repeat right 10px center; border: 1px solid var(--line); border-radius: 8px; padding: 5px 28px 5px 10px; font-weight: 600; max-width: 260px; cursor: pointer; }
+.loading { opacity: 0.55; transition: opacity 0.15s; }
+.error { margin-top: 16px; padding: 10px 14px; border: 1px solid var(--bad); border-radius: 10px; color: var(--bad); }
+
+/* Filters */
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; }
+.seg { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.seg button { border: 0; background: none; padding: 5px 11px; border-radius: 7px; cursor: pointer; color: var(--ink-2); font-weight: 500; white-space: nowrap; }
+.seg button:hover { color: var(--ink); background: var(--hover); }
+.seg button[aria-pressed="true"] { background: var(--accent-bg); color: var(--on-accent); }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 8px; background: var(--accent-wash); color: var(--ink); font-weight: 500; }
+.chip button { border: 0; background: none; cursor: pointer; width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; color: var(--ink-2); }
+.chip button:hover { background: var(--hover); color: var(--ink); }
+.hint { color: var(--muted); font-size: 13px; }
+.live { display: inline-flex; align-items: center; gap: 7px; color: var(--ink-2); font-weight: 500; margin-left: auto; }
+.live i { width: 8px; height: 8px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 0 rgba(12, 163, 12, 0.5); animation: pulse 2s infinite; }
+@keyframes pulse { 70% { box-shadow: 0 0 0 7px rgba(12, 163, 12, 0); } 100% { box-shadow: 0 0 0 0 rgba(12, 163, 12, 0); } }
+@media (prefers-reduced-motion: reduce) { .live i { animation: none; } }
+
+/* Tiles */
+.tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); margin-top: 14px; border: 1px solid var(--line); border-radius: 12px 12px 0 0; background: var(--surface); overflow: hidden; }
+.tile { display: grid; gap: 3px; align-content: start; text-align: left; padding: 14px 16px 13px; border: 0; border-right: 1px solid var(--line); background: none; cursor: pointer; position: relative; min-width: 0; }
+.tile:last-child { border-right: 0; }
+.tile:hover { background: var(--hover); }
+.tile[aria-pressed="true"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--accent); }
+.tile .label { color: var(--ink-2); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.tile .value { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
+.tile .delta { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.up { color: var(--good); font-weight: 600; }
+.down { color: var(--bad); font-weight: 600; }
+
+/* Panels */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; min-width: 0; }
+.panel.joined { border-top: 0; border-radius: 0 0 12px 12px; }
+.panel-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 14px 16px 0; }
+.panel-head h2 { font-size: 14px; font-weight: 600; }
+.panel-head .sub { color: var(--muted); font-size: 13px; }
+.panel-head .tools { margin-left: auto; display: flex; gap: 4px; }
+.panel-body { padding: 12px 16px 16px; }
+.link { border: 0; background: none; padding: 3px 6px; border-radius: 6px; color: var(--accent); cursor: pointer; font-size: 13px; font-weight: 500; }
+.link:hover { background: var(--accent-wash); }
+.tabs { display: flex; gap: 2px; }
+.tabs button { border: 0; background: none; padding: 3px 8px; border-radius: 6px; cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 500; }
+.tabs button:hover { color: var(--ink); }
+.tabs button[aria-selected="true"] { color: var(--ink); background: var(--hover); }
+section { margin-top: 22px; }
+.section-title { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.section-title h2 { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+.section-title p { color: var(--muted); font-size: 13px; }
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+
+/* Main chart */
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart svg:focus-visible { outline-offset: 4px; }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--line-2); border-radius: 8px; padding: 7px 10px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.10); white-space: nowrap; transform: translate(-50%, calc(-100% - 12px)); }
+.tip .v { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 7px; }
+.tip .v::before { content: ""; width: 12px; height: 2px; border-radius: 1px; background: var(--s1); }
+.tip .k { color: var(--muted); font-size: 12px; }
+.axis-text { fill: var(--muted); font: 11px var(--font); font-variant-numeric: tabular-nums; }
+.end-text { fill: var(--ink); font: 600 12px var(--font); }
+
+/* Tables */
+.scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th { text-align: right; font-weight: 500; color: var(--muted); font-size: 12px; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; padding-left: 0; }
+th:last-child, td:last-child { padding-right: 0; }
+tr:last-child td { border-bottom: 0; }
+tbody tr.pick { cursor: pointer; }
+tbody tr.pick:hover td { background: var(--hover); }
+tbody tr.pick td:first-child { color: var(--ink); font-weight: 600; }
+tbody tr.muted td { color: var(--muted); }
+tbody tr.on td { background: var(--accent-wash); }
+.est { display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: 4px; border: 1px solid var(--line-2); color: var(--muted); font-size: 10.5px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase; vertical-align: 1px; }
+
+/* The journey */
+.journey { display: grid; gap: 10px; }
+.stage { display: grid; grid-template-columns: 110px minmax(0, 1fr) 76px 168px; align-items: center; gap: 12px; }
+.stage .name { font-weight: 600; white-space: nowrap; }
+.stage .track { height: 22px; position: relative; }
+.stage .fill { position: absolute; inset: 0 auto 0 0; background: var(--s1); border-radius: 0 4px 4px 0; min-width: 2px; }
+.stage .count { text-align: right; font-weight: 700; font-size: 15px; }
+.stage .rate { color: var(--muted); font-size: 12.5px; }
+.stage .rate b { color: var(--ink-2); font-weight: 600; }
+.journey-note { margin-top: 12px; color: var(--muted); font-size: 12.5px; max-width: 80ch; }
+
+/* Bar lists */
+.bars { display: grid; gap: 3px; }
+.bars-head { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; padding: 0 2px 4px; }
+.bar-row { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 30px; padding: 0 8px; border: 0; background: none; text-align: left; width: 100%; border-radius: 6px; }
+button.bar-row { cursor: pointer; }
+button.bar-row:hover { background: var(--hover); }
+.bar-row .wash { position: absolute; inset: 2px auto 2px 0; background: var(--s1-bar); border-radius: 0 4px 4px 0; }
+.bar-row .l, .bar-row .r { position: relative; }
+.bar-row .l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.bar-row .r { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.bar-row .r small { color: var(--muted); font-weight: 500; margin-left: 6px; }
+.bar-row.on { box-shadow: inset 0 0 0 1px var(--accent); }
+
+/* App */
+.mini { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
+.mini div { padding: 14px 16px; border-right: 1px solid var(--line); min-width: 0; }
+.mini div:last-child { border-right: 0; }
+.mini .label { color: var(--ink-2); font-size: 12.5px; font-weight: 500; }
+.mini .value { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+.app-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.app-cols > div { padding: 14px 16px 16px; border-right: 1px solid var(--line); min-width: 0; }
+.app-cols > div:last-child { border-right: 0; }
+.app-cols h3, .rev-cols h3 { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+.stack { display: flex; gap: 2px; height: 22px; }
+.stack span { display: block; height: 100%; }
+.stack span:first-child { border-radius: 4px 0 0 4px; }
+.stack span:last-child { border-radius: 0 4px 4px 0; }
+.legend { display: grid; gap: 7px; margin-top: 12px; }
+.legend div { display: flex; align-items: center; gap: 8px; }
+.legend i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.legend b { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 600; }
+.legend small { color: var(--muted); font-variant-numeric: tabular-nums; width: 3.2em; text-align: right; }
+
+/* Revenue */
+.rev-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.rev-cols > div { padding: 14px 16px 16px; min-width: 0; }
+.rev-cols > div:first-child { border-right: 1px solid var(--line); }
+.orders { display: grid; }
+.order { display: grid; grid-template-columns: 82px minmax(0, 1fr) auto; gap: 10px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.order:last-child { border-bottom: 0; }
+.order .when { color: var(--muted); font-size: 12.5px; }
+.order .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.order .what small { color: var(--muted); margin-left: 6px; }
+.order .amt { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Setup */
+.setup { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }
+.setup .panel-body { display: grid; gap: 12px; align-content: start; }
+.setup p { color: var(--ink-2); max-width: 62ch; }
+.status { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; }
+.status i { width: 8px; height: 8px; border-radius: 50%; }
+.status.ok i { background: var(--live); }
+.status.wait i { background: var(--lapsed); }
+.code { position: relative; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; font: 12.5px/1.55 var(--mono); overflow-x: auto; white-space: pre; color: var(--ink); }
+.copy { position: absolute; top: 8px; right: 8px; border: 1px solid var(--line-2); background: var(--surface); border-radius: 6px; padding: 2px 8px; font: 500 12px var(--font); cursor: pointer; color: var(--ink-2); }
+.copy:hover { color: var(--ink); }
+.btn { display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 8px; padding: 7px 13px; background: var(--accent-bg); color: var(--on-accent); font-weight: 600; cursor: pointer; white-space: nowrap; }
+.btn.ghost { background: none; color: var(--ink); border: 1px solid var(--line-2); }
+.btn.ghost:hover { background: var(--hover); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.field { flex: 1 1 200px; min-width: 0; border: 1px solid var(--line-2); border-radius: 8px; padding: 7px 10px; background: var(--surface); color: var(--ink); font: inherit; }
+.people { display: grid; }
+.person { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.person:last-child { border-bottom: 0; }
+.person .avatar { width: 26px; height: 26px; }
+.person small { color: var(--muted); margin-left: auto; }
+.meter { height: 8px; border-radius: 4px; background: var(--s1-wash); overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--s1); border-radius: 0 4px 4px 0; }
+.toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--surface); padding: 9px 14px; border-radius: 9px; font-weight: 500; z-index: 20; max-width: calc(100vw - 32px); }
+
+footer { margin-top: 28px; padding-block: 18px 28px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+footer a { color: var(--ink-2); }
+
+@media (max-width: 1020px) {
+  .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tile:nth-child(3) { border-right: 0; }
+  .tile:nth-child(-n+3) { border-bottom: 1px solid var(--line); }
+  .stage { grid-template-columns: 96px minmax(0, 1fr) 64px; }
+  .stage .rate { grid-column: 2 / -1; margin-top: -6px; }
+  .app-cols, .grid3 { grid-template-columns: minmax(0, 1fr); }
+  .app-cols > div { border-right: 0; border-bottom: 1px solid var(--line); }
+  .app-cols > div:last-child { border-bottom: 0; }
+}
+@media (max-width: 760px) {
+  .grid2, .setup, .rev-cols { grid-template-columns: minmax(0, 1fr); }
+  .rev-cols > div:first-child { border-right: 0; border-bottom: 1px solid var(--line); }
+  .mini { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mini div:nth-child(2) { border-right: 0; }
+  .mini div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .project span.meta, .avatar.top { display: none; }
+  .live { margin-left: 0; }
+}
+@media (max-width: 520px) {
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tile { border-bottom: 1px solid var(--line); }
+  .tile:nth-child(3) { border-right: 1px solid var(--line); }
+  .tile:nth-child(2n) { border-right: 0; }
+  .tile:nth-last-child(-n+2) { border-bottom: 0; }
+  .tile .value { font-size: 21px; }
+  .brand span, .pill.sample-top { display: none; }
+  .order { grid-template-columns: 64px minmax(0, 1fr) auto; }
+}
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+</style>
+</head>
+<body>
+<header class="topbar gutter">
+  <div class="wrap">
+    <div class="brand">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="1" y="1" width="18" height="18" rx="5" fill="var(--accent-bg)"/><rect x="6" y="5" width="8" height="4" rx="1.2" fill="var(--on-accent)"/><rect x="6" y="11" width="8" height="4" rx="1.2" fill="var(--on-accent)" opacity="0.55"/></svg>
+      <span>Waymark</span>
+    </div>
+    <label class="visually-hidden" for="project">Project</label>
+    <select class="project" id="project"></select>
+    <nav class="nav" aria-label="Views">
+      <button type="button" id="nav-dashboard" aria-current="page">Dashboard</button>
+      <button type="button" id="nav-setup">Setup</button>
+    </nav>
+    <span class="spacer"></span>
+    <span class="live num" id="live"><i aria-hidden="true"></i><span></span></span>
+  </div>
+</header>
+
+<main class="gutter">
+  <div class="wrap">
+    <p class="error" id="error" hidden></p>
+
+    <div id="view-dashboard">
+      <div class="filters" role="group" aria-label="Filters">
+        <div class="seg" id="ranges" role="group" aria-label="Date range"></div>
+        <span id="filter-slot"></span>
+      </div>
+
+      <div id="content">
+        <div class="tiles" id="tiles"></div>
+        <div class="panel joined">
+          <div class="panel-head">
+            <h2 id="chart-title">Visitors</h2>
+            <span class="sub" id="chart-sub"></span>
+            <div class="tools"><button class="link" type="button" id="table-toggle" aria-expanded="false">Show as table</button></div>
+          </div>
+          <div class="panel-body">
+            <div class="chart" id="chart"></div>
+            <div class="scroll" id="chart-table" hidden></div>
+          </div>
+        </div>
+
+        <section aria-labelledby="journey-h">
+          <div class="section-title"><h2 id="journey-h">Journey</h2><p id="journey-sub"></p></div>
+          <div class="grid2" style="grid-template-columns: minmax(0, 1fr)">
+            <div class="panel">
+              <div class="panel-body" style="padding-top: 16px">
+                <div class="journey" id="journey"></div>
+                <p class="journey-note" id="journey-note"></p>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>By source</h2><span class="sub">Click a row to filter the whole dashboard.</span></div>
+              <div class="panel-body"><div class="scroll" id="sources-table"></div></div>
+            </div>
+          </div>
+        </section>
+
+        <section aria-labelledby="web-h">
+          <div class="section-title"><h2 id="web-h">Website</h2><p id="web-sub"></p></div>
+          <div class="grid2">
+            <div class="panel">
+              <div class="panel-head"><h2>Sources</h2></div>
+              <div class="panel-body"><div class="bars" id="sources"></div></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>Pages</h2><div class="tools tabs" role="tablist" id="pages-tabs"></div></div>
+              <div class="panel-body"><div class="bars" id="pages"></div></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>Countries</h2></div>
+              <div class="panel-body"><div class="bars" id="countries"></div></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><h2>Devices</h2><div class="tools tabs" role="tablist" id="dev-tabs"></div></div>
+              <div class="panel-body"><div class="bars" id="devices"></div></div>
+            </div>
+          </div>
+        </section>
+
+        <section aria-labelledby="ev-h">
+          <div class="section-title"><h2 id="ev-h">Events</h2><p>Custom events, downloads and checkout clicks.</p></div>
+          <div class="panel"><div class="panel-body"><div class="scroll" id="events"></div></div></div>
+        </section>
+
+        <section aria-labelledby="app-h">
+          <div class="section-title"><h2 id="app-h">App</h2></div>
+          <div class="panel empty">
+            <b>Nothing from the app yet.</b>
+            <p>The Swift package comes next. Once Notchlight sends its anonymous install ping, this shows installs, active installs by version, macOS versions and how many are in trial or licensed, and the journey above gains its Install and Trial steps.</p>
+          </div>
+        </section>
+
+        <section aria-labelledby="rev-h">
+          <div class="section-title"><h2 id="rev-h">Revenue</h2></div>
+          <div class="panel empty">
+            <b>No payments connected yet.</b>
+            <p id="rev-text">Polar's webhook comes after the Swift package. Each checkout click already carries a reference, so purchases will be credited to the source of the visit they came from.</p>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div id="view-setup" hidden>
+      <div class="setup">
+        <div class="panel">
+          <div class="panel-head"><h2>Website</h2><span class="status" id="setup-status"><i></i><span></span></span></div>
+          <div class="panel-body">
+            <p>Add this to the head of every page. It sets no cookies and is under 2 KB.</p>
+            <div class="code" id="snippet-web"></div>
+            <p>Page views count on their own, and so do clicks on .dmg, .zip and other files (<code>download</code>) and on Polar and Stripe checkout links (<code>checkout</code>). For anything else, add <code>data-track="name"</code> to a link or call <code>waymark("name")</code>.</p>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Domains</h2></div>
+          <div class="panel-body">
+            <p>Pages on these hostnames and their subdomains can send events to this project. Anything else is refused.</p>
+            <div class="people" id="domains"></div>
+            <p class="hint">Change them with <code>npm run project -- domains <span id="domains-key"></span> example.com</code></p>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Privacy</h2></div>
+          <div class="panel-body">
+            <p>No cookies and nothing stored in the browser. IP addresses are used in memory for the country, then dropped. A visitor is a hash that changes every day and can't be traced back.</p>
+            <p>To leave your own visits out, run <code>localStorage.waymark_ignore = "1"</code> in your browser's console on your site.</p>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Coming next</h2></div>
+          <div class="panel-body">
+            <p>The Swift package for the app, Polar and Stripe webhooks for revenue, then accounts, team invites and plans.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="gutter">
+  <div class="wrap">
+    <span>Waymark, running locally</span>
+    <span>Country data: <a href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a></span>
+  </div>
+</footer>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, props = {}, ...kids) => {
+    const node = Object.assign(document.createElement(tag), props);
+    for (const k of kids) if (k != null) node.append(k);
+    return node;
+  };
+  const int = (n) => Math.round(n).toLocaleString("en-US");
+  const pct = (a, b, d = 1) => (b ? ((100 * a) / b).toFixed(d) + "%" : "–");
+  const compact = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, "") + "K" : String(Math.round(n * 10) / 10));
+  const duration = (s) => (s == null ? "–" : s < 60 ? `${s} s` : `${Math.floor(s / 60)} m ${String(s % 60).padStart(2, "0")} s`);
+  let countryName = (c) => c;
+  try { const names = new Intl.DisplayNames(["en"], { type: "region" }); countryName = (c) => (c && c !== "Unknown" ? names.of(c) : "Unknown"); } catch {}
+
+  const RANGES = [
+    { id: "today", label: "Today", prev: "yesterday" },
+    { id: "d7", label: "7 days", prev: "the 7 days before" },
+    { id: "d30", label: "30 days", prev: "the 30 days before" },
+    { id: "d90", label: "90 days", prev: "the 90 days before" },
+  ];
+  // lower: a fall is good news (bounce rate).
+  const METRICS = [
+    { id: "visitors", label: "Visitors", fmt: int, tick: compact },
+    { id: "pageviews", label: "Page views", fmt: int, tick: compact },
+    { id: "bounce", label: "Bounce rate", fmt: (n) => (n == null ? "–" : n + "%"), tick: (n) => n + "%", lower: true },
+    { id: "duration", label: "Visit duration", fmt: duration, tick: (n) => (n < 60 ? n + "s" : Math.round(n / 60) + "m") },
+    { id: "downloads", label: "Downloads", fmt: int, tick: compact },
+    { id: "checkouts", label: "Checkouts", fmt: int, tick: compact },
+  ];
+
+  const state = { project: null, range: "d30", metric: "visitors", source: null, pagesTab: "top", devTab: "device", table: false, data: null };
+  const remember = () => { try { localStorage.setItem("waymark", JSON.stringify({ project: state.project, range: state.range })); } catch {} };
+  try { const saved = JSON.parse(localStorage.getItem("waymark") || "{}"); Object.assign(state, { project: saved.project ?? null, range: saved.range ?? "d30" }); } catch {}
+  let projects = [], ingestUrl = "";
+
+  async function loadProjects() {
+    const res = await fetch("/api/projects");
+    ({ projects, ingestUrl } = await res.json());
+    const fromUrl = new URLSearchParams(location.search).get("project");
+    if (fromUrl) state.project = fromUrl;
+    if (!projects.some((p) => p.key === state.project)) {
+      const recent = [...projects].sort((a, b) => new Date(b.last_event_at || 0) - new Date(a.last_event_at || 0))[0];
+      state.project = recent?.key ?? null;
+    }
+    $("project").replaceChildren(...projects.map((p) => el("option", { value: p.key, textContent: p.name, selected: p.key === state.project })));
+  }
+
+  async function load() {
+    if (!state.project) return showError("No projects yet. Create one with npm run project -- create \"My site\" example.com");
+    $("content").classList.add("loading");
+    try {
+      const q = new URLSearchParams({ project: state.project, range: state.range });
+      if (state.source) q.set("source", state.source);
+      const res = await fetch("/api/stats?" + q);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      state.data = data;
+      $("error").hidden = true;
+      render();
+    } catch (e) {
+      showError(`Couldn't load the numbers: ${e.message}. Is the dashboard server still running?`);
+    } finally {
+      $("content").classList.remove("loading");
+    }
+  }
+  const showError = (text) => { $("error").textContent = text; $("error").hidden = false; };
+
+  // ---------- Rendering ----------
+  function renderRanges() {
+    $("ranges").replaceChildren(...RANGES.map((r) => {
+      const b = el("button", { type: "button", textContent: r.label });
+      b.setAttribute("aria-pressed", String(r.id === state.range));
+      b.onclick = () => { state.range = r.id; remember(); load(); };
+      return b;
+    }));
+  }
+
+  function setSource(name) { state.source = state.source === name ? null : name; load(); }
+
+  function renderFilter() {
+    const slot = $("filter-slot");
+    if (!state.source) return slot.replaceChildren(el("span", { className: "hint", textContent: "Click a source to see its journey." }));
+    const clear = el("button", { type: "button", ariaLabel: "Clear the source filter", innerHTML: '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>' });
+    clear.onclick = () => setSource(null);
+    slot.replaceChildren(el("span", { className: "chip" }, el("span", { textContent: "Source is " }), el("b", { textContent: state.source }), clear));
+  }
+
+  function delta(m, now, before, prevLabel) {
+    if (now == null || before == null || !before) return el("span", { className: "delta", textContent: before === 0 || before == null ? `nothing in ${prevLabel}` : "" });
+    const change = ((now - before) / before) * 100;
+    const good = m.lower ? change <= 0 : change >= 0;
+    const span = el("span", { className: "delta" });
+    span.append(el("span", { className: good ? "up" : "down", textContent: `${change >= 0 ? "▲" : "▼"} ${Math.abs(change).toFixed(0)}%` }), ` vs ${prevLabel}`);
+    return span;
+  }
+
+  function renderTiles(d, range) {
+    $("tiles").replaceChildren(...METRICS.map((m) => {
+      const b = el("button", { type: "button", className: "tile" },
+        el("span", { className: "label", textContent: m.label }),
+        el("span", { className: "value", textContent: m.fmt(d.totals[m.id]) }),
+        delta(m, d.totals[m.id], d.previous[m.id], range.prev));
+      b.setAttribute("aria-pressed", String(m.id === state.metric));
+      b.onclick = () => { state.metric = m.id; render(); };
+      return b;
+    }));
+  }
+
+  function nice(max) {
+    if (max <= 0) return { top: 4, step: 1 };
+    const rough = max / 4, mag = 10 ** Math.floor(Math.log10(rough));
+    const step = [1, 2, 2.5, 5, 10].map((s) => s * mag).find((s) => s >= rough);
+    return { top: step * Math.ceil(max / step), step };
+  }
+  const SVG = "http://www.w3.org/2000/svg";
+  const svgEl = (tag, attrs) => { const n = document.createElementNS(SVG, tag); for (const k in attrs) n.setAttribute(k, attrs[k]); return n; };
+
+  function bucketLabel(t, unit) {
+    const [date, time] = t.split("T");
+    if (unit === "hour") return time;
+    const [y, m, day] = date.split("-").map(Number);
+    return new Date(y, m - 1, day).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  }
+
+  function renderChart() {
+    const d = state.data;
+    const m = METRICS.find((x) => x.id === state.metric);
+    const range = RANGES.find((r) => r.id === d.range.id);
+    const pts = d.series.map((s) => ({ label: bucketLabel(s.t, d.range.unit), v: s[m.id] ?? 0 }));
+    $("chart-title").textContent = m.label;
+    $("chart-sub").textContent = `${d.range.unit === "hour" ? "by hour, today" : `by day, last ${range.label}`}${state.source ? ` · from ${state.source}` : ""}`;
+
+    const host = $("chart");
+    const W = Math.max(280, host.clientWidth || 800), H = W < 560 ? 210 : 250;
+    const M = { l: 46, r: 14, t: 22, b: 26 };
+    const { top, step } = nice(Math.max(...pts.map((p) => p.v), 0) * 1.05);
+    const n = pts.length;
+    const x = (i) => M.l + (n === 1 ? (W - M.l - M.r) / 2 : (i * (W - M.l - M.r)) / (n - 1));
+    const y = (v) => M.t + (H - M.t - M.b) * (1 - v / top);
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", tabindex: "0", "aria-label": `${m.label}, ${n} points. Use the arrow keys to read each one.` });
+    for (let v = 0; v <= top + 1e-9; v += step) {
+      svg.append(svgEl("line", { x1: M.l, x2: W - M.r, y1: y(v), y2: y(v), stroke: v === 0 ? "var(--axis)" : "var(--grid)", "stroke-width": 1, "shape-rendering": "crispEdges" }));
+      const t = svgEl("text", { x: M.l - 8, y: y(v) + 4, "text-anchor": "end", class: "axis-text" });
+      t.textContent = m.tick(v);
+      svg.append(t);
+    }
+    const every = Math.max(1, Math.ceil(n / (W < 560 ? 4 : 7)));
+    for (let i = n - 1; i >= 0; i -= every) {
+      const anchor = i === n - 1 && n > 1 ? "end" : x(i) - M.l < 24 ? "start" : "middle";
+      const t = svgEl("text", { x: x(i), y: H - 6, "text-anchor": anchor, class: "axis-text" });
+      t.textContent = pts[i].label;
+      svg.append(t);
+    }
+    if (n > 1) {
+      const line = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
+      svg.append(svgEl("path", { d: `${line}L${x(n - 1)},${y(0)}L${x(0)},${y(0)}Z`, fill: "var(--s1-wash)" }));
+      svg.append(svgEl("path", { d: line, fill: "none", stroke: "var(--s1)", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+    }
+    const last = pts[n - 1];
+    svg.append(svgEl("circle", { cx: x(n - 1), cy: y(last.v), r: 4, fill: "var(--s1)", stroke: "var(--surface)", "stroke-width": 2 }));
+    const endLabel = svgEl("text", { x: x(n - 1), y: y(last.v) - 10, "text-anchor": n > 1 ? "end" : "middle", class: "end-text" });
+    endLabel.textContent = m.fmt(last.v);
+    svg.append(endLabel);
+
+    const cross = svgEl("line", { y1: M.t - 6, y2: H - M.b, stroke: "var(--axis)", "stroke-width": 1, visibility: "hidden" });
+    const dot = svgEl("circle", { r: 4, fill: "var(--s1)", stroke: "var(--surface)", "stroke-width": 2, visibility: "hidden" });
+    svg.append(cross, dot);
+    const tip = el("div", { className: "tip", hidden: true });
+    let at = n - 1;
+    const show = (i) => {
+      at = i;
+      cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i)); cross.setAttribute("visibility", "visible");
+      dot.setAttribute("cx", x(i)); dot.setAttribute("cy", y(pts[i].v)); dot.setAttribute("visibility", "visible");
+      tip.replaceChildren(el("div", { className: "v", textContent: m.fmt(pts[i].v) }), el("div", { className: "k", textContent: pts[i].label }));
+      tip.hidden = false;
+      tip.style.left = Math.min(Math.max((x(i) / W) * host.clientWidth, 70), host.clientWidth - 70) + "px";
+      tip.style.top = (y(pts[i].v) / H) * host.clientHeight + "px";
+    };
+    const hide = () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); };
+    svg.addEventListener("pointermove", (e) => {
+      const r = svg.getBoundingClientRect();
+      const px = ((e.clientX - r.left) / r.width) * W;
+      show(Math.max(0, Math.min(n - 1, Math.round(((px - M.l) / (W - M.l - M.r)) * (n - 1)))));
+    });
+    svg.addEventListener("pointerleave", hide);
+    svg.addEventListener("focus", () => show(at));
+    svg.addEventListener("blur", hide);
+    svg.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); show(Math.max(0, Math.min(n - 1, at + (e.key === "ArrowLeft" ? -1 : 1)))); }
+    });
+    host.replaceChildren(svg, tip);
+
+    const table = el("table", {}, el("thead", {}, el("tr", {}, el("th", { textContent: d.range.unit === "hour" ? "Hour" : "Day" }), el("th", { textContent: m.label }))));
+    table.append(el("tbody", {}, ...pts.slice().reverse().map((p) => el("tr", {}, el("td", { textContent: p.label }), el("td", { textContent: m.fmt(p.v) })))));
+    $("chart-table").replaceChildren(table);
+    $("chart-table").hidden = !state.table;
+    $("table-toggle").textContent = state.table ? "Hide table" : "Show as table";
+    $("table-toggle").setAttribute("aria-expanded", String(state.table));
+  }
+
+  function renderJourney(d) {
+    const t = d.totals;
+    const stages = [
+      { name: "Visit", n: t.visits },
+      { name: "Download", n: t.downloads, of: t.visits, ofLabel: "of visits" },
+      { name: "Checkout", n: t.checkouts, of: t.visits, ofLabel: "of visits", hint: "Clicked Buy" },
+      { name: "Install", off: "Comes with the Swift package" },
+      { name: "Trial", off: "Comes with the Swift package" },
+      { name: "Purchase", off: "Comes with Polar's webhook" },
+    ];
+    $("journey").replaceChildren(...stages.map((s) => {
+      const fill = el("span", { className: "fill" });
+      const rate = el("span", { className: "rate" });
+      if (s.off) {
+        rate.textContent = s.off;
+        return el("div", { className: "stage off" }, el("span", { className: "name", textContent: s.name }), el("span", { className: "track" }), el("span", { className: "count", textContent: "–" }), rate);
+      }
+      fill.style.width = (t.visits ? (100 * s.n) / t.visits : 0) + "%";
+      if (s.of != null) rate.append(el("b", { textContent: pct(s.n, s.of) }), ` ${s.ofLabel}`);
+      else rate.textContent = "Start";
+      return el("div", { className: "stage" }, el("span", { className: "name", textContent: s.name }), el("span", { className: "track" }, fill), el("span", { className: "count num", textContent: int(s.n) }), rate);
+    }));
+    $("journey-sub").textContent = state.source ? `Visits from ${state.source}, from arrival onward.` : "From the first visit onward, for visits in this period.";
+    $("journey-note").textContent = "Downloads and checkouts count visits that had at least one. Every step is credited to the source the visit arrived from.";
+
+    const head = el("tr", {}, ...["Source", "Visitors", "Visits", "Downloads", "Checkouts", "Visit to download", "Visit to checkout"].map((h) => el("th", { textContent: h })));
+    const body = el("tbody", {}, ...d.journeyBySource.map((r) => {
+      const tr = el("tr", { className: "pick" },
+        el("td", { textContent: r.label }),
+        el("td", { textContent: int(r.visitors) }), el("td", { textContent: int(r.visits) }),
+        el("td", { textContent: int(r.downloads) }), el("td", { textContent: int(r.checkouts) }),
+        el("td", { textContent: pct(r.downloads, r.visits) }), el("td", { textContent: pct(r.checkouts, r.visits) }));
+      if (r.label === state.source) tr.classList.add("on");
+      tr.tabIndex = 0;
+      tr.setAttribute("aria-label", `Filter by ${r.label}`);
+      const pick = () => { setSource(r.label); window.scrollTo({ top: 0, behavior: "smooth" }); };
+      tr.onclick = pick;
+      tr.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } };
+      return tr;
+    }));
+    $("sources-table").replaceChildren(d.journeyBySource.length ? el("table", {}, el("thead", {}, head), body) : el("p", { className: "hint", textContent: "No visits in this period." }));
+  }
+
+  function bars(id, rows, { head = ["", "Visitors"], fmt = int, onPick, label = (r) => r.label } = {}) {
+    if (!rows.length) return $(id).replaceChildren(el("p", { className: "hint", textContent: "Nothing in this period." }));
+    const max = Math.max(...rows.map((r) => r.v), 1);
+    const total = rows.reduce((a, r) => a + r.v, 0);
+    $(id).replaceChildren(
+      el("div", { className: "bars-head" }, el("span", { textContent: head[0] }), el("span", { textContent: head[1] })),
+      ...rows.map((r) => {
+        const row = el(onPick ? "button" : "div", { className: "bar-row" });
+        if (onPick) { row.type = "button"; row.onclick = () => onPick(r); if (r.label === state.source) row.classList.add("on"); }
+        const wash = el("span", { className: "wash" });
+        wash.style.width = (100 * r.v) / max + "%";
+        const right = el("span", { className: "r", textContent: fmt(r.v) }, el("small", { textContent: pct(r.v, total, 0) }));
+        row.append(wash, el("span", { className: "l", textContent: label(r) }), right);
+        return row;
+      }),
+    );
+  }
+
+  function tabs(id, items, key) {
+    $(id).replaceChildren(...items.map(([value, text]) => {
+      const b = el("button", { type: "button", role: "tab", textContent: text });
+      b.setAttribute("aria-selected", String(state[key] === value));
+      b.onclick = () => { state[key] = value; render(); };
+      return b;
+    }));
+  }
+
+  function renderWebsite(d) {
+    $("web-sub").textContent = d.project.domains.join(", ");
+    bars("sources", d.sources, { head: ["Source", "Visitors"], onPick: (r) => setSource(r.label) });
+    tabs("pages-tabs", [["top", "Top pages"], ["entry", "Entry pages"]], "pagesTab");
+    bars("pages", d.pages[state.pagesTab], { head: ["Page", state.pagesTab === "top" ? "Visitors" : "Entries"] });
+    bars("countries", d.countries, { head: ["Country", "Visitors"], label: (r) => countryName(r.label) });
+    tabs("dev-tabs", [["device", "Devices"], ["browser", "Browsers"], ["os", "Systems"]], "devTab");
+    bars("devices", d.devices[state.devTab], { head: [{ device: "Device", browser: "Browser", os: "System" }[state.devTab], "Visitors"] });
+  }
+
+  function renderEvents(d) {
+    if (!d.events.length) return $("events").replaceChildren(el("p", { className: "hint", textContent: "No custom events in this period." }));
+    $("events").replaceChildren(el("table", {},
+      el("thead", {}, el("tr", {}, ...["Event", "Count", "Visits", "Props"].map((h) => el("th", { textContent: h })))),
+      el("tbody", {}, ...d.events.map((e) => el("tr", {},
+        el("td", {}, el("code", { textContent: e.name })),
+        el("td", { textContent: int(e.count) }), el("td", { textContent: int(e.visits) }),
+        el("td", { textContent: e.props || "–", style: "color: var(--muted)" }))))));
+    $("rev-text").textContent = `Polar's webhook comes after the Swift package. The ${int(d.totals.checkouts)} checkout clicks in this period already carry a reference, so their purchases will be credited to the source of the visit they came from.`;
+  }
+
+  function renderSetup() {
+    const p = projects.find((x) => x.key === state.project);
+    if (!p) return;
+    const code = `<script defer data-project="${p.key}"\n  src="${ingestUrl}/s.js"></` + `script>`;
+    const copy = el("button", { className: "copy", type: "button", textContent: "Copy" });
+    copy.onclick = () => navigator.clipboard?.writeText(code).then(() => (copy.textContent = "Copied"), () => {});
+    $("snippet-web").replaceChildren(code, copy);
+    const status = $("setup-status");
+    const last = state.data?.lastEventAt ?? p.last_event_at;
+    status.className = "status " + (last ? "ok" : "wait");
+    status.querySelector("span").textContent = last ? `Last event ${ago(last)}` : "Waiting for the first event";
+    $("domains").replaceChildren(...p.domains.map((dom) => el("div", { className: "person" }, el("span", { textContent: dom }))));
+    $("domains-key").textContent = p.key;
+  }
+  function ago(at) {
+    const s = Math.max(0, Math.round((Date.now() - new Date(at)) / 1000));
+    return s < 60 ? `${s} s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`;
+  }
+
+  function render() {
+    const d = state.data;
+    renderRanges();
+    renderFilter();
+    if (!d) return;
+    const range = RANGES.find((r) => r.id === d.range.id);
+    renderTiles(d, range);
+    renderChart();
+    renderJourney(d);
+    renderWebsite(d);
+    renderEvents(d);
+    renderSetup();
+    $("live").querySelector("span").textContent = `${d.live} ${d.live === 1 ? "visitor" : "visitors"} in the last 5 minutes`;
+  }
+
+  $("table-toggle").onclick = () => { state.table = !state.table; renderChart(); };
+  $("project").onchange = (e) => { state.project = e.target.value; state.source = null; remember(); load(); };
+  let width = 0;
+  new ResizeObserver(() => { const w = $("chart").clientWidth; if (state.data && w && Math.abs(w - width) > 4) { width = w; renderChart(); } }).observe($("chart"));
+
+  const show = (view) => {
+    $("view-dashboard").hidden = view !== "dashboard";
+    $("view-setup").hidden = view !== "setup";
+    $("nav-dashboard").toggleAttribute("aria-current", view === "dashboard");
+    $("nav-setup").toggleAttribute("aria-current", view === "setup");
+    $(view === "dashboard" ? "nav-dashboard" : "nav-setup").setAttribute("aria-current", "page");
+    if (view === "dashboard" && state.data) renderChart();
+    renderSetup();
+  };
+  $("nav-dashboard").onclick = () => show("dashboard");
+  $("nav-setup").onclick = () => show("setup");
+
+  renderRanges();
+  loadProjects().then(load).catch((e) => showError(`Couldn't reach the dashboard server: ${e.message}`));
+  // Keep the numbers fresh while the page is open.
+  setInterval(() => { if (!document.hidden && state.project) load(); }, 30_000);
+})();
+</script>
+</body>
+</html>

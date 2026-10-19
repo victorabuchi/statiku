@@ -8,6 +8,7 @@ The plan, the stack and the data model are in [docs/PLAN.md](docs/PLAN.md).
 ## What's here
 
 - `ingest/`: the service that serves the website script (`/s.js`) and takes events (`/e`)
+- `dashboard/`: the dashboard page and its JSON API. It has no sign-in yet, so it only listens on localhost
 - `tracker/src/script.js`: the website script, under 2 KB minified
 - `db/migrations/`: the schema
 - `scripts/`: `project` (create projects), `stats` (a text report), `geo` (the country database), `e2e-notchlight` (the script on Notchlight's pages in Chrome)
@@ -23,7 +24,10 @@ npm install
 npm run geo        # DB-IP's country database, to data/
 npm run migrate
 npm run project -- create "My site" example.com --timezone Europe/Helsinki
-npm run dev        # http://localhost:8787
+npm run dev        # the ingest service, http://localhost:8787
+npm run dashboard  # the dashboard, http://localhost:8788
+npm run seed       # 30 days of sample traffic for the dashboard
+npm run notchlight # Notchlight's site with the script, http://localhost:8790
 npm test
 npm run e2e        # needs Chrome Canary and ../lockwidgets
 npm run stats -- <project key>

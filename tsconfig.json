@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["ingest", "db", "scripts", "test", "tracker/build.ts"]
+  "include": ["ingest", "dashboard", "db", "scripts", "test", "tracker/build.ts"]
 }
