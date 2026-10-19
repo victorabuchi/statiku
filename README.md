@@ -10,7 +10,7 @@ The plan, the stack and the data model are in [docs/PLAN.md](docs/PLAN.md).
 - `ingest/`: the service that serves the website script (`/s.js`) and takes events (`/e`)
 - `tracker/src/script.js`: the website script, under 2 KB minified
 - `db/migrations/`: the schema
-- `scripts/`: `project` (create projects), `stats` (a text report), `geo` (the country database)
+- `scripts/`: `project` (create projects), `stats` (a text report), `geo` (the country database), `e2e-notchlight` (the script on Notchlight's pages in Chrome)
 
 ## Run it locally
 
@@ -25,6 +25,7 @@ npm run migrate
 npm run project -- create "My site" example.com --timezone Europe/Helsinki
 npm run dev        # http://localhost:8787
 npm test
+npm run e2e        # needs Chrome Canary and ../lockwidgets
 npm run stats -- <project key>
 ```
 
