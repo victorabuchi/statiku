@@ -28,6 +28,7 @@
   --s1: #2a78d6;
   --s1-wash: rgba(42, 120, 214, 0.10);
   --s1-bar: rgba(42, 120, 214, 0.14);
+  --s2: #eb6834;
   --s3: #1baf7a;
   --lapsed: #c9c8c1;
   --grid: #eeeeea;
@@ -42,7 +43,7 @@
   :root:not([data-theme="light"]) {
     --bg: #0e0f11; --surface: #17181b; --ink: #eeeef0; --ink-2: #b3b6be; --muted: #868991; --line: #26282c; --line-2: #34373c;
     --hover: rgba(255, 255, 255, 0.04); --accent: #8aa0f7; --accent-bg: #4263eb; --on-accent: #ffffff; --accent-wash: rgba(138, 160, 247, 0.12);
-    --s1: #3987e5; --s1-wash: rgba(57, 135, 229, 0.16); --s1-bar: rgba(57, 135, 229, 0.22); --s3: #199e70; --lapsed: #4a4b48;
+    --s1: #3987e5; --s1-wash: rgba(57, 135, 229, 0.16); --s1-bar: rgba(57, 135, 229, 0.22); --s2: #d95926; --s3: #199e70; --lapsed: #4a4b48;
     --grid: #232427; --axis: #3a3b3a; --good: #3cc23c; --bad: #ef7070; --live: #0ca30c;
     color-scheme: dark;
   }
@@ -50,13 +51,15 @@
 :root[data-theme="dark"] {
   --bg: #0e0f11; --surface: #17181b; --ink: #eeeef0; --ink-2: #b3b6be; --muted: #868991; --line: #26282c; --line-2: #34373c;
   --hover: rgba(255, 255, 255, 0.04); --accent: #8aa0f7; --accent-bg: #4263eb; --on-accent: #ffffff; --accent-wash: rgba(138, 160, 247, 0.12);
-  --s1: #3987e5; --s1-wash: rgba(57, 135, 229, 0.16); --s1-bar: rgba(57, 135, 229, 0.22); --s3: #199e70; --lapsed: #4a4b48;
+  --s1: #3987e5; --s1-wash: rgba(57, 135, 229, 0.16); --s1-bar: rgba(57, 135, 229, 0.22); --s2: #d95926; --s3: #199e70; --lapsed: #4a4b48;
   --grid: #232427; --axis: #3a3b3a; --good: #3cc23c; --bad: #ef7070; --live: #0ca30c;
   color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
 html { color-scheme: light; }
+/* Panels set their own display, which would otherwise show them while hidden. */
+[hidden] { display: none !important; }
 
 body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--font); -webkit-font-smoothing: antialiased; }
 body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
@@ -195,14 +198,19 @@ button.bar-row:hover { background: var(--hover); }
 .bar-row.on { box-shadow: inset 0 0 0 1px var(--accent); }
 
 /* App */
+.app-panel { overflow: hidden; }
 .mini { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
-.mini div { padding: 14px 16px; border-right: 1px solid var(--line); min-width: 0; }
-.mini div:last-child { border-right: 0; }
-.mini .label { color: var(--ink-2); font-size: 12.5px; font-weight: 500; }
+.mini > button { display: grid; gap: 2px; align-content: start; text-align: left; padding: 14px 16px 12px; border: 0; border-right: 1px solid var(--line); background: none; cursor: pointer; position: relative; min-width: 0; }
+.mini > button:last-child { border-right: 0; }
+.mini > button:hover { background: var(--hover); }
+.mini > button[aria-pressed="true"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--accent); }
+.mini .label { color: var(--ink-2); font-size: 12.5px; font-weight: 500; white-space: nowrap; }
 .mini .value { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
-.app-cols { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.mini .delta { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-cols { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--line); }
 .app-cols > div { padding: 14px 16px 16px; border-right: 1px solid var(--line); min-width: 0; }
 .app-cols > div:last-child { border-right: 0; }
+.app-cols .hint { margin-top: 10px; }
 .app-cols h3, .rev-cols h3 { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
 .stack { display: flex; gap: 2px; height: 22px; }
 .stack span { display: block; height: 100%; }
@@ -261,16 +269,20 @@ footer a { color: var(--ink-2); }
   .tile:nth-child(-n+3) { border-bottom: 1px solid var(--line); }
   .stage { grid-template-columns: 96px minmax(0, 1fr) 64px; }
   .stage .rate { grid-column: 2 / -1; margin-top: -6px; }
-  .app-cols, .grid3 { grid-template-columns: minmax(0, 1fr); }
-  .app-cols > div { border-right: 0; border-bottom: 1px solid var(--line); }
-  .app-cols > div:last-child { border-bottom: 0; }
+  .grid3 { grid-template-columns: minmax(0, 1fr); }
+  .app-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .app-cols > div:nth-child(2n) { border-right: 0; }
+  .app-cols > div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
 }
 @media (max-width: 760px) {
   .grid2, .setup, .rev-cols { grid-template-columns: minmax(0, 1fr); }
   .rev-cols > div:first-child { border-right: 0; border-bottom: 1px solid var(--line); }
   .mini { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .mini div:nth-child(2) { border-right: 0; }
-  .mini div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .mini > button:nth-child(2) { border-right: 0; }
+  .mini > button:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .app-cols { grid-template-columns: minmax(0, 1fr); }
+  .app-cols > div { border-right: 0; border-bottom: 1px solid var(--line); }
+  .app-cols > div:last-child { border-bottom: 0; }
   .project span.meta, .avatar.top { display: none; }
   .live { margin-left: 0; }
 }
@@ -281,7 +293,7 @@ footer a { color: var(--ink-2); }
   .tile:nth-child(2n) { border-right: 0; }
   .tile:nth-last-child(-n+2) { border-bottom: 0; }
   .tile .value { font-size: 21px; }
-  .brand span, .pill.sample-top { display: none; }
+  .brand span, .pill.sample-top, .live { display: none; }
   .order { grid-template-columns: 64px minmax(0, 1fr) auto; }
 }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -368,15 +380,34 @@ footer a { color: var(--ink-2); }
         </section>
 
         <section aria-labelledby="ev-h">
-          <div class="section-title"><h2 id="ev-h">Events</h2><p>Custom events, downloads and checkout clicks.</p></div>
+          <div class="section-title"><h2 id="ev-h">Events</h2><p>Custom events from the website and the app, downloads and checkout clicks.</p></div>
           <div class="panel"><div class="panel-body"><div class="scroll" id="events"></div></div></div>
         </section>
 
         <section aria-labelledby="app-h">
-          <div class="section-title"><h2 id="app-h">App</h2></div>
-          <div class="panel empty">
+          <div class="section-title"><h2 id="app-h">App</h2><p id="app-sub"></p></div>
+          <div class="panel empty" id="app-empty" hidden>
             <b>Nothing from the app yet.</b>
-            <p>The Swift package comes next. Once Notchlight sends its anonymous install ping, this shows installs, active installs by version, macOS versions and how many are in trial or licensed, and the journey above gains its Install and Trial steps.</p>
+            <p>Add the Swift package and call <code>Statiku.start(project:)</code> when the app launches; Setup has the lines to copy. Then this shows installs, the installs in use by version and macOS version, and how many are in trial or licensed, and the journey above gains its Install, Trial and Licensed steps.</p>
+          </div>
+          <div class="panel app-panel" id="app-data" hidden>
+            <div class="mini" id="app-tiles"></div>
+            <div class="panel-head">
+              <h2 id="app-chart-title">New installs</h2>
+              <span class="sub" id="app-chart-sub"></span>
+              <div class="tools"><button class="link" type="button" id="app-table-toggle" aria-expanded="false">Show as table</button></div>
+            </div>
+            <div class="panel-body">
+              <div class="chart" id="app-chart"></div>
+              <div class="scroll" id="app-chart-table" hidden></div>
+              <p class="journey-note" id="app-note"></p>
+            </div>
+            <div class="app-cols">
+              <div><h3>Where installs came from</h3><div class="bars" id="app-sources"></div></div>
+              <div><h3>Versions in use</h3><div class="bars" id="app-versions"></div></div>
+              <div><h3>Licence</h3><div id="app-states"></div></div>
+              <div><h3>Systems</h3><div class="bars" id="app-systems"></div></div>
+            </div>
           </div>
         </section>
 
@@ -384,7 +415,7 @@ footer a { color: var(--ink-2); }
           <div class="section-title"><h2 id="rev-h">Revenue</h2></div>
           <div class="panel empty">
             <b>No payments connected yet.</b>
-            <p id="rev-text">Polar's webhook comes after the Swift package. Each checkout click already carries a reference, so purchases will be credited to the source of the visit they came from.</p>
+            <p id="rev-text">Polar's webhook comes next. Each checkout click already carries a reference, so purchases will be credited to the source of the visit they came from.</p>
           </div>
         </section>
       </div>
@@ -401,6 +432,14 @@ footer a { color: var(--ink-2); }
           </div>
         </div>
         <div class="panel">
+          <div class="panel-head"><h2>App</h2><span class="status" id="app-status"><i></i><span></span></span></div>
+          <div class="panel-body">
+            <p>Add the Swift package in <code>sdk/swift</code> to the app, then start it at launch and tell it the licence whenever that changes. It works on macOS 12 and iOS 15 or later.</p>
+            <div class="code" id="snippet-app"></div>
+            <p>Each day the app runs counts it as in use, and a new version sends <code>update</code>. Open checkout links through <code>Statiku.checkoutURL(_:)</code> so purchases made from the app are credited too, and offer <code>Statiku.isOptedOut</code> in its settings.</p>
+          </div>
+        </div>
+        <div class="panel">
           <div class="panel-head"><h2>Domains</h2></div>
           <div class="panel-body">
             <p>Pages on these hostnames and their subdomains can send events to this project. Anything else is refused.</p>
@@ -412,13 +451,14 @@ footer a { color: var(--ink-2); }
           <div class="panel-head"><h2>Privacy</h2></div>
           <div class="panel-body">
             <p>No cookies and nothing stored in the browser. IP addresses are used in memory for the country, then dropped. A visitor is a hash that changes every day and can't be traced back.</p>
+            <p>In the app, an install is a random ID kept in its preferences, with no name, account or hardware ID. The IP is used for the country and to match the install to a download from the same network that day, then dropped.</p>
             <p>To leave your own visits out, run <code>localStorage.statiku_ignore = "1"</code> in your browser's console on your site.</p>
           </div>
         </div>
         <div class="panel">
           <div class="panel-head"><h2>Coming next</h2></div>
           <div class="panel-body">
-            <p>The Swift package for the app, Polar and Stripe webhooks for revenue, then accounts, team invites and plans.</p>
+            <p>Polar and Stripe webhooks for revenue, then accounts, team invites and plans.</p>
           </div>
         </div>
       </div>
@@ -463,8 +503,22 @@ footer a { color: var(--ink-2); }
     { id: "downloads", label: "Downloads", fmt: int, tick: compact },
     { id: "checkouts", label: "Checkouts", fmt: int, tick: compact },
   ];
+  const APP_METRICS = [
+    { id: "installs", label: "New installs", fmt: int, tick: compact },
+    { id: "active", label: "Installs in use", fmt: int, tick: compact },
+    { id: "trials", label: "Trials started", fmt: int, tick: compact },
+    { id: "licensed", label: "Licensed", fmt: int, tick: compact },
+  ];
+  // The licence bar's segments, each with its own fixed colour: slots 1–3 of the validated palette, and grey for an
+  // ended trial.
+  const LICENCE = [
+    { id: "licensed", label: "Licensed", color: "var(--s1)" },
+    { id: "trial", label: "In trial", color: "var(--s2)" },
+    { id: "free", label: "Free", color: "var(--s3)" },
+    { id: "expired", label: "Trial ended", color: "var(--lapsed)" },
+  ];
 
-  const state = { project: null, range: "d30", metric: "visitors", source: null, pagesTab: "top", devTab: "device", table: false, data: null };
+  const state = { project: null, range: "d30", metric: "visitors", appMetric: "installs", source: null, pagesTab: "top", devTab: "device", table: false, appTable: false, data: null };
   const remember = () => { try { localStorage.setItem("statiku", JSON.stringify({ project: state.project, range: state.range })); } catch {} };
   try { const saved = JSON.parse(localStorage.getItem("statiku") || "{}"); Object.assign(state, { project: saved.project ?? null, range: saved.range ?? "d30" }); } catch {}
   let projects = [], ingestUrl = "";
@@ -558,15 +612,9 @@ footer a { color: var(--ink-2); }
     return new Date(y, m - 1, day).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   }
 
-  function renderChart() {
-    const d = state.data;
-    const m = METRICS.find((x) => x.id === state.metric);
-    const range = RANGES.find((r) => r.id === d.range.id);
-    const pts = d.series.map((s) => ({ label: bucketLabel(s.t, d.range.unit), v: s[m.id] ?? 0 }));
-    $("chart-title").textContent = m.label;
-    $("chart-sub").textContent = `${d.range.unit === "hour" ? "by hour, today" : `by day, last ${range.label}`}${state.source ? ` · from ${state.source}` : ""}`;
-
-    const host = $("chart");
+  // A line over time with a crosshair, a tooltip and arrow keys to read each point, and the same points as a table.
+  function drawChart(hostId, pts, m) {
+    const host = $(hostId);
     const W = Math.max(280, host.clientWidth || 800), H = W < 560 ? 210 : 250;
     const M = { l: 46, r: 14, t: 22, b: 26 };
     const { top, step } = nice(Math.max(...pts.map((p) => p.v), 0) * 1.05);
@@ -625,47 +673,86 @@ footer a { color: var(--ink-2); }
       if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); show(Math.max(0, Math.min(n - 1, at + (e.key === "ArrowLeft" ? -1 : 1)))); }
     });
     host.replaceChildren(svg, tip);
+  }
 
-    const table = el("table", {}, el("thead", {}, el("tr", {}, el("th", { textContent: d.range.unit === "hour" ? "Hour" : "Day" }), el("th", { textContent: m.label }))));
+  function chartTable(id, toggleId, pts, m, unit, show) {
+    const table = el("table", {}, el("thead", {}, el("tr", {}, el("th", { textContent: unit === "hour" ? "Hour" : "Day" }), el("th", { textContent: m.label }))));
     table.append(el("tbody", {}, ...pts.slice().reverse().map((p) => el("tr", {}, el("td", { textContent: p.label }), el("td", { textContent: m.fmt(p.v) })))));
-    $("chart-table").replaceChildren(table);
-    $("chart-table").hidden = !state.table;
-    $("table-toggle").textContent = state.table ? "Hide table" : "Show as table";
-    $("table-toggle").setAttribute("aria-expanded", String(state.table));
+    $(id).replaceChildren(table);
+    $(id).hidden = !show;
+    $(toggleId).textContent = show ? "Hide table" : "Show as table";
+    $(toggleId).setAttribute("aria-expanded", String(show));
+  }
+
+  function chartSub(d) {
+    const range = RANGES.find((r) => r.id === d.range.id);
+    return `${d.range.unit === "hour" ? "by hour, today" : `by day, last ${range.label}`}${state.source ? ` · from ${state.source}` : ""}`;
+  }
+
+  function renderChart() {
+    const d = state.data;
+    const m = METRICS.find((x) => x.id === state.metric);
+    const pts = d.series.map((s) => ({ label: bucketLabel(s.t, d.range.unit), v: s[m.id] ?? 0 }));
+    $("chart-title").textContent = m.label;
+    $("chart-sub").textContent = chartSub(d);
+    drawChart("chart", pts, m);
+    chartTable("chart-table", "table-toggle", pts, m, d.range.unit, state.table);
+  }
+
+  function renderAppChart() {
+    const d = state.data;
+    if (!d.app.has) return;
+    const m = APP_METRICS.find((x) => x.id === state.appMetric);
+    const pts = d.series.map((s) => ({ label: bucketLabel(s.t, d.range.unit), v: s[m.id] ?? 0 }));
+    $("app-chart-title").textContent = m.label;
+    $("app-chart-sub").textContent = chartSub(d);
+    drawChart("app-chart", pts, m);
+    chartTable("app-chart-table", "app-table-toggle", pts, m, d.range.unit, state.appTable);
   }
 
   function renderJourney(d) {
-    const t = d.totals;
+    const t = d.totals, a = d.app.journey, hasApp = d.app.has;
+    const app = (stage) => (hasApp ? stage : { name: stage.name, off: "Add the Swift package" });
     const stages = [
       { name: "Visit", n: t.visits },
       { name: "Download", n: t.downloads, of: t.visits, ofLabel: "of visits" },
-      { name: "Checkout", n: t.checkouts, of: t.visits, ofLabel: "of visits", hint: "Clicked Buy" },
-      { name: "Install", off: "Comes with the Swift package" },
-      { name: "Trial", off: "Comes with the Swift package" },
+      app({ name: "Install", n: a.installs, of: t.downloads, ofLabel: "of downloads", estimate: true }),
+      app({ name: "Trial", n: a.trials, of: a.installs, ofLabel: "of installs" }),
+      { name: "Checkout", n: t.checkouts, of: t.visits, ofLabel: "of visits" },
+      app({ name: "Licensed", n: a.licensed, of: a.installs, ofLabel: "of installs" }),
       { name: "Purchase", off: "Comes with Polar's webhook" },
     ];
     $("journey").replaceChildren(...stages.map((s) => {
       const fill = el("span", { className: "fill" });
       const rate = el("span", { className: "rate" });
+      const name = el("span", { className: "name", textContent: s.name }, s.estimate ? el("span", { className: "est", textContent: "est.", title: "Matched by network, so an estimate" }) : null);
       if (s.off) {
         rate.textContent = s.off;
-        return el("div", { className: "stage off" }, el("span", { className: "name", textContent: s.name }), el("span", { className: "track" }), el("span", { className: "count", textContent: "–" }), rate);
+        return el("div", { className: "stage off" }, name, el("span", { className: "track" }), el("span", { className: "count", textContent: "–" }), rate);
       }
-      fill.style.width = (t.visits ? (100 * s.n) / t.visits : 0) + "%";
+      fill.style.width = (t.visits ? Math.min(100, (100 * s.n) / t.visits) : 0) + "%";
       if (s.of != null) rate.append(el("b", { textContent: pct(s.n, s.of) }), ` ${s.ofLabel}`);
       else rate.textContent = "Start";
-      return el("div", { className: "stage" }, el("span", { className: "name", textContent: s.name }), el("span", { className: "track" }, fill), el("span", { className: "count num", textContent: int(s.n) }), rate);
+      return el("div", { className: "stage" }, name, el("span", { className: "track" }, fill), el("span", { className: "count num", textContent: int(s.n) }), rate);
     }));
     $("journey-sub").textContent = state.source ? `Visits from ${state.source}, from arrival onward.` : "From the first visit onward, for visits in this period.";
-    $("journey-note").textContent = "Downloads and checkouts count visits that had at least one. Every step is credited to the source the visit arrived from.";
+    $("journey-note").textContent = hasApp
+      ? "Downloads and checkouts count visits that had at least one. An install counts for the visit whose download came from the same network in the day before it, so installs are an estimate. Every step is credited to the source the visit arrived from."
+      : "Downloads and checkouts count visits that had at least one. Every step is credited to the source the visit arrived from.";
 
-    const head = el("tr", {}, ...["Source", "Visitors", "Visits", "Downloads", "Checkouts", "Visit to download", "Visit to checkout"].map((h) => el("th", { textContent: h })));
+    const cols = [
+      ["Source", (r) => r.label],
+      ["Visitors", (r) => int(r.visitors)],
+      ["Visits", (r) => int(r.visits)],
+      ["Downloads", (r) => int(r.downloads)],
+      ...(hasApp ? [["Installs", (r) => int(r.installs)], ["Licensed", (r) => int(r.licensed)]] : []),
+      ["Checkouts", (r) => int(r.checkouts)],
+      ["Visit to download", (r) => pct(r.downloads, r.visits)],
+      hasApp ? ["Install to licensed", (r) => pct(r.licensed, r.installs)] : ["Visit to checkout", (r) => pct(r.checkouts, r.visits)],
+    ];
+    const head = el("tr", {}, ...cols.map(([h]) => el("th", { textContent: h })));
     const body = el("tbody", {}, ...d.journeyBySource.map((r) => {
-      const tr = el("tr", { className: "pick" },
-        el("td", { textContent: r.label }),
-        el("td", { textContent: int(r.visitors) }), el("td", { textContent: int(r.visits) }),
-        el("td", { textContent: int(r.downloads) }), el("td", { textContent: int(r.checkouts) }),
-        el("td", { textContent: pct(r.downloads, r.visits) }), el("td", { textContent: pct(r.checkouts, r.visits) }));
+      const tr = el("tr", { className: "pick" }, ...cols.map(([, value]) => el("td", { textContent: value(r) })));
       if (r.label === state.source) tr.classList.add("on");
       tr.tabIndex = 0;
       tr.setAttribute("aria-label", `Filter by ${r.label}`);
@@ -677,15 +764,16 @@ footer a { color: var(--ink-2); }
     $("sources-table").replaceChildren(d.journeyBySource.length ? el("table", {}, el("thead", {}, head), body) : el("p", { className: "hint", textContent: "No visits in this period." }));
   }
 
-  function bars(id, rows, { head = ["", "Visitors"], fmt = int, onPick, label = (r) => r.label } = {}) {
+  function bars(id, rows, { head = ["", "Visitors"], fmt = int, onPick, canPick = () => true, label = (r) => r.label } = {}) {
     if (!rows.length) return $(id).replaceChildren(el("p", { className: "hint", textContent: "Nothing in this period." }));
     const max = Math.max(...rows.map((r) => r.v), 1);
     const total = rows.reduce((a, r) => a + r.v, 0);
     $(id).replaceChildren(
       el("div", { className: "bars-head" }, el("span", { textContent: head[0] }), el("span", { textContent: head[1] })),
       ...rows.map((r) => {
-        const row = el(onPick ? "button" : "div", { className: "bar-row" });
-        if (onPick) { row.type = "button"; row.onclick = () => onPick(r); if (r.label === state.source) row.classList.add("on"); }
+        const pickable = onPick && canPick(r);
+        const row = el(pickable ? "button" : "div", { className: "bar-row" });
+        if (pickable) { row.type = "button"; row.onclick = () => onPick(r); if (r.label === state.source) row.classList.add("on"); }
         const wash = el("span", { className: "wash" });
         wash.style.width = (100 * r.v) / max + "%";
         const right = el("span", { className: "r", textContent: fmt(r.v) }, el("small", { textContent: pct(r.v, total, 0) }));
@@ -715,27 +803,84 @@ footer a { color: var(--ink-2); }
   }
 
   function renderEvents(d) {
+    $("rev-text").textContent = `Polar's webhook comes next. The ${int(d.totals.checkouts)} checkout clicks in this period already carry a reference, so their purchases will be credited to the source of the visit they came from.`;
     if (!d.events.length) return $("events").replaceChildren(el("p", { className: "hint", textContent: "No custom events in this period." }));
+    const heads = ["Event", "Count", "Visits", ...(d.app.has ? ["Installs"] : []), "Props"];
     $("events").replaceChildren(el("table", {},
-      el("thead", {}, el("tr", {}, ...["Event", "Count", "Visits", "Props"].map((h) => el("th", { textContent: h })))),
+      el("thead", {}, el("tr", {}, ...heads.map((h) => el("th", { textContent: h })))),
       el("tbody", {}, ...d.events.map((e) => el("tr", {},
         el("td", {}, el("code", { textContent: e.name })),
         el("td", { textContent: int(e.count) }), el("td", { textContent: int(e.visits) }),
+        d.app.has ? el("td", { textContent: int(e.installs) }) : null,
         el("td", { textContent: e.props || "–", style: "color: var(--muted)" }))))));
-    $("rev-text").textContent = `Polar's webhook comes after the Swift package. The ${int(d.totals.checkouts)} checkout clicks in this period already carry a reference, so their purchases will be credited to the source of the visit they came from.`;
+  }
+
+  function renderApp(d, range) {
+    $("app-empty").hidden = d.app.has;
+    $("app-data").hidden = !d.app.has;
+    $("app-sub").textContent = d.app.has ? `Last heard from ${ago(d.app.lastSeen)}.` : "";
+    if (!d.app.has) return;
+    $("app-tiles").replaceChildren(...APP_METRICS.map((m) => {
+      const b = el("button", { type: "button" },
+        el("span", { className: "label", textContent: m.label }),
+        el("span", { className: "value", textContent: m.fmt(d.app.totals[m.id]) }),
+        delta(m, d.app.totals[m.id], d.app.previous[m.id], range.prev));
+      b.setAttribute("aria-pressed", String(m.id === state.appMetric));
+      b.onclick = () => { state.appMetric = m.id; renderApp(d, range); };
+      return b;
+    }));
+    renderAppChart();
+    const t = d.app.totals;
+    $("app-note").textContent = (t.unmatched ? `${int(t.unmatched)} of the ${int(t.installs)} new installs had no download before them from the same network: installed with Homebrew, on another network, or from a link passed on. ` : "")
+      + "An install is credited to the latest download from its network in the day before it, so the match is an estimate.";
+    bars("app-sources", d.app.sources, { head: ["Source", "New installs"], onPick: (r) => setSource(r.label), canPick: (r) => r.label !== "Not matched" });
+    bars("app-versions", d.app.versions, { head: ["Version", "In use"] });
+    bars("app-systems", d.app.systems, { head: ["System", "In use"] });
+    renderLicence(d.app.states);
+  }
+
+  // Installs in use by licence: one bar split by state, with a legend that names and counts each part.
+  function renderLicence(rows) {
+    const count = (id) => rows.find((r) => r.label === id)?.v ?? 0;
+    const shown = LICENCE.filter((s) => count(s.id));
+    const total = shown.reduce((sum, s) => sum + count(s.id), 0);
+    const unreported = rows.filter((r) => !LICENCE.some((s) => s.id === r.label)).reduce((sum, r) => sum + r.v, 0);
+    if (!total) {
+      return $("app-states").replaceChildren(el("p", { className: "hint", textContent: unreported ? "The app doesn't report its licence yet. Call Statiku.setState(.trial) and the others when it changes." : "Nothing in this period." }));
+    }
+    const stack = el("div", { className: "stack", role: "img", ariaLabel: shown.map((s) => `${s.label}: ${int(count(s.id))}`).join(", ") }, ...shown.map((s) => {
+      const part = el("span", { title: `${s.label}: ${int(count(s.id))} (${pct(count(s.id), total, 0)})` });
+      Object.assign(part.style, { flex: `${count(s.id)} 1 0`, minWidth: "3px", background: s.color });
+      return part;
+    }));
+    const legend = el("div", { className: "legend" }, ...shown.map((s) => {
+      const swatch = el("i");
+      swatch.style.background = s.color;
+      return el("div", {}, swatch, el("span", { textContent: s.label }), el("b", { textContent: int(count(s.id)) }), el("small", { textContent: pct(count(s.id), total, 0) }));
+    }));
+    $("app-states").replaceChildren(stack, legend, unreported ? el("p", { className: "hint", textContent: `${int(unreported)} more didn't report a licence.` }) : "");
+  }
+
+  function codeBlock(id, code) {
+    const copy = el("button", { className: "copy", type: "button", textContent: "Copy" });
+    copy.onclick = () => navigator.clipboard?.writeText(code).then(() => (copy.textContent = "Copied"), () => {});
+    $(id).replaceChildren(code, copy);
+  }
+  function setStatus(id, last, waiting) {
+    const status = $(id);
+    status.className = "status " + (last ? "ok" : "wait");
+    status.querySelector("span").textContent = last ? `Last heard from ${ago(last)}` : waiting;
   }
 
   function renderSetup() {
     const p = projects.find((x) => x.key === state.project);
     if (!p) return;
-    const code = `<script defer data-project="${p.key}"\n  src="${ingestUrl}/s.js"></` + `script>`;
-    const copy = el("button", { className: "copy", type: "button", textContent: "Copy" });
-    copy.onclick = () => navigator.clipboard?.writeText(code).then(() => (copy.textContent = "Copied"), () => {});
-    $("snippet-web").replaceChildren(code, copy);
-    const status = $("setup-status");
-    const last = state.data?.lastEventAt ?? p.last_event_at;
-    status.className = "status " + (last ? "ok" : "wait");
-    status.querySelector("span").textContent = last ? `Last event ${ago(last)}` : "Waiting for the first event";
+    codeBlock("snippet-web", `<script defer data-project="${p.key}"\n  src="${ingestUrl}/s.js"></` + `script>`);
+    // The package sends to Statiku's own service unless told otherwise, as it must be when running locally.
+    const endpoint = ingestUrl === "https://statiku-ingest.onrender.com" ? "" : `,\n              endpoint: URL(string: "${ingestUrl}")!`;
+    codeBlock("snippet-app", `import Statiku\n\n// When the app launches\nStatiku.start(project: "${p.key}"${endpoint})\n\n// Whenever the licence may have changed\nStatiku.setState(.trial) // .licensed, .expired or .free`);
+    setStatus("setup-status", state.data?.lastEventAt ?? p.last_event_at, "Waiting for the first event");
+    setStatus("app-status", state.data?.app.lastSeen, "Waiting for the first install");
     $("domains").replaceChildren(...p.domains.map((dom) => el("div", { className: "person" }, el("span", { textContent: dom }))));
     $("domains-key").textContent = p.key;
   }
@@ -755,14 +900,19 @@ footer a { color: var(--ink-2); }
     renderJourney(d);
     renderWebsite(d);
     renderEvents(d);
+    renderApp(d, range);
     renderSetup();
     $("live").querySelector("span").textContent = `${d.live} ${d.live === 1 ? "visitor" : "visitors"} in the last 5 minutes`;
   }
 
   $("table-toggle").onclick = () => { state.table = !state.table; renderChart(); };
+  $("app-table-toggle").onclick = () => { state.appTable = !state.appTable; renderAppChart(); };
   $("project").onchange = (e) => { state.project = e.target.value; state.source = null; remember(); load(); };
-  let width = 0;
-  new ResizeObserver(() => { const w = $("chart").clientWidth; if (state.data && w && Math.abs(w - width) > 4) { width = w; renderChart(); } }).observe($("chart"));
+  // Charts are drawn to their width, so they're drawn again when it changes.
+  for (const [id, redraw] of [["chart", renderChart], ["app-chart", renderAppChart]]) {
+    let width = 0;
+    new ResizeObserver(() => { const w = $(id).clientWidth; if (state.data && w && Math.abs(w - width) > 4) { width = w; redraw(); } }).observe($(id));
+  }
 
   const show = (view) => {
     $("view-dashboard").hidden = view !== "dashboard";
@@ -770,7 +920,7 @@ footer a { color: var(--ink-2); }
     $("nav-dashboard").toggleAttribute("aria-current", view === "dashboard");
     $("nav-setup").toggleAttribute("aria-current", view === "setup");
     $(view === "dashboard" ? "nav-dashboard" : "nav-setup").setAttribute("aria-current", "page");
-    if (view === "dashboard" && state.data) renderChart();
+    if (view === "dashboard" && state.data) { renderChart(); renderAppChart(); }
     renderSetup();
   };
   $("nav-dashboard").onclick = () => show("dashboard");

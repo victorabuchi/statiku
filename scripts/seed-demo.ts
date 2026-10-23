@@ -1,8 +1,10 @@
-// 30 days of made-up visits to a Notchlight-like site, sent through the real collection code (sessions, sources,
-// countries, devices), so the dashboard has something to show locally. Reruns replace the demo project's data.
+// 30 days of made-up visits to a Notchlight-like site and installs of its app, sent through the real collection code
+// (sessions, sources, countries, devices, download marks, installs), so the dashboard has something to show locally.
+// Reruns replace the demo project's data.
 //   npm run seed
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import pg from "pg";
+import { collectApp } from "../ingest/app.ts";
 import { collect, type Deps } from "../ingest/collect.ts";
 import { Geo } from "../ingest/geo.ts";
 import { Installs } from "../ingest/installs.ts";
@@ -77,7 +79,7 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 await pool.query("select ensure_month_partitions('events', 2, 2), ensure_month_partitions('sessions', 2, 2)");
 let project = (await pool.query("select id, key from projects where name = $1", [NAME])).rows[0];
 project ??= await createProject(pool, NAME, ["notchlight.com"], "Europe/Helsinki");
-for (const table of ["events", "sessions", "usage_daily"]) await pool.query(`delete from ${table} where project_id = $1`, [project.id]);
+for (const table of ["events", "sessions", "usage_daily", "installs", "download_marks"]) await pool.query(`delete from ${table} where project_id = $1`, [project.id]);
 
 const sessions = new Sessions(pool);
 const writer = new Writer(pool, sessions);
@@ -91,7 +93,27 @@ const send = async (at: Date, name: string, path: string, arrival: Arrival, devi
   sent++;
 };
 
+// The app: an install a few minutes after most downloads, from the same network, and some with no visit before them
+// (Homebrew, or a link passed on). 1.5 came out four days ago.
 const now = Date.now();
+const RELEASE = now - 4 * 86400_000;
+const SYSTEMS: [string, number][] = [["26.1", 45], ["26.0", 14], ["15.7", 30], ["15.6", 8], ["15.5", 3]];
+type Install = { id: string; at: number; ip: string; version: string; os: string; buyRate: number };
+const installs: Install[] = [];
+let batches = 0;
+const app = async (install: Install, at: number, state: string, events: { name: string; props?: object }[]) => {
+  const build = install.version === "1.4" ? "5" : "6";
+  const body = { project: project.key, install: install.id, platform: "macOS", osVersion: install.os, appVersion: install.version, build, state,
+    events: events.map((e) => ({ ...e, at: new Date(at).toISOString() })) };
+  await collectApp(deps, JSON.stringify(body), install.ip, new Date(at));
+  batches++;
+};
+const newInstall = async (at: number, ip: string, buyRate: number) => {
+  const install = { id: randomUUID(), at, ip, version: at < RELEASE ? "1.4" : "1.5", os: pick(SYSTEMS), buyRate };
+  installs.push(install);
+  await app(install, at, "trial", [{ name: "install" }, { name: "active" }, { name: "state", props: { to: "trial" } }]);
+};
+
 for (let daysAgo = DAYS - 1; daysAgo >= 0; daysAgo--) {
   const dayStart = new Date(now - daysAgo * 86400_000);
   dayStart.setUTCHours(0, 0, 0, 0);
@@ -104,6 +126,7 @@ for (let daysAgo = DAYS - 1; daysAgo >= 0; daysAgo--) {
     const hour = i >= ordinary ? 13 + rand() * 6 : pick([[6, 1], [9, 2], [12, 3], [15, 4], [18, 4], [21, 3], [1, 1]]) + rand() * 3;
     visits.push({ at: dayStart.getTime() + hour * 3600_000, arrival: i >= ordinary ? HACKER_NEWS : pick(ARRIVALS) });
   }
+  const downloads: { at: number; ip: string; arrival: Arrival }[] = [];
   for (const { at, arrival } of visits.sort((a, b) => a.at - b.at)) {
     if (at > now) continue;
     const device = pick(DEVICES);
@@ -120,6 +143,7 @@ for (let daysAgo = DAYS - 1; daysAgo >= 0; daysAgo--) {
         page = "/download/";
       }
       await send(step(), "download", page, arrival, device, ip, arrival.referrer, { file: "Notchlight.dmg" });
+      downloads.push({ at: t, ip, arrival });
       if (rand() < 0.12) await send(step(), "download", page, arrival, device, ip, arrival.referrer, { file: "Notchlight.dmg" });
     }
     if (device.mac && rand() < arrival.checkout) {
@@ -129,8 +153,46 @@ for (let daysAgo = DAYS - 1; daysAgo >= 0; daysAgo--) {
     if (rand() < 0.05) await send(step(), "pageview", pick([["/privacy/", 2], ["/terms/", 1]]), arrival, device, ip, SITE + page);
     if (rand() < 0.015) await send(step(), "copy-homebrew", "/", arrival, device, ip, arrival.referrer);
   }
+  // The day's download marks are written before its installs look for them, while the day's salt is still kept.
+  await writer.flush();
+  const firstRuns: { at: number; ip: string; buyRate: number }[] = downloads
+    .filter(() => rand() < 0.72)
+    .map((d) => ({ at: d.at + (2 + rand() * 38) * 60_000, ip: d.ip, buyRate: d.arrival.checkout * 3.5 }));
+  for (let i = 0; i < Math.round(downloads.length * 0.12); i++) {
+    const ip = pick(pools.get(pick(COUNTRIES))!.map((x): [string, number] => [x, 1]));
+    firstRuns.push({ at: dayStart.getTime() + rand() * 86400_000, ip, buyRate: 0.15 });
+  }
+  for (const run of firstRuns.sort((a, b) => a.at - b.at)) if (run.at <= now) await newInstall(run.at, run.ip, run.buyRate);
+}
+
+// Each install's days after the first: used most days at first, less as the trial runs out, and every day once bought.
+// Some buy within ten days; the rest expire after seven. Those on 1.4 update when 1.5 is out.
+for (const install of installs) {
+  let state = "trial";
+  const buyOn = rand() < install.buyRate ? 1 + Math.floor(rand() * 10) : 0;
+  for (let day = 1; ; day++) {
+    const at = install.at + day * 86400_000 + (rand() - 0.5) * 6 * 3600_000;
+    if (at > now) break;
+    const chance = state === "licensed" ? 0.88 : state === "expired" ? 0.1 : 0.82 * 0.96 ** day;
+    if (rand() > chance && day !== buyOn) continue;
+    const events: { name: string; props?: object }[] = [{ name: "active" }];
+    if (install.version === "1.4" && at >= RELEASE) {
+      events.push({ name: "update", props: { from: "1.4" } });
+      install.version = "1.5";
+    }
+    if (day === buyOn) {
+      events.push({ name: "state", props: { from: state, to: "licensed" } });
+      state = "licensed";
+    } else if (state === "trial" && day >= 7) {
+      events.push({ name: "state", props: { from: "trial", to: "expired" } });
+      state = "expired";
+    }
+    if (rand() < 0.2) events.push({ name: "widget-added", props: { widget: pick([["weather", 3], ["music", 4], ["calendar", 2], ["battery", 1]]) } });
+    await app(install, at, state, events);
+  }
 }
 await writer.flush();
 const { rows: [count] } = await pool.query("select count(*)::int as events, count(distinct session_id)::int as visits from events where project_id = $1", [project.id]);
-console.log(`${NAME} (${project.key}): ${count.visits} visits, ${count.events} events over ${DAYS} days`);
+const { rows: [apps] } = await pool.query("select count(*)::int as installs, count(source)::int as matched from installs where project_id = $1", [project.id]);
+console.log(`${NAME} (${project.key}): ${count.visits} visits, ${apps.installs} installs (${apps.matched} matched to a visit), ${count.events} events in ${batches} app batches and the website's over ${DAYS} days`);
 await pool.end();
