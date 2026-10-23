@@ -27,7 +27,7 @@ Notchlight (notchlight.com) is the first customer.
 | Database | Postgres 17 on Render (Frankfurt), `pg` driver, plain SQL migrations | Simple to start; events are partitioned by month so it grows |
 | Country lookup | DB-IP Country Lite (`.mmdb`, CC BY 4.0), downloaded at build time, read with `mmdb-lib` | Country only, offline, no third-party calls |
 | Website script | `tracker/`: plain JS, minified with esbuild, served at `/s.js` | Under 2 KB |
-| App SDK (next) | Swift package for macOS and iOS | Notchlight first |
+| App SDK | `sdk/swift/`: a Swift package for macOS and iOS, no dependencies, sending to `/v1/app` | Notchlight first |
 | Dashboard | `dashboard/`: one page and a JSON API on `node:http`, Pursecast-style UI; local only until sign-in exists | Small, no build step, same stack as ingest |
 | SaaS billing (later) | Polar as merchant of record | It handles EU VAT, and you already use it |
 | Hosting | Render Blueprint (`render.yaml`): ingest web service + Postgres, both in Frankfurt | Your current host |
@@ -54,7 +54,12 @@ Notchlight (notchlight.com) is the first customer.
 - **Country:** looked up from the IP in memory. No city, no region.
 - **Bots:** dropped by user agent; automated browsers are skipped by the script.
 - **Opting out:** site owners set `localStorage.statiku_ignore = "1"` in their own browser; the app SDK has an opt-out
-  switch.
+  switch, which also forgets the install ID.
+- **Apps:** an install is a random UUID the app makes on its first launch and keeps in its preferences. The SDK sends
+  the platform, the OS and app versions, the build, the licence state and the events, nothing else. The IP is used for
+  the country and the network hash below, then dropped.
+- **Download marks:** each website download leaves `HMAC(salt_of_the_day, project + network)`, where the network is
+  the IPv4 address or the IPv6 /64. Marks are deleted after 48 hours.
 
 ## Attribution: how each step finds its source
 
@@ -62,10 +67,10 @@ Notchlight (notchlight.com) is the first customer.
 | --- | --- | --- |
 | Visit | UTM tags, then the referrer | exact |
 | Download click | Same session as the visit (the script tracks clicks on `.dmg`, `.zip`, `.pkg`, `.exe` and links with `data-track`) | exact |
-| Install | When the app first pings, it is matched to a download click from the same network within 24 hours. The match uses `HMAC(salt_of_the_day, project + IP)`, kept in a table that is emptied after 48 hours | estimate, shown as such |
+| Install | When the app first pings, it takes the latest untaken download mark from its network in the last 24 hours, hashed with today's or yesterday's salt, and copies that visit's source | estimate, shown as such |
 | Trial, licensed | Reported by the SDK on the install | exact |
 | Purchase on the website | The script adds `reference_id=stk_…` (Polar) or `client_reference_id=stk_…` (Stripe Payment Links) to checkout links when clicked, and records a `checkout` event with that ref. The webhook carries it back | exact |
-| Purchase in the app | The SDK adds the install ID as the reference on the checkout link | exact, then through the install's source |
+| Purchase in the app | `Statiku.checkoutURL` adds a reference to the checkout link and records a `checkout` event with it on the install | exact, then through the install's source |
 
 ## Data model
 
@@ -87,12 +92,15 @@ Collection (built now):
   session's source fields, country, device, browser, OS, props (jsonb), revenue (smallest unit + currency)
 - `usage_daily` (project, day, events): for plan limits and billing
 
-Apps (next):
+Apps (built):
 
-- `installs` (project, random install ID, first and last seen, platform, app version, OS version, state: trial, licensed
-  or free, country, attributed source and how it was matched)
-- `download_marks` (project, network hash, time, session, source): emptied after 48 hours
-- app events go into `events` with `install_id`, `app_version` and `os_version` set
+- `installs` (project, random install ID, first and last seen, platform, app version, build, OS version, state: free,
+  trial, expired or licensed, when trial and licensed were first reported, country, and the matched visit and its
+  source fields)
+- `download_marks` (project, network hash, time, session and its source, the install that took it): deleted after
+  48 hours
+- app events go into `events` with `install_id`, `app_version` and `os_version` set and the install's source copied
+  on, so events by source work the same for both
 
 Revenue (after that):
 
@@ -102,11 +110,11 @@ Revenue (after that):
 
 ## Plan
 
-1. **Ingestion and the website script** (this step): `/e`, `/s.js`, sessions, country, devices, sources, custom events,
+1. **Ingestion and the website script** (built; not yet deployed): `/e`, `/s.js`, sessions, country, devices, sources, custom events,
    checkout and download tracking, a CLI for projects and a stats report until the dashboard exists. Tested on
    notchlight.com's pages in Chrome, then live on notchlight.com.
-2. **Swift SDK and app ingestion:** `/v1/app`, installs, active installs by version, trial and licensed state, opt-out,
-   install attribution. Into Notchlight with the privacy page updated the same day.
+2. **Swift SDK and app ingestion** (built; not yet in Notchlight): `/v1/app`, installs, active installs by version,
+   trial and licensed state, opt-out, install attribution. Into Notchlight with the privacy page updated the same day.
 3. **Revenue:** Polar and Stripe webhooks, attributed back to the source. Paddle, Lemon Squeezy and the App Store later.
 4. **Accounts and dashboard:** sign-up, workspaces, projects, invites, and per project: visitors, pages, sources,
    countries, devices, the funnel, installs, revenue by source.
