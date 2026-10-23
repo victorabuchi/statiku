@@ -1,14 +1,17 @@
-// The ingest service: serves the website script and takes its events.
+// The ingest service: serves the website script and takes its events and the app SDKs' batches.
 //   GET  /s.js      the script
 //   POST /e         one event (a plain-text JSON body, so browsers send it without a preflight)
+//   POST /v1/app    a batch of events from an app (see app.ts)
 //   GET  /healthz   for Render
 // Nothing here logs or stores an IP.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
 import pg from "pg";
 import { buildTracker } from "../tracker/build.ts";
+import { collectApp, MAX_APP_BODY } from "./app.ts";
 import { collect, MAX_BODY, type Deps } from "./collect.ts";
 import { Geo } from "./geo.ts";
+import { Installs } from "./installs.ts";
 import { Projects } from "./projects.ts";
 import { Salts } from "./salts.ts";
 import { Sessions } from "./sessions.ts";
@@ -33,14 +36,14 @@ export function clientIp(req: IncomingMessage, trustProxy: boolean): string {
   return req.socket.remoteAddress ?? "";
 }
 
-function readBody(req: IncomingMessage): Promise<string | null> {
+function readBody(req: IncomingMessage, limit: number): Promise<string | null> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
     req.on("data", (chunk: Buffer) => {
       size += chunk.length;
       // Too large: answer now and let the rest drain unread.
-      if (size > MAX_BODY) resolve(null);
+      if (size > limit) resolve(null);
       else chunks.push(chunk);
     });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
@@ -58,7 +61,8 @@ export async function createApp(options: Options) {
   pool.on("error", (e) => console.error("Postgres:", e.message));
   const sessions = new Sessions(pool);
   const writer = new Writer(pool, sessions);
-  const deps: Deps = { projects: new Projects(pool), salts: new Salts(pool), sessions, writer, geo: new Geo(options.geoPath) };
+  const salts = new Salts(pool);
+  const deps: Deps = { projects: new Projects(pool), salts, sessions, installs: new Installs(pool, salts), writer, geo: new Geo(options.geoPath) };
 
   const script = await buildTracker();
   const etag = `"${createHash("sha256").update(script).digest("base64url").slice(0, 16)}"`;
@@ -81,9 +85,16 @@ export async function createApp(options: Options) {
       if (path === "/e") {
         if (req.method === "OPTIONS") return send(res, 204, "");
         if (req.method !== "POST") return send(res, 405, "use POST");
-        const body = await readBody(req);
+        const body = await readBody(req, MAX_BODY);
         if (body === null) return send(res, 413, "body too large");
         const outcome = await collect(deps, body, String(req.headers["user-agent"] ?? ""), clientIp(req, options.trustProxy));
+        return send(res, outcome.status, outcome.message);
+      }
+      if (path === "/v1/app") {
+        if (req.method !== "POST") return send(res, 405, "use POST");
+        const body = await readBody(req, MAX_APP_BODY);
+        if (body === null) return send(res, 413, "body too large");
+        const outcome = await collectApp(deps, body, clientIp(req, options.trustProxy));
         return send(res, outcome.status, outcome.message);
       }
       if (path === "/healthz") return send(res, 200, `ok, ${writer.queue.length} queued`);
@@ -95,9 +106,14 @@ export async function createApp(options: Options) {
     }
   });
 
+  // Download marks only need to outlive the day an install can be matched in.
+  const dropMarks = () =>
+    pool.query("delete from download_marks where ts < now() - interval '48 hours'").catch((e) => console.error("Marks:", e.message));
+
   const timers = [
     setInterval(() => sessions.sweep(new Date()), 60_000),
     setInterval(ensurePartitions, 6 * 3600_000),
+    setInterval(dropMarks, 3600_000),
   ];
   writer.start(options.flushMs ?? 1000);
 
@@ -116,7 +132,7 @@ export async function createApp(options: Options) {
     await pool.end();
   }
 
-  return { server, pool, deps, writer, close };
+  return { server, pool, deps, writer, dropMarks, close };
 }
 
 if (import.meta.main) {

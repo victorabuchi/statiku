@@ -1,8 +1,10 @@
 // Events wait in memory and are written in batches: one transaction a second (or sooner at 500 events) holds the
-// events, the sessions they changed and the day's usage counts. A failed batch goes back to the front of the queue.
+// events, the sessions they changed, the download marks and the day's usage counts. A failed batch goes back to the
+// front of the queue.
 // This is the one place that writes events, so moving them to another store later means changing this file.
 import type pg from "pg";
 import type { Session, Sessions } from "./sessions.ts";
+import type { Source } from "./source.ts";
 
 export type EventRow = {
   projectId: string;
@@ -25,7 +27,12 @@ export type EventRow = {
   props: Record<string, unknown> | null;
   revenueMinor: number | null;
   currency: string | null;
+  installId: string | null;
+  appVersion: string | null;
+  osVersion: string | null;
 };
+
+export type MarkRow = Source & { projectId: string; network: string; ts: Date; sessionId: string };
 
 const BATCH = 500;
 // Past this many waiting events (the database has been down a while), the oldest are dropped.
@@ -52,6 +59,22 @@ const EVENT_COLUMNS: [string, string, (e: EventRow) => unknown][] = [
   ["props", "jsonb", (e) => (e.props ? JSON.stringify(e.props) : null)],
   ["revenue_minor", "bigint", (e) => e.revenueMinor],
   ["currency", "text", (e) => e.currency],
+  ["install_id", "uuid", (e) => e.installId],
+  ["app_version", "text", (e) => e.appVersion],
+  ["os_version", "text", (e) => e.osVersion],
+];
+
+const MARK_COLUMNS: [string, string, (m: MarkRow) => unknown][] = [
+  ["project_id", "uuid", (m) => m.projectId],
+  ["network", "bigint", (m) => m.network],
+  ["ts", "timestamptz", (m) => m.ts],
+  ["session_id", "bigint", (m) => m.sessionId],
+  ["source", "text", (m) => m.source],
+  ["referrer_host", "text", (m) => m.referrerHost],
+  ["utm_medium", "text", (m) => m.utmMedium],
+  ["utm_campaign", "text", (m) => m.utmCampaign],
+  ["utm_content", "text", (m) => m.utmContent],
+  ["utm_term", "text", (m) => m.utmTerm],
 ];
 
 const SESSION_COLUMNS: [string, string, (s: Session) => unknown][] = [
@@ -90,6 +113,7 @@ export class Writer {
   pool: pg.Pool;
   sessions: Sessions;
   queue: EventRow[] = [];
+  marks: MarkRow[] = [];
   dropped = 0;
   flushing: Promise<void> | null = null;
   timer: NodeJS.Timeout | null = null;
@@ -109,6 +133,10 @@ export class Writer {
     if (this.queue.length >= BATCH) this.flushQuietly();
   }
 
+  addMark(row: MarkRow) {
+    this.marks.push(row);
+  }
+
   start(intervalMs = 1000) {
     this.timer = setInterval(() => this.flushQuietly(), intervalMs);
   }
@@ -126,17 +154,18 @@ export class Writer {
   // Writes everything waiting. Only one flush runs at a time; a call during one waits for it and then runs again.
   async flush(): Promise<void> {
     while (this.flushing) await this.flushing.catch(() => {});
-    if (!this.queue.length && !this.sessions.anyDirty) return;
+    if (!this.queue.length && !this.marks.length && !this.sessions.anyDirty) return;
     this.flushing = this.writeAll().finally(() => (this.flushing = null));
     return this.flushing;
   }
 
   async writeAll() {
-    while (this.queue.length || this.sessions.anyDirty) {
+    while (this.queue.length || this.marks.length || this.sessions.anyDirty) {
       const events = this.queue.splice(0, BATCH * 4);
+      const marks = this.marks.splice(0);
       const { rows: sessions, sessions: live } = this.sessions.takeDirty();
       try {
-        await this.write(events, sessions);
+        await this.write(events, sessions, marks);
       } catch (e) {
         // A data error (SQLSTATE class 22 or 23) would fail on every retry and block the queue, so that batch goes.
         if (/^2[23]/.test((e as { code?: string }).code ?? "")) {
@@ -145,6 +174,7 @@ export class Writer {
           continue;
         }
         this.sessions.requeue(live);
+        this.marks.unshift(...marks);
         this.queue.unshift(...events);
         console.error(`Writing ${events.length} events failed; they stay queued.`, (e as Error).message);
         throw e;
@@ -152,7 +182,7 @@ export class Writer {
     }
   }
 
-  async write(events: EventRow[], sessions: Session[]) {
+  async write(events: EventRow[], sessions: Session[], marks: MarkRow[]) {
     const usage = new Map<string, number>();
     for (const e of events) {
       const key = `${e.projectId} ${e.ts.toISOString().slice(0, 10)}`;
@@ -172,6 +202,7 @@ export class Writer {
           values: insert.values,
         });
       }
+      if (marks.length) await client.query(unnestInsert("download_marks", MARK_COLUMNS, marks));
       if (usage.size) {
         const keys = [...usage.keys()].map((k) => k.split(" "));
         await client.query(

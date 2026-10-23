@@ -5,6 +5,7 @@ import { randomBytes } from "node:crypto";
 import pg from "pg";
 import { collect, type Deps } from "../ingest/collect.ts";
 import { Geo } from "../ingest/geo.ts";
+import { Installs } from "../ingest/installs.ts";
 import { Projects } from "../ingest/projects.ts";
 import { Salts } from "../ingest/salts.ts";
 import { Sessions } from "../ingest/sessions.ts";
@@ -80,7 +81,8 @@ for (const table of ["events", "sessions", "usage_daily"]) await pool.query(`del
 
 const sessions = new Sessions(pool);
 const writer = new Writer(pool, sessions);
-const deps: Deps = { projects: new Projects(pool), salts: new Salts(pool), sessions, writer, geo };
+const salts = new Salts(pool);
+const deps: Deps = { projects: new Projects(pool), salts, sessions, installs: new Installs(pool, salts), writer, geo };
 
 let sent = 0;
 const send = async (at: Date, name: string, path: string, arrival: Arrival, device: { ua: string; width: number }, ip: string, referrer: string | null, props?: object) => {

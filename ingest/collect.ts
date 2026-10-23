@@ -1,9 +1,10 @@
 // One event from the website script, from the raw body to a queued row. The IP is used here, in memory, for the
-// country and the visitor hash, and goes no further.
+// country, the visitor hash and, for downloads, the network hash an install is matched with, and goes no further.
 import { agentOf, isBot } from "./agent.ts";
 import type { Geo } from "./geo.ts";
+import type { Installs } from "./installs.ts";
 import { hostAllowed, type Projects } from "./projects.ts";
-import { hash63, type Salts } from "./salts.ts";
+import { hash63, networkOf, type Salts } from "./salts.ts";
 import type { Sessions } from "./sessions.ts";
 import { sourceOf } from "./source.ts";
 import type { Writer } from "./writer.ts";
@@ -20,15 +21,15 @@ export type Hit = {
   revenue: { minor: number; currency: string } | null;
 };
 
-export type Deps = { projects: Projects; salts: Salts; sessions: Sessions; writer: Writer; geo: Geo };
+export type Deps = { projects: Projects; salts: Salts; sessions: Sessions; installs: Installs; writer: Writer; geo: Geo };
 
 export type Outcome = { status: number; message: string };
 
 // Postgres can't store NUL in text or jsonb.
-const text = (value: unknown, max: number) =>
+export const text = (value: unknown, max: number) =>
   typeof value === "string" ? value.replace(/\u0000/g, "").trim().slice(0, max) : "";
 
-function cleanProps(input: unknown): Hit["props"] {
+export function cleanProps(input: unknown): Hit["props"] {
   if (!input || typeof input !== "object" || Array.isArray(input)) return null;
   const props: Record<string, string | number | boolean> = {};
   for (const [k, v] of Object.entries(input).slice(0, 30)) {
@@ -120,6 +121,23 @@ export async function collect(deps: Deps, body: string, ua: string, ip: string, 
     props: hit.props,
     revenueMinor: hit.revenue?.minor ?? null,
     currency: hit.revenue?.currency ?? null,
+    installId: null,
+    appVersion: null,
+    osVersion: null,
   });
+  if (hit.name === "download") {
+    deps.writer.addMark({
+      projectId: project.id,
+      network: hash63(salt, project.id, networkOf(ip)),
+      ts: now,
+      sessionId: session.id,
+      source: session.source,
+      referrerHost: session.referrerHost,
+      utmMedium: session.utmMedium,
+      utmCampaign: session.utmCampaign,
+      utmContent: session.utmContent,
+      utmTerm: session.utmTerm,
+    });
+  }
   return { status: 202, message: "ok" };
 }

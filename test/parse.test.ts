@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { agentOf, isBot } from "../ingest/agent.ts";
+import { parseApp } from "../ingest/app.ts";
 import { parseHit } from "../ingest/collect.ts";
 import { cleanDomain, hostAllowed } from "../ingest/projects.ts";
-import { hash63 } from "../ingest/salts.ts";
+import { hash63, networkOf } from "../ingest/salts.ts";
 import { sourceOf } from "../ingest/source.ts";
 
 const SAFARI_MAC = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15";
@@ -84,4 +85,45 @@ test("event bodies", () => {
   assert.equal(parseHit(JSON.stringify({ k: "p", n: "x", u: "javascript:alert(1)" })), "page URL (u) must be http or https");
   const noRevenue = parseHit(JSON.stringify({ k: "p", n: "x", u: "https://a.com", $: { amount: -1, currency: "EUR" } }));
   assert.ok(typeof noRevenue === "object" && noRevenue.revenue === null);
+});
+
+test("networks: an IPv4 address as it is, an IPv6 one by its /64", () => {
+  assert.equal(networkOf("193.166.3.2"), "193.166.3.2");
+  assert.equal(networkOf("::ffff:193.166.3.2"), "193.166.3.2");
+  assert.equal(networkOf("2001:14ba:a0bd:dd00:1c2b:5f3e:aa01:7c11"), "2001:14ba:a0bd:dd00::/64");
+  assert.equal(networkOf("2001:14BA:A0BD:DD00::9"), "2001:14ba:a0bd:dd00::/64");
+  assert.equal(networkOf("2001:db8::1"), "2001:db8:0:0::/64");
+  assert.equal(networkOf("2001:0db8:0000:0042::1"), "2001:db8:0:42::/64");
+  assert.equal(networkOf("::1"), "0:0:0:0::/64");
+});
+
+test("app batches", () => {
+  const now = new Date("2026-10-23T12:00:00Z");
+  const install = "8F3C2A10-5B7E-4C1D-9A2B-3C4D5E6F7A8B";
+  const parsed = parseApp(JSON.stringify({
+    project: "p_abc", install, platform: "macOS", osVersion: "26.1", appVersion: "1.6", build: "7", state: "trial",
+    events: [
+      { name: "install", at: "2026-10-23T11:59:00Z" },
+      { name: "export", props: { format: "png", nested: {} } },
+      { name: "active", at: "2026-10-23T12:30:00Z" },
+      { name: "stale", at: "2026-10-01T00:00:00Z" },
+    ],
+  }), now);
+  assert.ok(typeof parsed === "object");
+  assert.equal(parsed.install, install.toLowerCase());
+  assert.equal(parsed.state, "trial");
+  assert.deepEqual(parsed.events.map((e) => [e.name, e.at.toISOString(), e.props]), [
+    ["install", "2026-10-23T11:59:00.000Z", null],
+    ["export", now.toISOString(), { format: "png" }],
+    // Ahead of the server's clock: now. A month old: dropped.
+    ["active", now.toISOString(), null],
+  ]);
+  const base = { project: "p", install, platform: "iOS", events: [{ name: "x" }] };
+  assert.equal(parseApp(JSON.stringify({ ...base, install: "123" }), now), "install must be a UUID");
+  assert.equal(parseApp(JSON.stringify({ ...base, platform: "" }), now), "missing platform");
+  assert.equal(parseApp(JSON.stringify({ ...base, events: [] }), now), "events must be a list with at least one event");
+  assert.equal(parseApp(JSON.stringify({ ...base, events: [{ name: "x", at: "soon" }] }), now), "x: at is not a time");
+  assert.match(parseApp(JSON.stringify({ ...base, state: "paid" }), now) as string, /^state must be one of/);
+  const minimal = parseApp(JSON.stringify(base), now);
+  assert.ok(typeof minimal === "object" && minimal.state === null && minimal.appVersion === null);
 });
