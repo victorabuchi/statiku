@@ -12,11 +12,12 @@ export const DEFAULT_DOCS = new URL("../../notchlight/docs", import.meta.url).pa
 export const LOCAL_PROJECT = "Notchlight (local test)";
 
 // The snippet in every page's head, and the download page reporting the download it starts: the same edits that
-// go into notchlight.com.
+// go into notchlight.com. Pages that already carry them (notchlight.com's own) get the local snippet in place of theirs.
 const AUTO_START = "setTimeout(() => { window.location.href = link.href; }, 700);";
+const LIVE_SNIPPET = /<script defer data-project="[^"]*" src="[^"]*\/s\.js"><\/script>/;
 export function addSnippet(html: string, path: string, snippet: string) {
-  html = html.replace("</head>", `${snippet}\n</head>`);
-  if (path.endsWith("download/index.html")) {
+  html = LIVE_SNIPPET.test(html) ? html.replace(LIVE_SNIPPET, snippet) : html.replace("</head>", `${snippet}\n</head>`);
+  if (path.endsWith("download/index.html") && !html.includes('statiku("download"')) {
     if (!html.includes(AUTO_START)) throw new Error("The download page's auto-start changed; update this script and the live edit.");
     html = html.replace(
       AUTO_START,
