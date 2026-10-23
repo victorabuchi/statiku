@@ -31,8 +31,9 @@ export async function createProject(pool: pg.Pool, name: string, domains: string
   }
 }
 
+// On Render (in the service's Shell) the service's own address; locally the dev server.
 const snippet = (key: string) =>
-  `<script defer data-project="${key}" src="${process.env.PUBLIC_URL ?? "http://localhost:8787"}/s.js"></script>`;
+  `<script defer data-project="${key}" src="${process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? "http://localhost:8787"}/s.js"></script>`;
 
 if (import.meta.main) {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: { timezone: { type: "string" } } });
