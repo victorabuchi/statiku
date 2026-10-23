@@ -1,6 +1,6 @@
-// Notchlight's website from the lockwidgets repo, served locally with the Waymark snippet added the way it will be on
+// Notchlight's website from the notchlight repo, served locally with the Statiku snippet added the way it will be on
 // notchlight.com, so you can click around it and watch the visits arrive in the dashboard.
-//   npm run notchlight [-- --docs ../lockwidgets/docs]   then open http://localhost:8790
+//   npm run notchlight [-- --docs ../notchlight/docs]   then open http://localhost:8790
 import { readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, normalize } from "node:path";
@@ -8,7 +8,7 @@ import { parseArgs } from "node:util";
 import pg from "pg";
 import { createProject } from "./project.ts";
 
-export const DEFAULT_DOCS = new URL("../../lockwidgets/docs", import.meta.url).pathname;
+export const DEFAULT_DOCS = new URL("../../notchlight/docs", import.meta.url).pathname;
 export const LOCAL_PROJECT = "Notchlight (local test)";
 
 // The snippet in every page's head, and the download page reporting the download it starts: the same edits that
@@ -20,8 +20,8 @@ export function addSnippet(html: string, path: string, snippet: string) {
     if (!html.includes(AUTO_START)) throw new Error("The download page's auto-start changed; update this script and the live edit.");
     html = html.replace(
       AUTO_START,
-      `window.waymark = window.waymark || function () { (waymark.q = waymark.q || []).push(arguments) };
-  setTimeout(() => { waymark("download", { props: { file: "Notchlight.dmg" } }); window.location.href = link.href; }, 700);`,
+      `window.statiku = window.statiku || function () { (statiku.q = statiku.q || []).push(arguments) };
+  setTimeout(() => { statiku("download", { props: { file: "Notchlight.dmg" } }); window.location.href = link.href; }, 700);`,
     );
   }
   return html;
@@ -57,5 +57,5 @@ if (import.meta.main) {
   // data-local: the script skips localhost unless told otherwise.
   const snippet = `<script defer data-local data-project="${project.key}" src="${ingest}/s.js"></script>`;
   const port = Number(process.env.SITE_PORT ?? 8790);
-  serveDocs(values.docs!, snippet).listen(port, "127.0.0.1", () => console.log(`Notchlight's website with Waymark on http://localhost:${port} (project ${project.key})`));
+  serveDocs(values.docs!, snippet).listen(port, "127.0.0.1", () => console.log(`Notchlight's website with Statiku on http://localhost:${port} (project ${project.key})`));
 }

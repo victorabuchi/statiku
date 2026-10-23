@@ -1,8 +1,8 @@
 // Runs the website script on Notchlight's own pages in Chrome against a local ingest service, then checks what
-// reached the database. The pages come from the lockwidgets repo's docs folder (the source of notchlight.com) with
+// reached the database. The pages come from the notchlight repo's docs folder (the source of notchlight.com) with
 // the snippet added the way it will be on the live site. Chrome resolves notchlight.com to this machine, so the
 // pages run under their real hostname. Nothing leaves the machine: requests to other hosts are answered locally.
-//   npm run e2e [-- --docs ../lockwidgets/docs --chrome <path to Chrome>]
+//   npm run e2e [-- --docs ../notchlight/docs --chrome <path to Chrome>]
 import type { AddressInfo } from "node:net";
 import { parseArgs } from "node:util";
 import pg from "pg";
@@ -126,7 +126,7 @@ if (b) {
   const checkout = of(b).find((e) => e.name === "checkout");
   const ref = checkout?.props?.ref;
   check("Hacker News visit: source, Germany, Safari", b.source === "Hacker News" && b.referrer_host === "news.ycombinator.com" && b.country === "DE" && b.browser === "Safari", b);
-  check("Buy: a checkout event with a reference", typeof ref === "string" && ref.startsWith("wm_"), checkout?.props);
+  check("Buy: a checkout event with a reference", typeof ref === "string" && ref.startsWith("stk_"), checkout?.props);
   check("Buy: Polar's checkout opened with the same reference_id", new URL(checkoutUrl).hostname === "buy.polar.sh" && new URL(checkoutUrl).searchParams.get("reference_id") === ref, checkoutUrl);
 }
 if (c) {

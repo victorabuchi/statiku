@@ -1,12 +1,12 @@
-// The Waymark website script. It stores nothing in the browser and sends no identifier: each event carries the page
+// The Statiku website script. It stores nothing in the browser and sends no identifier: each event carries the page
 // (its query string dropped, apart from campaign tags), the referrer, the window width and any props.
 //
-//   <script defer data-project="p_…" src="https://<waymark host>/s.js"></script>
+//   <script defer data-project="p_…" src="https://<statiku host>/s.js"></script>
 //     data-api="https://…/e"  send events elsewhere, such as through your own domain
 //     data-hash               count #/routes as pages
 //     data-local              count on localhost too
 //
-//   waymark("signup", { props: { plan: "pro" }, revenue: { amount: 9, currency: "EUR" } })
+//   statiku("signup", { props: { plan: "pro" }, revenue: { amount: 9, currency: "EUR" } })
 //   <a data-track="download" data-track-os="mac" href="…">  sends "download" with { os: "mac" } on click
 //
 // Clicks on files (.dmg, .zip, .exe…) send "download". Clicks on Polar and Stripe checkout links send "checkout" with
@@ -23,7 +23,7 @@
     opts = opts || {};
     if ((/^(localhost|127\.|\[::1\])/.test(loc.hostname) && attr("local") == null) || loc.protocol == "file:") return;
     if (nav.webdriver || w.Cypress) return;
-    try { if (localStorage.waymark_ignore) return; } catch (e) {}
+    try { if (localStorage.statiku_ignore) return; } catch (e) {}
     var tags = loc.search.slice(1).split("&").filter(function (p) { return /^(utm_[a-z]+|ref|source|via)=/.test(p); }).join("&");
     var body = JSON.stringify({
       k: key,
@@ -54,7 +54,7 @@
     if (a && CHECKOUT.test(a.href)) {
       url = new URL(a.href);
       param = /stripe/.test(url.host) ? "client_reference_id" : "reference_id";
-      props.ref = url.searchParams.get(param) || "wm_" + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+      props.ref = url.searchParams.get(param) || "stk_" + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
       url.searchParams.set(param, props.ref);
       // Rewritten before the page's own handlers run, so a checkout opened in an overlay gets it too.
       a.href = url.href;
@@ -66,9 +66,9 @@
     if (name) send(name, { props: props });
   }
 
-  // Calls made before the script loaded: window.waymark = window.waymark || function () { (waymark.q = waymark.q || []).push(arguments) }
-  var queued = (w.waymark && w.waymark.q) || [];
-  w.waymark = send;
+  // Calls made before the script loaded: window.statiku = window.statiku || function () { (statiku.q = statiku.q || []).push(arguments) }
+  var queued = (w.statiku && w.statiku.q) || [];
+  w.statiku = send;
   for (var i = 0; i < queued.length; i++) send(queued[i][0], queued[i][1]);
 
   d.addEventListener("click", click, true);

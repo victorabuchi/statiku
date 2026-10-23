@@ -1,8 +1,8 @@
 {
-  "name": "waymark",
+  "name": "statiku",
   "version": "0.1.0",
   "private": true,
-  "description": "Privacy-first analytics for websites and apps, from first visit to purchase.",
+  "description": "Privacy-first analytics for websites and the apps you sell yourself, from the first visit to the purchase.",
   "type": "module",
   "engines": {
     "node": ">=24"

@@ -122,7 +122,7 @@ for (let daysAgo = DAYS - 1; daysAgo >= 0; daysAgo--) {
     }
     if (device.mac && rand() < arrival.checkout) {
       if (page !== "/") await send(step(), "pageview", "/", arrival, device, ip, SITE + page);
-      await send(step(), "checkout", "/", arrival, device, ip, arrival.referrer, { ref: "wm_" + randomBytes(8).toString("hex") });
+      await send(step(), "checkout", "/", arrival, device, ip, arrival.referrer, { ref: "stk_" + randomBytes(8).toString("hex") });
     }
     if (rand() < 0.05) await send(step(), "pageview", pick([["/privacy/", 2], ["/terms/", 1]]), arrival, device, ip, SITE + page);
     if (rand() < 0.015) await send(step(), "copy-homebrew", "/", arrival, device, ip, arrival.referrer);

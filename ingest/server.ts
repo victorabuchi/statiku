@@ -87,7 +87,7 @@ export async function createApp(options: Options) {
         return send(res, outcome.status, outcome.message);
       }
       if (path === "/healthz") return send(res, 200, `ok, ${writer.queue.length} queued`);
-      if (path === "/") return send(res, 200, "Waymark ingest");
+      if (path === "/") return send(res, 200, "Statiku ingest");
       return send(res, 404, "not found");
     } catch (e) {
       console.error("Request failed:", (e as Error).message);
@@ -128,7 +128,7 @@ if (import.meta.main) {
     geoPath: process.env.GEO_DB ?? new URL("../data/country.mmdb", import.meta.url),
   });
   const port = Number(process.env.PORT ?? 8787);
-  app.server.listen(port, () => console.log(`Waymark ingest on :${port}`));
+  app.server.listen(port, () => console.log(`Statiku ingest on :${port}`));
   // Render sends SIGTERM before replacing an instance: finish the batch first.
   for (const signal of ["SIGTERM", "SIGINT"] as const) {
     process.once(signal, async () => {

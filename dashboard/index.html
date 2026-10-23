@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Waymark</title>
+<title>Statiku</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Crect x='1' y='1' width='18' height='18' rx='5' fill='%233b5bdb'/%3E%3Crect x='6' y='5' width='8' height='4' rx='1.2' fill='white'/%3E%3Crect x='6' y='11' width='8' height='4' rx='1.2' fill='white' opacity='.55'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -292,7 +292,7 @@ footer a { color: var(--ink-2); }
   <div class="wrap">
     <div class="brand">
       <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="1" y="1" width="18" height="18" rx="5" fill="var(--accent-bg)"/><rect x="6" y="5" width="8" height="4" rx="1.2" fill="var(--on-accent)"/><rect x="6" y="11" width="8" height="4" rx="1.2" fill="var(--on-accent)" opacity="0.55"/></svg>
-      <span>Waymark</span>
+      <span>Statiku</span>
     </div>
     <label class="visually-hidden" for="project">Project</label>
     <select class="project" id="project"></select>
@@ -397,7 +397,7 @@ footer a { color: var(--ink-2); }
           <div class="panel-body">
             <p>Add this to the head of every page. It sets no cookies and is under 2 KB.</p>
             <div class="code" id="snippet-web"></div>
-            <p>Page views count on their own, and so do clicks on .dmg, .zip and other files (<code>download</code>) and on Polar and Stripe checkout links (<code>checkout</code>). For anything else, add <code>data-track="name"</code> to a link or call <code>waymark("name")</code>.</p>
+            <p>Page views count on their own, and so do clicks on .dmg, .zip and other files (<code>download</code>) and on Polar and Stripe checkout links (<code>checkout</code>). For anything else, add <code>data-track="name"</code> to a link or call <code>statiku("name")</code>.</p>
           </div>
         </div>
         <div class="panel">
@@ -412,7 +412,7 @@ footer a { color: var(--ink-2); }
           <div class="panel-head"><h2>Privacy</h2></div>
           <div class="panel-body">
             <p>No cookies and nothing stored in the browser. IP addresses are used in memory for the country, then dropped. A visitor is a hash that changes every day and can't be traced back.</p>
-            <p>To leave your own visits out, run <code>localStorage.waymark_ignore = "1"</code> in your browser's console on your site.</p>
+            <p>To leave your own visits out, run <code>localStorage.statiku_ignore = "1"</code> in your browser's console on your site.</p>
           </div>
         </div>
         <div class="panel">
@@ -428,7 +428,7 @@ footer a { color: var(--ink-2); }
 
 <footer class="gutter">
   <div class="wrap">
-    <span>Waymark, running locally</span>
+    <span>Statiku, running locally</span>
     <span>Country data: <a href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a></span>
   </div>
 </footer>
@@ -465,8 +465,8 @@ footer a { color: var(--ink-2); }
   ];
 
   const state = { project: null, range: "d30", metric: "visitors", source: null, pagesTab: "top", devTab: "device", table: false, data: null };
-  const remember = () => { try { localStorage.setItem("waymark", JSON.stringify({ project: state.project, range: state.range })); } catch {} };
-  try { const saved = JSON.parse(localStorage.getItem("waymark") || "{}"); Object.assign(state, { project: saved.project ?? null, range: saved.range ?? "d30" }); } catch {}
+  const remember = () => { try { localStorage.setItem("statiku", JSON.stringify({ project: state.project, range: state.range })); } catch {} };
+  try { const saved = JSON.parse(localStorage.getItem("statiku") || "{}"); Object.assign(state, { project: saved.project ?? null, range: saved.range ?? "d30" }); } catch {}
   let projects = [], ingestUrl = "";
 
   async function loadProjects() {

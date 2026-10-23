@@ -1,4 +1,4 @@
-// The ingest service end to end against a real Postgres. Needs TEST_DATABASE_URL (createdb waymark_test); the test
+// The ingest service end to end against a real Postgres. Needs TEST_DATABASE_URL (createdb statiku_test); the test
 // empties that database first.
 import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
@@ -65,7 +65,7 @@ test("a visit: its source, its session, its events", { skip }, async () => {
   assert.equal(first.headers.get("access-control-allow-origin"), "*");
   await post(hit("pageview", "https://notchlight.com/download/", { r: "https://notchlight.com/" }));
   await post(hit("download", "https://notchlight.com/download/", { p: { file: "Notchlight.dmg" } }));
-  await post(hit("checkout", "https://notchlight.com/", { p: { ref: "wm_abc123" } }));
+  await post(hit("checkout", "https://notchlight.com/", { p: { ref: "stk_abc123" } }));
   // Another browser on the same network is another visitor.
   await post(hit("pageview", "https://www.notchlight.com/", { r: "https://www.google.com/" }), FIREFOX);
   await app.writer.flush();
@@ -92,7 +92,7 @@ test("a visit: its source, its session, its events", { skip }, async () => {
   // Every event carries the session's source, so the download counts for MacNative.
   assert.ok(events.every((e) => e.source === "MacNative"));
   assert.deepEqual(events[2].props, { file: "Notchlight.dmg" });
-  assert.deepEqual(events[3].props, { ref: "wm_abc123" });
+  assert.deepEqual(events[3].props, { ref: "stk_abc123" });
   // The query string is gone apart from the tags.
   assert.equal(events[0].path, "/");
 

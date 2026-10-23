@@ -156,5 +156,5 @@ if (import.meta.main) {
     }
   });
   const port = Number(process.env.DASHBOARD_PORT ?? 8788);
-  server.listen(port, "127.0.0.1", () => console.log(`Waymark dashboard on http://localhost:${port}`));
+  server.listen(port, "127.0.0.1", () => console.log(`Statiku dashboard on http://localhost:${port}`));
 }

@@ -1,6 +1,6 @@
-# Waymark: stack, data model and plan
+# Statiku: stack, data model and plan
 
-Waymark is a working name. It is privacy-first analytics for websites and apps (Mac, iOS, desktop) that follows each
+Statiku is privacy-first analytics for websites and apps (Mac, iOS, desktop) that follows each
 traffic source from the first visit to the purchase:
 
 ```
@@ -53,7 +53,7 @@ Notchlight (notchlight.com) is the first customer.
   `via` are kept), the referrer, the window width (for the device type) and optional props.
 - **Country:** looked up from the IP in memory. No city, no region.
 - **Bots:** dropped by user agent; automated browsers are skipped by the script.
-- **Opting out:** site owners set `localStorage.waymark_ignore = "1"` in their own browser; the app SDK has an opt-out
+- **Opting out:** site owners set `localStorage.statiku_ignore = "1"` in their own browser; the app SDK has an opt-out
   switch.
 
 ## Attribution: how each step finds its source
@@ -64,7 +64,7 @@ Notchlight (notchlight.com) is the first customer.
 | Download click | Same session as the visit (the script tracks clicks on `.dmg`, `.zip`, `.pkg`, `.exe` and links with `data-track`) | exact |
 | Install | When the app first pings, it is matched to a download click from the same network within 24 hours. The match uses `HMAC(salt_of_the_day, project + IP)`, kept in a table that is emptied after 48 hours | estimate, shown as such |
 | Trial, licensed | Reported by the SDK on the install | exact |
-| Purchase on the website | The script adds `reference_id=wm_…` (Polar) or `client_reference_id=wm_…` (Stripe Payment Links) to checkout links when clicked, and records a `checkout` event with that ref. The webhook carries it back | exact |
+| Purchase on the website | The script adds `reference_id=stk_…` (Polar) or `client_reference_id=stk_…` (Stripe Payment Links) to checkout links when clicked, and records a `checkout` event with that ref. The webhook carries it back | exact |
 | Purchase in the app | The SDK adds the install ID as the reference on the checkout link | exact, then through the install's source |
 
 ## Data model
