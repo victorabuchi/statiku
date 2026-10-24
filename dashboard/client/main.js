@@ -60,8 +60,8 @@ const ICONS = {
   trash: '<path d="M4 6h12M8 6V4.5h4V6M5.5 6l.7 10a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9l.7-10"/>',
   // A clock turning back: history from before.
   history: '<path d="M3.5 10a6.5 6.5 0 1 0 1.9-4.6L3.5 7.3"/><path d="M3.5 3.8v3.5H7M10 6.5V10l2.4 1.6"/>',
-  // A card: the plan you pay for.
-  plan: '<rect x="2.5" y="4.5" width="15" height="11" rx="2"/><path d="M2.5 8.5h15M5.5 12.5h3.5"/>',
+  // Three rounded bars, short, tall and medium: the plans' tiers (the idea of Onshipy's plan icon, drawn for Statiku).
+  plan: '<rect x="3.4" y="9.6" width="3.2" height="7" rx="1.6"/><rect x="8.4" y="3.4" width="3.2" height="13.2" rx="1.6"/><rect x="13.4" y="6.6" width="3.2" height="10" rx="1.6"/>',
   file: '<path d="M11.5 3H6a1.5 1.5 0 0 0-1.5 1.5v11A1.5 1.5 0 0 0 6 17h8a1.5 1.5 0 0 0 1.5-1.5V7Z"/><path d="M11.5 3v4h4M7.5 11h5M7.5 14h3"/>',
 };
 function icon(name, size = 18) {
