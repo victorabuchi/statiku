@@ -2,6 +2,7 @@
 // numbers. The pages are one app (client/), bundled when the service starts; everything it shows comes from /api.
 //   GET    /  /login  /signup  /join/…  /settings  /sites/…    the app
 //   POST   /api/signup  /api/login  /api/logout
+//   POST   /api/password/forgot { email }    GET /api/password/reset/:token   POST { password }
 //   GET    /api/me              PATCH { name?, email? }   DELETE { password }
 //   POST   /api/me/password     { current, password }
 //   GET    /api/me/photo        POST { image: data URL }   DELETE
@@ -26,8 +27,9 @@ import { cleanDomain } from "../ingest/projects.ts";
 import { createProject, deleteProject } from "../scripts/project.ts";
 import {
   Attempts, changePassword, clearedCookie, cleanEmail, createUser, deleteAccount, emailLooksRight, endLogin,
-  findByPassword, loginCookie, startLogin, userOf, type User,
+  findByPassword, finishReset, loginCookie, resetFor, startLogin, startReset, userOf, type User,
 } from "./auth.ts";
+import { letter, smtpMailer, type Mailer } from "./mail.ts";
 import { checkInstall, fetchIcon, imageType } from "./check.ts";
 import { FILTERS, live, overview, RANGE_IDS, siteFor, stats, type Filters, type Presence, type Site } from "./stats.ts";
 
@@ -147,12 +149,16 @@ async function bundle() {
   return { js, css, icon, html, map, fonts };
 }
 
-export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (key: string) => void; presence: Presence; hub: Hub; streets: Streets }) {
+export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (key: string) => void; presence: Presence; hub: Hub; streets: Streets; mailer?: Mailer }) {
   const { pool, onSiteChanged, presence, hub, streets } = options;
+  const mailer = options.mailer ?? smtpMailer();
   const assets = await bundle();
   const signIns = new Attempts(10, 10 * 60_000);
   const checks = new Attempts(12, 60_000);
   const passwords = new Attempts(10, 10 * 60_000);
+  // Reset links: a few per address an hour, so no one can fill a stranger's inbox.
+  const resets = new Attempts(5, 15 * 60_000);
+  const resetsTo = new Attempts(3, 60 * 60_000);
 
   function sendAsset(r: Request, asset: Awaited<ReturnType<typeof bundle>>["js"], cache: string) {
     const gzip = /\bgzip\b/.test(r.req.headers["accept-encoding"] ?? "");
@@ -224,8 +230,10 @@ export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (
     return found.workspace as string;
   }
 
-  // The script's address, as this service is reached: the snippet points at wherever the dashboard is.
-  const origin = (r: Request) => process.env.PUBLIC_URL ?? `${r.secure ? "https" : "http"}://${r.req.headers.host ?? "localhost"}`;
+  // This service's address, for the snippet and for links in emails: PUBLIC_URL, or the address Render gives it. Only
+  // on a laptop does it come from the request, whose Host header anyone can write.
+  const origin = (r: Request) =>
+    process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? `${r.secure ? "https" : "http"}://${r.req.headers.host ?? "localhost"}`;
   const snippet = (r: Request, key: string) => `<script defer data-project="${key}" src="${origin(r)}/s.js"></script>`;
   const me = (user: User) => ({ id: user.id, name: user.name, email: user.email, photo: user.avatarAt ? new Date(user.avatarAt).getTime() : null });
 
@@ -258,6 +266,43 @@ export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (
     if (path === "/api/logout" && method === "POST") {
       await endLogin(pool, req);
       return json(res, 200, { ok: true }, { "set-cookie": clearedCookie(r.secure) });
+    }
+    if (path === "/api/password/forgot" && method === "POST") {
+      if (!resets.allow(r.ip)) throw new HttpError(429, "Too many tries. Wait a few minutes and try again.");
+      const email = cleanEmail((await readJson(req)).email);
+      if (!emailLooksRight(email)) throw new HttpError(400, "Enter a valid email address.");
+      // The same answer whether or not there's an account, and the email goes out after it.
+      if (resetsTo.allow(email)) {
+        void startReset(pool, email)
+          .then(async (found) => {
+            if (!found) return;
+            const url = `${origin(r)}/reset/${found.token}`;
+            await mailer({
+              to: found.user.email, subject: "Choose a new Statiku password",
+              ...letter({
+                heading: "Choose a new password",
+                lines: [`Hi ${found.user.name}, someone (hopefully you) asked to reset the password of your Statiku account.`, "The link works once, for an hour."],
+                button: { label: "Choose a new password", url },
+                foot: "If you didn't ask, ignore this email: your password stays as it is.",
+              }),
+            });
+          })
+          .catch((e) => console.error("Password reset email:", (e as Error).message));
+      }
+      return json(res, 200, { ok: true });
+    }
+    const reset = path.match(/^\/api\/password\/reset\/([\w-]{20,80})$/);
+    if (reset && method === "GET") {
+      const found = await resetFor(pool, reset[1]);
+      return json(res, 200, found ? { valid: true, email: found.email } : { valid: false });
+    }
+    if (reset && method === "POST") {
+      if (!resets.allow(r.ip)) throw new HttpError(429, "Too many tries. Wait a few minutes and try again.");
+      const password = (await readJson(req)).password;
+      if (typeof password !== "string" || password.length < 8 || password.length > 200) throw new HttpError(400, "Use a password of at least 8 characters.");
+      const found = await finishReset(pool, reset[1], password);
+      if (!found) throw new HttpError(410, "This link has expired or was already used. Ask for a new one.");
+      return json(res, 200, { user: me(found) }, { "set-cookie": loginCookie(await startLogin(pool, found.id), r.secure) });
     }
     const invitation = path.match(/^\/api\/invites\/([\w-]{20,80})(\/accept)?$/);
     if (invitation && !invitation[2] && method === "GET") {

@@ -9,6 +9,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
 import pg from "pg";
+import type { Mailer } from "../dashboard/mail.ts";
 import { createDashboard } from "../dashboard/server.ts";
 import { buildTracker } from "../tracker/build.ts";
 import { collectApp, MAX_APP_BODY } from "./app.ts";
@@ -26,6 +27,8 @@ export type Options = {
   databaseUrl: string; trustProxy: boolean; geoPath: string | URL; cityPath?: string | URL; flushMs?: number; dashboard?: boolean;
   // Street names for shared locations; tests pass their own instead of asking OpenStreetMap.
   geocode?: Geocoder;
+  // Email to the people who use the dashboard; tests keep what would be sent.
+  mailer?: Mailer;
 };
 
 const CORS = {
@@ -81,6 +84,7 @@ export async function createApp(options: Options) {
     presence: (projectId) => sessions.present(projectId),
     hub: deps.hub,
     streets: deps.streets,
+    mailer: options.mailer,
   });
   const etag = `"${createHash("sha256").update(script).digest("base64url").slice(0, 16)}"`;
 

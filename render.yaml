@@ -22,6 +22,12 @@ services:
         fromDatabase:
           name: statiku-db
           property: connectionString
+      # Email for password resets and site alerts: any SMTP service, such as
+      # smtps://LOGIN:KEY@smtp-relay.brevo.com:465, and the sender, such as Statiku <hello@yourdomain.com>.
+      - key: SMTP_URL
+        sync: false
+      - key: MAIL_FROM
+        sync: false
 
 databases:
   - name: statiku-db

@@ -109,6 +109,44 @@ export async function changePassword(pool: pg.Pool, req: IncomingMessage, userId
   await pool.query("delete from logins where user_id = $1 and token_hash <> $2", [userId, token ? tokenHash(token) : Buffer.alloc(0)]);
 }
 
+// A forgotten password: a link that works once, for an hour, mailed to the account's address. Asking again makes the
+// earlier links stop working. Null when there's no account with that email, which the caller doesn't reveal.
+const RESET_MINUTES = 60;
+export async function startReset(pool: pg.Pool, email: string): Promise<{ user: User; token: string } | null> {
+  const { rows: [user] } = await pool.query(`select id, email, name, avatar_at as "avatarAt" from users where email = $1`, [email]);
+  if (!user) return null;
+  const token = randomBytes(32).toString("base64url");
+  await pool.query("delete from password_resets where user_id = $1 or expires_at < now()", [user.id]);
+  await pool.query(
+    "insert into password_resets (token_hash, user_id, expires_at) values ($1, $2, now() + make_interval(mins => $3))",
+    [tokenHash(token), user.id, RESET_MINUTES],
+  );
+  return { user, token };
+}
+
+// Whose reset link this is, if it still works.
+export async function resetFor(pool: pg.Pool, token: string): Promise<User | null> {
+  const { rows: [user] } = await pool.query(
+    `select u.id, u.email, u.name, u.avatar_at as "avatarAt" from password_resets r join users u on u.id = r.user_id
+      where r.token_hash = $1 and r.expires_at > now() and r.used_at is null`,
+    [tokenHash(token)],
+  );
+  return user ?? null;
+}
+
+// The new password: the link is used up, and every browser signed in to the account is signed out.
+export async function finishReset(pool: pg.Pool, token: string, password: string): Promise<User | null> {
+  const { rows: [row] } = await pool.query(
+    "update password_resets set used_at = now() where token_hash = $1 and expires_at > now() and used_at is null returning user_id",
+    [tokenHash(token)],
+  );
+  if (!row) return null;
+  await pool.query("update users set password_hash = $2 where id = $1", [row.user_id, await hashPassword(password)]);
+  await pool.query("delete from logins where user_id = $1", [row.user_id]);
+  const { rows: [user] } = await pool.query(`select id, email, name, avatar_at as "avatarAt" from users where id = $1`, [row.user_id]);
+  return user;
+}
+
 // Closing an account: the workspaces only this person was in go with it, with their sites and everything they
 // collected; workspaces shared with others stay.
 export async function deleteAccount(pool: pg.Pool, userId: string, deleteSite: (site: { id: string; key: string }) => Promise<void>) {

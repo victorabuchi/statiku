@@ -415,3 +415,5 @@ details.more .card-body { padding-top: 0; display: grid; gap: 12px; }
   .dot.pulse { animation: none; }
   .sidebar { transition: none; }
 }
+.auth .forgot { margin-top: -6px; text-align: center; }
+.auth .forgot a { color: var(--text-2); }

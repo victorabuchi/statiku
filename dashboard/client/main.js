@@ -392,9 +392,73 @@ function authPage(mode) {
     h("div", { class: "card" },
       h("div", {}, h("h1", { text: signup ? "Create your account" : "Sign in" }),
         h("p", { class: "sub", text: signup ? "Add your website and see your visitors in minutes. No credit card." : "See who's visiting your websites." })),
-      authForm(mode, { onDone: () => go(safeNext ?? (signup ? "/sites/new" : "/"), true) })),
+      authForm(mode, { onDone: () => go(safeNext ?? (signup ? "/sites/new" : "/"), true) }),
+      signup ? null : h("p", { class: "forgot" }, h("a", { href: "/forgot", text: "Forgot your password?" }))),
     h("p", { class: "switch" }, signup ? "Already have an account? " : "New to Statiku? ",
       h("a", { href: `${signup ? "/login" : "/signup"}${safeNext ? `?next=${encodeURIComponent(safeNext)}` : ""}`, text: signup ? "Sign in" : "Create an account" })));
+}
+
+// A forgotten password: an email with a link, then a new password, which signs you in.
+function forgotPage() {
+  const error = h("div", { class: "error", role: "alert", hidden: true });
+  const email = h("input", { class: "input big", id: "f-email", name: "email", type: "email", autocomplete: "email", required: true });
+  const button = h("button", { class: "btn primary big", type: "submit", text: "Email me a link" });
+  const box = h("div", { class: "card" },
+    h("div", {}, h("h1", { text: "Forgot your password?" }), h("p", { class: "sub", text: "Enter your account's email and we'll send you a link to choose a new one." })),
+    h("form", {
+      class: "form", novalidate: true,
+      onsubmit: async (e) => {
+        e.preventDefault();
+        button.disabled = true;
+        error.hidden = true;
+        try {
+          await api("/api/password/forgot", { method: "POST", body: { email: email.value } });
+          box.replaceChildren(h("div", {}, h("h1", { text: "Check your email" }),
+            h("p", { class: "sub", text: `If there's an account for ${email.value.trim()}, a link to choose a new password is on its way. It works for an hour.` })),
+            h("a", { class: "btn big", href: "/login", text: "Back to sign in" }));
+        } catch (err) {
+          error.textContent = err.message;
+          error.hidden = false;
+          button.disabled = false;
+        }
+      },
+    }, error, h("div", { class: "field" }, h("label", { for: "f-email", text: "Email" }), email), button));
+  setTimeout(() => email.focus());
+  return authLayout(box, h("p", { class: "switch" }, "Remembered it? ", h("a", { href: "/login", text: "Sign in" })));
+}
+
+async function resetPage(token) {
+  const info = await api(`/api/password/reset/${token}`);
+  if (!info.valid) {
+    return authLayout(h("div", { class: "card" }, h("div", {}, h("h1", { text: "This link doesn't work any more" }),
+      h("p", { class: "sub", text: "Reset links work once, for an hour. Ask for a new one." })),
+      h("a", { class: "btn primary big", href: "/forgot", text: "Send a new link" })));
+  }
+  const error = h("div", { class: "error", role: "alert", hidden: true });
+  const password = h("input", { class: "input big", id: "f-password", name: "password", type: "password", autocomplete: "new-password", required: true });
+  const button = h("button", { class: "btn primary big", type: "submit", text: "Save and sign in" });
+  setTimeout(() => password.focus());
+  return authLayout(h("div", { class: "card" },
+    h("div", {}, h("h1", { text: "Choose a new password" }), h("p", { class: "sub", text: `For ${info.email}. You'll be signed out everywhere else.` })),
+    h("form", {
+      class: "form", novalidate: true,
+      onsubmit: async (e) => {
+        e.preventDefault();
+        button.disabled = true;
+        error.hidden = true;
+        try {
+          const { user } = await api(`/api/password/reset/${token}`, { method: "POST", body: { password: password.value } });
+          state.user = user;
+          state.sites = null;
+          toast("Your new password is saved");
+          go("/", true);
+        } catch (err) {
+          error.textContent = err.message;
+          error.hidden = false;
+          button.disabled = false;
+        }
+      },
+    }, error, h("div", { class: "field" }, h("label", { for: "f-password", text: "New password" }), password, h("span", { class: "help", text: "At least 8 characters." })), button)));
 }
 
 async function joinPage(token) {
@@ -1516,6 +1580,7 @@ async function render() {
   const path = location.pathname;
   const auth = path === "/login" || path === "/signup";
   const join = path.match(/^\/join\/([\w-]{20,80})$/);
+  const reset = path.match(/^\/reset\/([\w-]{20,80})$/);
   try {
     if (state.user === undefined) {
       const res = await fetch("/api/me", { credentials: "same-origin" });
@@ -1525,6 +1590,12 @@ async function render() {
     if (join) {
       document.title = "Join a team · Statiku";
       const content = await joinPage(join[1]);
+      if (run === rendering) root.replaceChildren(content);
+      return;
+    }
+    if (reset || path === "/forgot") {
+      document.title = "Choose a new password · Statiku";
+      const content = reset ? await resetPage(reset[1]) : forgotPage();
       if (run === rendering) root.replaceChildren(content);
       return;
     }

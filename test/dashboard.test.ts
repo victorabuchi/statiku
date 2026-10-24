@@ -19,6 +19,12 @@ const CITIES = existsSync(new URL("../data/city.mmdb", import.meta.url)) ? new U
 let app: Awaited<ReturnType<typeof createApp>>;
 let pool: pg.Pool;
 let base: string;
+// What the app would have emailed.
+const mailbox: { to: string; subject: string; text: string }[] = [];
+const mailFor = async (to: string) => {
+  for (let i = 0; i < 40 && !mailbox.some((m) => m.to === to); i++) await new Promise((r) => setTimeout(r, 25));
+  return mailbox.filter((m) => m.to === to).at(-1);
+};
 
 before(async () => {
   if (skip) return;
@@ -33,6 +39,7 @@ before(async () => {
     databaseUrl: url!, trustProxy: true, geoPath: new URL("../data/country.mmdb", import.meta.url), cityPath: CITIES, flushMs: 60_000,
     // Instead of OpenStreetMap: every shared point is 8 metres from the same house in Kuopio.
     geocode: async () => ({ street: "Särkiniementie", number: "30", numberMetres: 8, area: "Saaristokaupunki", city: "Kuopio", region: "North Savo", country: "FI" }),
+    mailer: async (mail) => void mailbox.push(mail),
   });
   await new Promise<void>((resolve) => app.server.listen(0, resolve));
   base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
@@ -494,4 +501,37 @@ test("exact location: only on sites that ask, only from visitors who share it, n
     for (const secret of ["62.89", "27.67", "Särkiniementie", "Saaristokaupunki"]) assert.ok(!dump.includes(secret), `${secret} in ${table_name}`);
   }
   assert.equal((await pool.query("select count(*)::int as n from events where name in ('_loc', '_noloc')")).rows[0].n, 0);
+});
+
+test("a forgotten password: a link by email that works once, for that account, and signs out everywhere", { skip }, async () => {
+  const owner = await signUp("forgetful@example.com");
+  const other = browser();
+  assert.equal((await other("/api/login", { method: "POST", body: { email: "forgetful@example.com", password: PASSWORD } })).status, 200);
+
+  // The same answer for an address with no account, and nothing is sent to it.
+  const stranger = browser();
+  assert.deepEqual((await stranger("/api/password/forgot", { method: "POST", body: { email: "nobody@example.com" } })).data, { ok: true });
+  assert.deepEqual((await stranger("/api/password/forgot", { method: "POST", body: { email: "Forgetful@Example.com " } })).data, { ok: true });
+  const mail = await mailFor("forgetful@example.com");
+  assert.ok(mail, "a reset email");
+  assert.equal(mailbox.filter((m) => m.to === "nobody@example.com").length, 0);
+  const link = mail!.text.match(/\/reset\/([\w-]+)/)!;
+  assert.ok(link);
+
+  // The link says whose account it is, takes a new password, and signs in with it.
+  assert.deepEqual((await stranger(`/api/password/reset/${link[1]}`)).data, { valid: true, email: "forgetful@example.com" });
+  assert.equal((await stranger(`/api/password/reset/${link[1]}`, { method: "POST", body: { password: "short" } })).status, 400);
+  const done = await stranger(`/api/password/reset/${link[1]}`, { method: "POST", body: { password: "a brand new password" } });
+  assert.equal(done.status, 200);
+  assert.equal(done.data.user.email, "forgetful@example.com");
+  assert.equal((await stranger("/api/me")).status, 200);
+
+  // Once only; the old password is gone, and so are the other sign-ins.
+  assert.deepEqual((await stranger(`/api/password/reset/${link[1]}`)).data, { valid: false });
+  assert.equal((await stranger(`/api/password/reset/${link[1]}`, { method: "POST", body: { password: "another one entirely" } })).status, 410);
+  assert.equal((await owner("/api/me")).status, 401);
+  assert.equal((await other("/api/me")).status, 401);
+  assert.equal((await browser()("/api/login", { method: "POST", body: { email: "forgetful@example.com", password: PASSWORD } })).status, 401);
+  assert.equal((await browser()("/api/login", { method: "POST", body: { email: "forgetful@example.com", password: "a brand new password" } })).status, 200);
+  assert.equal((await stranger("/api/password/reset/not-a-real-token-at-all-0123")).data.valid, false);
 });
