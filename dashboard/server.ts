@@ -646,7 +646,9 @@ export async function createDashboard(options: {
       const product = plan && polar.products[`${plan.id}:${interval}`];
       if (!plan || !product || !polar.token) throw new HttpError(400, "That plan can't be bought here yet.");
       const own = await ownWorkspace(user.id);
-      const url = await checkoutUrl(polarRequest, polar, { product, workspaceId: own.id, email: user.email, success: `${origin(r)}/settings?billing=done#plan` })
+      // A second checkout would start a second subscription: a paying workspace changes plan in Polar's portal.
+      if (own.customer && access(own) === "paid" && !own.cancelAtPeriodEnd) throw new HttpError(409, "You already have a plan. Change it under Invoices, card and cancelling.");
+      const url = await checkoutUrl(polarRequest, polar, { product, workspaceId: own.id, email: user.email, success: `${origin(r)}/plan?billing=done` })
         .catch((e) => {
           throw new HttpError(502, (e as Error).message);
         });
@@ -655,7 +657,7 @@ export async function createDashboard(options: {
     if (path === "/api/billing/portal" && method === "POST") {
       if (!polar.token) throw new HttpError(400, "Billing isn't set up on this server yet.");
       const own = await ownWorkspace(user.id);
-      const url = await portalUrl(polarRequest, polar, own.id, `${origin(r)}/settings#plan`);
+      const url = await portalUrl(polarRequest, polar, own.id, `${origin(r)}/plan`);
       if (!url) throw new HttpError(404, "There's no billing account yet. Choose a plan first.");
       return json(res, 200, { url });
     }

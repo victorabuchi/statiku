@@ -828,7 +828,7 @@ test("plans: a trial, a checkout with Polar, its webhook, and reports that close
   const checkout = await owner("/api/billing/checkout", { method: "POST", body: { plan: "growth", interval: "year" } });
   assert.match(checkout.data.url, /^https:\/\/polar\.test\/checkout\//);
   assert.deepEqual([polar.checkouts.at(-1).products, polar.checkouts.at(-1).external_customer_id, polar.checkouts.at(-1).customer_email], [["prod-growth-year"], workspace, "paying@example.com"]);
-  assert.match(polar.checkouts.at(-1).success_url, /\/settings\?billing=done#plan$/);
+  assert.match(polar.checkouts.at(-1).success_url, /\/plan\?billing=done$/);
   assert.equal((await owner("/api/billing/portal", { method: "POST" })).status, 404);
 
   // Polar's webhook: anything not signed with the secret is refused; a signed one sets the plan.
@@ -849,6 +849,8 @@ test("plans: a trial, a checkout with Polar, its webhook, and reports that close
   assert.deepEqual([billing.access, billing.plan, billing.planName, billing.limit, billing.status], ["paid", "growth", "Growth", 100_000, "active"]);
   polar.customers.add(workspace);
   assert.equal((await owner("/api/billing/portal", { method: "POST" })).data.url, "https://polar.test/portal");
+  // Paying already: another plan is changed in Polar's portal, never bought as a second subscription.
+  assert.equal((await owner("/api/billing/checkout", { method: "POST", body: { plan: "starter", interval: "month" } })).status, 409);
 
   // An older delivery that arrives late changes nothing.
   assert.equal(await deliver(subscription("canceled"), Math.floor(Date.now() / 1000) - 120), 202);

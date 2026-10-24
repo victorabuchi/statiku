@@ -460,3 +460,12 @@ details.more .card-body { padding-top: 0; display: grid; gap: 12px; }
 .plan .price small { margin-left: 4px; color: var(--text-2); }
 .plan .btn { margin-top: 6px; }
 @media (max-width: 767px) { .banner { width: calc(100% - 32px); } }
+.plan-summary { display: grid; grid-template-columns: 1.2fr 1fr auto; align-items: center; gap: 18px 28px; padding: 20px 22px; }
+.plan-summary .what, .plan-summary .usage { display: grid; gap: 4px; min-width: 0; }
+.plan-summary .label { font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-2); }
+.plan-summary b { font-size: 22px; line-height: 28px; font-weight: 700; letter-spacing: -0.02em; }
+.plan-summary .usage .meter-bar { margin: 4px 0 2px; }
+.included { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px 20px; }
+.included li { display: flex; gap: 8px; align-items: flex-start; }
+.included svg { flex: none; margin-top: 2px; color: var(--green); }
+@media (max-width: 767px) { .plan-summary { grid-template-columns: 1fr; } }
