@@ -1,7 +1,7 @@
 // Projects by their public key, cached for a minute (unknown keys too, so a bad snippet can't hammer the database).
 import type pg from "pg";
 
-export type Project = { id: string; key: string; domains: string[] };
+export type Project = { id: string; key: string; domains: string[]; askLocation: boolean };
 
 const TTL = 60_000;
 
@@ -16,7 +16,7 @@ export class Projects {
   async byKey(key: string, now = Date.now()): Promise<Project | null> {
     const hit = this.cache.get(key);
     if (hit && now - hit.at < TTL) return hit.project;
-    const { rows } = await this.pool.query("select id, key, domains from projects where key = $1", [key]);
+    const { rows } = await this.pool.query(`select id, key, domains, ask_location as "askLocation" from projects where key = $1`, [key]);
     const project: Project | null = rows[0] ?? null;
     if (this.cache.size > 10_000) this.cache.clear();
     this.cache.set(key, { project, at: now });

@@ -21,6 +21,7 @@ import { gzipSync } from "node:zlib";
 import { build } from "esbuild";
 import type pg from "pg";
 import type { Hub } from "../ingest/live.ts";
+import type { Streets } from "../ingest/streets.ts";
 import { cleanDomain } from "../ingest/projects.ts";
 import { createProject, deleteProject } from "../scripts/project.ts";
 import {
@@ -37,7 +38,7 @@ const ICON_DAYS = 7;
 const INVITE_DAYS = 7;
 const HEADERS = {
   "content-security-policy":
-    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "default-src 'self'; img-src 'self' data: blob: https://tile.openstreetmap.org; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   "x-content-type-options": "nosniff",
   "referrer-policy": "same-origin",
 };
@@ -138,8 +139,8 @@ async function bundle() {
   return { js, css, icon, html, map };
 }
 
-export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (key: string) => void; presence: Presence; hub: Hub }) {
-  const { pool, onSiteChanged, presence, hub } = options;
+export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (key: string) => void; presence: Presence; hub: Hub; streets: Streets }) {
+  const { pool, onSiteChanged, presence, hub, streets } = options;
   const assets = await bundle();
   const signIns = new Attempts(10, 10 * 60_000);
   const checks = new Attempts(12, 60_000);
@@ -379,7 +380,10 @@ export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (
         [site.id],
       );
       return json(res, 200, {
-        site: { key: site.key, name: site.name, domains: site.domains, timezone: site.timezone, role: site.role, createdAt: info.created_at, lastEventAt: info.last_event_at },
+        site: {
+          key: site.key, name: site.name, domains: site.domains, timezone: site.timezone, role: site.role, askLocation: site.askLocation,
+          createdAt: info.created_at, lastEventAt: info.last_event_at,
+        },
         snippet: snippet(r, site.key),
         scriptUrl: `${origin(r)}/s.js`,
       });
@@ -396,10 +400,11 @@ export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (
         if (!domains.length) throw new HttpError(400, "Keep at least one domain.");
       }
       const timezone = body.timezone === undefined ? site.timezone : zoneOf(body.timezone);
-      await pool.query("update projects set name = $2, domains = $3, timezone = $4 where id = $1", [site.id, name, domains, timezone]);
+      const askLocation = typeof body.askLocation === "boolean" ? body.askLocation : site.askLocation;
+      await pool.query("update projects set name = $2, domains = $3, timezone = $4, ask_location = $5 where id = $1", [site.id, name, domains, timezone, askLocation]);
       onSiteChanged(site.key);
       if (domains[0] !== site.domains[0]) void refreshIcon({ id: site.id, domains });
-      return json(res, 200, { site: { key: site.key, name, domains, timezone } });
+      return json(res, 200, { site: { key: site.key, name, domains, timezone, askLocation } });
     }
     if (action === "" && method === "DELETE") {
       ownerOnly(site);
@@ -434,7 +439,7 @@ export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (
         from: url.searchParams.get("from"), to: url.searchParams.get("to"), by: url.searchParams.get("by"),
       }));
     }
-    if (action === "/live" && method === "GET") return json(res, 200, await live(pool, site, presence(site.id)));
+    if (action === "/live" && method === "GET") return json(res, 200, await live(pool, site, presence(site.id), streets));
     if (action === "/stream" && method === "GET") {
       // Server-sent events: each event on the site as it's collected, and a nudge when someone arrives or leaves.
       res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", "x-accel-buffering": "no", ...HEADERS });

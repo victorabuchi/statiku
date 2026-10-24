@@ -29,7 +29,11 @@ before(async () => {
   await migrate(url!, () => {});
   pool = new pg.Pool({ connectionString: url });
   // With the city database (npm run geo), live visitors get a city too; the tests check it's never stored.
-  app = await createApp({ databaseUrl: url!, trustProxy: true, geoPath: new URL("../data/country.mmdb", import.meta.url), cityPath: CITIES, flushMs: 60_000 });
+  app = await createApp({
+    databaseUrl: url!, trustProxy: true, geoPath: new URL("../data/country.mmdb", import.meta.url), cityPath: CITIES, flushMs: 60_000,
+    // Instead of OpenStreetMap: every shared point is on the same street in Kuopio.
+    geocode: async () => ({ street: "Särkiniementie", area: "Saaristokaupunki", city: "Kuopio", region: "North Savo", country: "FI" }),
+  });
   await new Promise<void>((resolve) => app.server.listen(0, resolve));
   base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
 });
@@ -432,4 +436,52 @@ test("a visitor's city, from the city database", { skip: !CITIES && "run npm run
   assert.equal(espoo.region, "Uusimaa");
   assert.ok(!/\(/.test(geo.place("141.30.1.1")?.city ?? ""), "districts are left off");
   assert.equal(new Geo(new URL("../data/country.mmdb", import.meta.url)).place("193.166.3.2"), null);
+});
+
+test("exact location: only on sites that ask, only from visitors who share it, never stored", { skip }, async () => {
+  const owner = await signUp("location@example.com");
+  const { key } = (await owner("/api/sites", { method: "POST", body: { address: "where.example", timezone: "UTC" } })).data.site;
+  const config = (ip: string) => fetch(`${base}/v1/site?k=${key}`, { headers: { "user-agent": SAFARI, "x-forwarded-for": ip } });
+  const share = (ip: string, name: string, props?: object) =>
+    fetch(`${base}/e`, { method: "POST", headers: { "user-agent": SAFARI, "x-forwarded-for": ip }, body: JSON.stringify({ k: key, n: name, u: "https://where.example/", p: props }) });
+  const live = async () => (await owner(`/api/sites/${key}/live`)).data;
+
+  // Off: the script isn't told to ask, the answer can be cached, and a shared point is ignored.
+  const off = await config("91.152.40.31");
+  assert.deepEqual(await off.json(), { ask: false, prompt: false });
+  assert.match(off.headers.get("cache-control")!, /max-age/);
+  assert.equal(off.headers.get("access-control-allow-origin"), "*");
+  await visit(key, "https://where.example/", "91.152.40.31");
+  await share("91.152.40.31", "_loc", { lat: 62.8924, lon: 27.6782 });
+  assert.deepEqual((await live()).exact, []);
+
+  // On: each visitor is asked once a visit; "not now" holds for the rest of it.
+  assert.equal((await owner(`/api/sites/${key}`, { method: "PATCH", body: { askLocation: true } })).data.site.askLocation, true);
+  assert.equal((await owner(`/api/sites/${key}`)).data.site.askLocation, true);
+  await visit(key, "https://where.example/", "91.152.40.32");
+  const asked = await config("91.152.40.32");
+  assert.deepEqual(await asked.json(), { ask: true, prompt: true, site: "where.example" });
+  assert.equal(asked.headers.get("cache-control"), "no-store");
+  await share("91.152.40.32", "_noloc");
+  assert.equal((await (await config("91.152.40.32")).json()).prompt, false);
+
+  // Shared: the visitor is on their street, in that street's city, whatever the IP address suggested.
+  await visit(key, "https://where.example/", "91.152.40.33");
+  await share("91.152.40.33", "_loc", { lat: 62.89237, lon: 27.67821, acc: 12 });
+  for (let i = 0; i < 20 && !(await live()).exact[0]?.street; i++) await new Promise((r) => setTimeout(r, 50));
+  const now = await live();
+  assert.deepEqual(now.exact, [{ lat: 62.892, lon: 27.678, street: "Särkiniementie", area: "Saaristokaupunki", city: "Kuopio", country: "FI", v: 1 }]);
+  const kuopio = now.cities.find((c: any) => c.city === "Kuopio");
+  assert.equal(kuopio.exact, 1);
+  assert.equal(kuopio.region, "North Savo");
+  assert.equal((await (await config("91.152.40.33")).json()).prompt, false);
+
+  // Nothing of it is stored: not the point, not the street, not as an event.
+  await app.writer.flush();
+  const { rows: tables } = await pool.query("select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE'");
+  for (const { table_name } of tables) {
+    const dump = JSON.stringify((await pool.query(`select * from ${table_name}`)).rows);
+    for (const secret of ["62.89", "27.67", "Särkiniementie", "Saaristokaupunki"]) assert.ok(!dump.includes(secret), `${secret} in ${table_name}`);
+  }
+  assert.equal((await pool.query("select count(*)::int as n from events where name in ('_loc', '_noloc')")).rows[0].n, 0);
 });

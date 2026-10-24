@@ -3,8 +3,9 @@
 // comes from the visits it holds in memory, so arrivals and departures show at once.
 import type pg from "pg";
 import type { Session } from "../ingest/sessions.ts";
+import type { Streets } from "../ingest/streets.ts";
 
-export type Site = { id: string; key: string; name: string; domains: string[]; timezone: string; role: string };
+export type Site = { id: string; key: string; name: string; domains: string[]; timezone: string; role: string; askLocation: boolean };
 export type Presence = (projectId: string) => Session[];
 
 // Narrowing a report to one value of a breakdown. A page means the visits that viewed that page.
@@ -96,7 +97,7 @@ const APP_LIFECYCLE = "('install', 'active', 'update', 'state')";
 
 export async function siteFor(pool: pg.Pool, userId: string, key: string): Promise<Site | null> {
   const { rows: [site] } = await pool.query(
-    `select p.id, p.key, p.name, p.domains, p.timezone, m.role from projects p
+    `select p.id, p.key, p.name, p.domains, p.timezone, m.role, p.ask_location as "askLocation" from projects p
        join memberships m on m.workspace_id = p.workspace_id
       where p.key = $1 and m.user_id = $2`,
     [key, userId],
@@ -264,7 +265,7 @@ function countBy(present: Session[], pick: (s: Session) => string | null) {
 // Right now: who is on the site, where they are and what they're reading (from memory, so it's current to the
 // second), today's totals, page views minute by minute for the last half hour, and the latest events. No visitor
 // hash leaves the server.
-export async function live(pool: pg.Pool, site: Site, present: Session[]) {
+export async function live(pool: pg.Pool, site: Site, present: Session[], streets: Streets) {
   const tz = site.timezone;
   const q = async (sql: string, params: unknown[] = [site.id]) => (await pool.query(sql, params)).rows;
   const [[today], perMinute, recent] = await Promise.all([
@@ -279,18 +280,43 @@ export async function live(pool: pg.Pool, site: Site, present: Session[]) {
     q(`select ts, name, path, country, source, device, browser, os, install_id is not null as app
          from events where project_id = $1 and ts > now() - interval '30 minutes' order by ts desc limit 25`),
   ]);
-  // Cities for the zoomed-in globe: each with its centre and how many visitors are there now.
-  const cities = new Map<string, { country: string | null; city: string; region: string | null; lat: number; lon: number; visitors: Set<string> }>();
+  // Where each visitor is: a visitor who shared their exact location is at their point, in the city and country their
+  // street is in (their device knows better than their IP address); anyone else is at the centre of the city their IP
+  // address suggests.
+  const streetOf = (s: Session) => (s.exact ? streets.at(s.exact.lat, s.exact.lon) : null);
+  const countryOf = (s: Session) => streetOf(s)?.country ?? s.country;
+  const placeOf = (s: Session) => {
+    const street = streetOf(s);
+    if (s.exact && street?.city) return { city: street.city, region: street.region, lat: s.exact.lat, lon: s.exact.lon };
+    return s.place ?? null;
+  };
+  // Cities for the zoomed-in globe: each with a point and how many visitors are there now.
+  const cities = new Map<string, { country: string | null; city: string; region: string | null; lat: number; lon: number; visitors: Set<string>; sharing: Set<string> }>();
+  // Shared points, for the globe at street level, with their street names once OpenStreetMap has answered.
+  const exact = new Map<string, { lat: number; lon: number; street: string | null; area: string | null; city: string | null; country: string | null; visitors: Set<string> }>();
   for (const s of present) {
-    if (!s.place) continue;
-    const key = `${s.country}|${s.place.city}`;
-    if (!cities.has(key)) cities.set(key, { country: s.country, ...s.place, visitors: new Set() });
-    cities.get(key)!.visitors.add(s.visitor);
+    const place = placeOf(s);
+    if (place) {
+      const key = `${countryOf(s)}|${place.city}`;
+      if (!cities.has(key)) cities.set(key, { country: countryOf(s), ...place, visitors: new Set(), sharing: new Set() });
+      cities.get(key)!.visitors.add(s.visitor);
+      if (s.exact) cities.get(key)!.sharing.add(s.visitor);
+    }
+    if (s.exact) {
+      const key = `${s.exact.lat},${s.exact.lon}`;
+      const street = streets.at(s.exact.lat, s.exact.lon);
+      if (!exact.has(key)) {
+        exact.set(key, { ...s.exact, street: street?.street ?? null, area: street?.area ?? null, city: street?.city ?? s.place?.city ?? null, country: countryOf(s), visitors: new Set() });
+      }
+      exact.get(key)!.visitors.add(s.visitor);
+    }
   }
   return {
     visitors: new Set(present.map((s) => s.visitor)).size,
-    countries: countBy(present, (s) => s.country),
-    cities: [...cities.values()].map(({ visitors, ...c }) => ({ ...c, v: visitors.size })).sort((a, b) => b.v - a.v || a.city.localeCompare(b.city)),
+    countries: countBy(present, countryOf),
+    cities: [...cities.values()].map(({ visitors, sharing, ...c }) => ({ ...c, v: visitors.size, exact: sharing.size })).sort((a, b) => b.v - a.v || a.city.localeCompare(b.city)),
+    exact: [...exact.values()].map(({ visitors, ...p }) => ({ ...p, v: visitors.size })),
+    asksLocation: site.askLocation,
     pages: countBy(present, (s) => s.exitPath),
     sources: countBy(present, (s) => s.source),
     devices: countBy(present, (s) => s.device),

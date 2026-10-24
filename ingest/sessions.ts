@@ -28,6 +28,10 @@ export type Session = Source & {
   left?: boolean;
   // The approximate city, for the live globe. Memory only: it isn't one of the columns written.
   place?: Place | null;
+  // On sites that ask: whether this visitor has been asked to share their exact location, and the point they shared,
+  // rounded to about 100 metres. Memory only, like the city.
+  asked?: boolean;
+  exact?: { lat: number; lon: number } | null;
 };
 
 // What a new session starts with: the first event's source, page and visitor details.

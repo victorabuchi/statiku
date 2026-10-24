@@ -1069,13 +1069,16 @@ async function livePage(key) {
   const locationsSub = h("span", { class: "sub", text: "Click one to fly there" });
   const locations = h("div"), pages = h("div"), perMinute = h("div", { class: "chart" }), sources = h("div"), feed = h("div", { class: "feed" });
   let latest = null;
-  let view = { country: null, region: null, city: null };
+  let view = { country: null, region: null, city: null, street: null };
+  const osm = h("div", { class: "osm", hidden: true }, "Map © ", h("a", { href: "https://www.openstreetmap.org/copyright", target: "_blank", rel: "noopener", "data-external": "", text: "OpenStreetMap" }), " contributors");
 
   const globe = createGlobe(canvas, {
     onHover: (dot, x, y) => {
       if (!dot) return void (tip.hidden = true);
-      const where = dot.city ? [dot.city, dot.region, countryName(dot.code)].filter(Boolean).join(", ") : dot.unplaced ? `${countryName(dot.code)}, city unknown` : countryName(dot.code);
-      tip.replaceChildren(h("b", {}, `${flag(dot.code)} ${where}`), h("span", { class: "muted", text: `${dot.v} ${dot.v === 1 ? "visitor" : "visitors"} now` }));
+      const where = dot.exact ? [dot.street ?? dot.point.area ?? "Shared location", dot.city].filter(Boolean).join(", ")
+        : dot.city ? [dot.city, dot.region, countryName(dot.code)].filter(Boolean).join(", ") : dot.unplaced ? `${countryName(dot.code)}, city unknown` : countryName(dot.code);
+      tip.replaceChildren(h("b", {}, `${flag(dot.code)} ${where}`),
+        h("span", { class: "muted", text: `${dot.v} ${dot.v === 1 ? "visitor" : "visitors"} now${dot.exact ? ", shared by them" : dot.city ? ", approximately" : ""}` }));
       tip.style.left = `${x}px`;
       tip.style.top = `${y}px`;
       tip.hidden = false;
@@ -1085,6 +1088,7 @@ async function livePage(key) {
       drawCrumbs();
       if (latest) drawLocations();
     },
+    onTiles: (shown) => (osm.hidden = !shown),
   });
   onLeave(() => globe.destroy());
   const controls = h("div", { class: "globe-controls" },
@@ -1092,7 +1096,7 @@ async function livePage(key) {
     h("button", { type: "button", "aria-label": "Zoom out", title: "Zoom out", onclick: () => globe.zoomBy(0.5) }, icon("minus", 16)),
     h("button", { type: "button", "aria-label": "The whole world", title: "The whole world", onclick: () => globe.world() }, icon("globe", 16)));
   const globeCard = h("div", { class: "card globe-card" }, canvas,
-    h("div", { class: "over" }, h("div", { class: "where" }, h("b", { text: "Visitors right now" }), crumbs), overCount), caption, controls, tip);
+    h("div", { class: "over" }, h("div", { class: "where" }, h("b", { text: "Visitors right now" }), crumbs), overCount), caption, controls, osm, tip);
 
   // World › Finland › Kuopio: each part flies back to it.
   function drawCrumbs() {
@@ -1100,7 +1104,8 @@ async function livePage(key) {
     if (view.country) {
       parts.push(h("span", { text: "›" }), h("button", { type: "button", text: countryName(view.country), onclick: () => globe.focusCountry(view.country) }));
       if (view.region && view.region !== view.city) parts.push(h("span", { text: "›" }), h("span", { class: "region", text: view.region }));
-      if (view.city) parts.push(h("span", { text: "›" }), h("b", { text: view.city }));
+      if (view.city) parts.push(h("span", { text: "›" }), view.street ? h("button", { type: "button", text: view.city, onclick: () => { const c = latest?.cities.find((x) => x.city === view.city); if (c) globe.focusCity(c); } }) : h("b", { text: view.city }));
+      if (view.street) parts.push(h("span", { text: "›" }), h("b", { text: view.street }));
     }
     crumbs.replaceChildren(...parts);
   }
@@ -1122,9 +1127,13 @@ async function livePage(key) {
     const rows = [...here.map((c) => ({ label: c.city, region: c.region, v: c.v, city: c })), ...(unplaced > 0 ? [{ label: "City unknown", v: unplaced }] : [])];
     locationsTitle.textContent = `${flag(view.country)} ${countryName(view.country)}`;
     locationsSub.textContent = "Cities, approximately";
+    // In a city, the streets of the visitors there who shared their location.
+    const points = view.city ? d.exact.filter((p) => p.city === view.city && p.country === view.country) : [];
     locations.replaceChildren(
       rows.length ? bars(rows, { head: ["City", "Visitors"], label: (r) => (r.region && r.region !== r.label ? `${r.label} · ${r.region}` : r.label), onPick: (r) => globe.focusCity(r.city), canPick: (r) => !!r.city, active: view.city })
         : h("p", { class: "empty-note", text: "No one here right now." }),
+      points.length ? h("div", { style: { marginTop: "14px" } }, bars(points.map((p) => ({ label: p.street ?? p.area ?? "Shared location", v: p.v, point: p })),
+        { head: [`Shared locations in ${view.city}`, "Visitors"], onPick: (r) => globe.focusPoint(r.point), active: view.street })) : null,
       h("button", { class: "btn plain", type: "button", style: { marginTop: "8px" }, onclick: () => globe.world() }, icon("back", 14), " All countries"));
   }
 
@@ -1193,7 +1202,7 @@ async function livePage(key) {
         h("span", { class: "delta", text: "On the site this minute" })),
       ...[["Visits today", d.today.visits], ["Visitors today", d.today.visitors], ["Page views today", d.today.pageviews]].map(([label, v]) =>
         h("div", { class: "card kpi" }, h("span", { class: "label", text: label }), h("span", { class: "value num", text: int(v) }), h("span", { class: "delta", text: "Since midnight" }))));
-    globe.update(d.countries, d.cities);
+    globe.update(d.countries, d.cities, d.exact);
     overCount.textContent = d.visitors ? `${d.visitors} in ${d.countries.length} ${d.countries.length === 1 ? "country" : "countries"}` : "";
     canvas.setAttribute("aria-label", d.visitors ? `Visitors right now: ${d.countries.map((c) => `${c.v} in ${countryName(c.label)}`).join(", ")}` : "No visitors right now");
     caption.textContent = d.visitors
@@ -1226,7 +1235,8 @@ async function livePage(key) {
     h("p", { class: "faint", style: { fontSize: "12px", marginTop: "4px" } },
       "Locations are approximate, from each visitor's IP address (",
       h("a", { href: "https://db-ip.com", target: "_blank", rel: "noopener", "data-external": "", text: "IP Geolocation by DB-IP" }),
-      "). Cities are used only for this view while people are on the site, and are never stored."));
+      "). Cities are used only for this view while people are on the site, and are never stored. ",
+      site?.role === "owner" ? h("a", { href: `/sites/${key}/settings#location`, text: "Exact locations from visitors who agree to share them" }) : null));
 }
 
 // ---------- A site's settings ----------
@@ -1272,6 +1282,25 @@ async function siteSettingsPage(key) {
   };
   const copyButton = h("button", { class: "btn copy", type: "button", onclick: () => copy(snippet, copyButton) }, icon("copy", 14), "Copy");
 
+  // Exact location: off unless the owner turns it on, and then each visitor decides for themselves.
+  const asking = h("input", { type: "checkbox", id: "s-location", checked: !!site.askLocation, disabled: !owner });
+  const policy = "If you choose to share your location when our site asks, we see roughly which street you're on, on a live map of the people on the site right now. We see it only while you're on the site, and it isn't stored. The street name is looked up from OpenStreetMap, which receives that point rounded to about 100 metres.";
+  const copyPolicy = h("button", { class: "btn copy", type: "button", onclick: () => copy(policy, copyPolicy) }, icon("copy", 14), "Copy");
+  const saveLocation = h("button", {
+    class: "btn primary", type: "button", text: "Save", hidden: !owner,
+    onclick: () => saveSite({ askLocation: asking.checked }, saveLocation, asking.checked ? "Visitors will be asked to share their location" : "Visitors won't be asked any more"),
+  });
+  const locationCard = card("Exact location in the live view", h("div", { class: "form" },
+    h("p", { class: "muted", text: "The live view places visitors in their approximate city, from their IP address. To see the street someone is on, they have to share it themselves. With this on, visitors see this a few seconds after they arrive:" }),
+    h("div", { class: "ask-preview", "aria-hidden": "true" }, h("b", { text: "Share your location?" }),
+      h("p", { text: `${site.domains[0]} would like to show where its visitors are on a live map. Your location is seen only while you're on the site, and is never stored.` }),
+      h("div", {}, h("span", { text: "Not now" }), h("span", { class: "yes", text: "Share" }))),
+    h("p", { class: "muted", text: "Only if they tap Share does their browser ask them, and only if they allow it there do they appear on their street in your live view, while they're on the site. Their location is never stored, and they aren't asked again during their visit. Expect most visitors to say no." }),
+    h("label", { class: "check", for: "s-location" }, asking, "Ask my visitors to share their location"),
+    h("div", { class: "field" }, h("span", { style: { fontWeight: 550 }, text: "Add this to your privacy policy before you turn it on:" }), h("div", { class: "code-block", style: { fontFamily: "var(--font)", wordBreak: "normal" } }, policy, copyPolicy)),
+    h("div", {}, saveLocation)), { id: "location" });
+  if (location.hash) setTimeout(() => $(location.hash.slice(1))?.scrollIntoView({ block: "start" }));
+
   return h("div", { class: "page narrow" },
     pageHead([icon("settings", 20), h("h1", { text: "Site settings" }), h("span", { class: "muted", text: site.domains[0] })]),
     h("div", { class: "stack" },
@@ -1288,6 +1317,7 @@ async function siteSettingsPage(key) {
         owner ? h("div", {}, saveDomains) : null)),
       card("Tracking code", h("div", { style: { display: "grid", gap: "10px" } }, h("div", { class: "code-block" }, snippet, copyButton),
         h("a", { href: `/sites/${key}/setup`, text: "Steps for WordPress, Shopify, Wix and more" }))),
+      locationCard,
       owner ? h("div", { class: "card", style: { borderColor: "#fbd5d0" } }, h("div", { class: "card-head" }, h("h2", { text: "Delete site" })),
         h("div", { class: "card-body form" },
           h("p", { class: "muted", text: "This deletes the site and every visit and event it collected. It can't be undone." }),

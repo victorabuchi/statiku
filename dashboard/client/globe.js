@@ -1,19 +1,30 @@
 // The live view's globe: the world on a canvas, turning slowly, with a glowing dot for the visitors on the site right
 // now, sized by how many. Zoomed out, there's a dot per country; zoom in (scroll, pinch, the buttons, or tap a country)
-// and they split into cities, named once there's room. A visitor's city is approximate, from their IP address, and
-// sits at the city's centre: Statiku never knows a street. Map data: world-atlas (Natural Earth); a finer map is
-// fetched the first time someone zooms in.
+// and they split into cities, named once there's room. A visitor's city is approximate, from their IP address, unless
+// they chose to share their exact location (on sites that ask); then, zoomed in to street level, they have a dot of
+// their own on their street, over OpenStreetMap's street map. Country shapes: world-atlas (Natural Earth); a finer
+// map is fetched the first time someone zooms in.
 import { geoArea, geoBounds, geoCentroid, geoContains, geoDistance, geoGraticule10, geoOrthographic, geoPath } from "d3-geo";
 import { feature, mesh } from "topojson-client";
 import coarse from "world-atlas/countries-110m.json";
 import places from "./countries.json";
 
 const LIVE = "#29c46b";
-const MAX_ZOOM = 60;
+const MAX_ZOOM = 20000;
 // Past this zoom, visitors show by city, and the finer map is used.
 const CITY_ZOOM = 2.6;
 // Past this one, cities are named.
 const LABEL_ZOOM = 4.5;
+// Past this one, OpenStreetMap's map is drawn under the dots.
+const TILE_ZOOM = 14;
+// And past this one, shared locations have dots of their own.
+const STREET_ZOOM = 60;
+
+// OpenStreetMap's tiles, by Web Mercator tile number.
+const lonToX = (lon, z) => ((lon + 180) / 360) * 2 ** z;
+const latToY = (lat, z) => ((1 - Math.log(Math.tan((lat * Math.PI) / 180) + 1 / Math.cos((lat * Math.PI) / 180)) / Math.PI) / 2) * 2 ** z;
+const xToLon = (x, z) => (x / 2 ** z) * 360 - 180;
+const yToLat = (y, z) => (180 / Math.PI) * Math.atan(Math.sinh(Math.PI * (1 - (2 * y) / 2 ** z)));
 
 const toMap = (topo) => ({
   countries: feature(topo, topo.objects.countries).features,
@@ -27,7 +38,7 @@ function mainland(f) {
   return parts.reduce((a, b) => (geoArea(b) > geoArea(a) ? b : a));
 }
 
-export function createGlobe(canvas, { onHover, onView } = {}) {
+export function createGlobe(canvas, { onHover, onView, onTiles } = {}) {
   const ctx = canvas.getContext("2d");
   // The land is drawn into a layer of its own, again only when the view changes; each frame copies it and adds the dots.
   const layer = document.createElement("canvas");
@@ -39,15 +50,64 @@ export function createGlobe(canvas, { onHover, onView } = {}) {
 
   let map = toMap(coarse), detailed = null, fetching = false;
   let rotation = [-15, -32, 0], zoom = 1;
-  let countries = [], cities = [], lit = new Set();
+  let countries = [], cities = [], exact = [], lit = new Set();
+  const tiles = new Map();
+  let tiled = false;
   let dots = [];
-  let focus = { country: null, region: null, city: null };
+  let focus = { country: null, region: null, city: null, street: null };
   let size = { w: 0, h: 0, dpr: 1 };
   let dragging = null, hovered = null, flying = null, idleUntil = 0, frame = 0, alive = true, layerKey = "";
   const pointers = new Map();
 
   const baseScale = () => Math.max(60, Math.min(size.w * 0.42, (size.h - 100) / 2));
-  const radius = (d) => 3.5 + Math.sqrt(d.v) * (d.city ? 2 : 2.4);
+  const radius = (d) => (d.exact ? 6 : 3.5 + Math.sqrt(d.v) * (d.city ? 2 : 2.4));
+
+  function tile(z, x, y) {
+    const url = `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
+    let t = tiles.get(url);
+    if (!t) {
+      const img = new Image();
+      // OpenStreetMap asks for the site's address with each tile; this page otherwise sends none.
+      img.referrerPolicy = "strict-origin-when-cross-origin";
+      t = { img, ready: false };
+      img.onload = () => {
+        t.ready = true;
+        layerKey = "";
+        wake();
+      };
+      img.src = url;
+      tiles.set(url, t);
+      if (tiles.size > 300) tiles.delete(tiles.keys().next().value);
+    }
+    return t;
+  }
+
+  // The street map under the visible part of the globe: tiles at the zoom that matches, each placed by three of its
+  // corners (flat enough at this scale), and darkened to match the globe.
+  function drawTiles() {
+    const { w, h, dpr } = size;
+    const lat0 = -rotation[1];
+    const z = Math.max(2, Math.min(18, Math.round(Math.log2((projection.scale() * 2 * Math.PI * Math.cos((lat0 * Math.PI) / 180)) / 256))));
+    const corners = [[0, 0], [w, 0], [0, h], [w, h], [w / 2, 0], [w / 2, h], [0, h / 2], [w, h / 2]].map((p) => projection.invert(p)).filter(Boolean);
+    if (corners.length < 8) return false;
+    const lons = corners.map((c) => c[0]), lats = corners.map((c) => Math.max(-85, Math.min(85, c[1])));
+    const x0 = Math.floor(lonToX(Math.min(...lons), z)), x1 = Math.floor(lonToX(Math.max(...lons), z));
+    const y0 = Math.floor(latToY(Math.max(...lats), z)), y1 = Math.floor(latToY(Math.min(...lats), z));
+    if ((x1 - x0 + 1) * (y1 - y0 + 1) > 80) return false;
+    lctx.save();
+    lctx.filter = "invert(1) hue-rotate(180deg) brightness(0.82) contrast(0.92) saturate(0.55)";
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) {
+        const t = tile(z, ((x % 2 ** z) + 2 ** z) % 2 ** z, y);
+        if (!t.ready) continue;
+        const tl = projection([xToLon(x, z), yToLat(y, z)]), tr = projection([xToLon(x + 1, z), yToLat(y, z)]), bl = projection([xToLon(x, z), yToLat(y + 1, z)]);
+        lctx.setTransform(dpr * (tr[0] - tl[0]) / 256, dpr * (tr[1] - tl[1]) / 256, dpr * (bl[0] - tl[0]) / 256, dpr * (bl[1] - tl[1]) / 256, dpr * tl[0], dpr * tl[1]);
+        lctx.drawImage(t.img, 0, 0, 256.6, 256.6);
+      }
+    }
+    lctx.restore();
+    return true;
+  }
 
   function resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -102,16 +162,21 @@ export function createGlobe(canvas, { onHover, onView } = {}) {
     lctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
     lctx.lineWidth = 0.6;
     lctx.stroke();
-    for (const c of shown.countries) {
-      const code = codeOf(c);
-      lctx.beginPath();
-      path(c);
-      lctx.fillStyle = code && code === focus.country ? "#3a7d58" : lit.has(code) ? "#2f6b4b" : "#3b4651";
-      lctx.fill();
+    const wasTiled = tiled;
+    tiled = zoom >= TILE_ZOOM && drawTiles();
+    if (tiled !== wasTiled) onTiles?.(tiled);
+    if (!tiled) {
+      for (const c of shown.countries) {
+        const code = codeOf(c);
+        lctx.beginPath();
+        path(c);
+        lctx.fillStyle = code && code === focus.country ? "#3a7d58" : lit.has(code) ? "#2f6b4b" : "#3b4651";
+        lctx.fill();
+      }
     }
     lctx.beginPath();
     path(shown.borders);
-    lctx.strokeStyle = zoom >= CITY_ZOOM ? "rgba(255, 255, 255, 0.22)" : "rgba(17, 19, 21, 0.75)";
+    lctx.strokeStyle = tiled ? "rgba(41, 196, 107, 0.5)" : zoom >= CITY_ZOOM ? "rgba(255, 255, 255, 0.22)" : "rgba(17, 19, 21, 0.75)";
     lctx.lineWidth = zoom >= CITY_ZOOM ? 0.8 : 0.5;
     lctx.stroke();
     lctx.beginPath();
@@ -129,7 +194,16 @@ export function createGlobe(canvas, { onHover, onView } = {}) {
     if (zoom < CITY_ZOOM) {
       list = countries.filter((r) => places.points[r.label]).map((r) => ({ id: r.label, code: r.label, v: r.v, lonlat: places.points[r.label] }));
     } else {
-      list = cities.map((c) => ({ id: `${c.country}|${c.city}`, code: c.country, city: c.city, region: c.region, v: c.v, lonlat: [c.lon, c.lat] }));
+      // At street level, everyone who shared their location has a dot of their own; the city's dot keeps the rest.
+      const streets = zoom >= STREET_ZOOM;
+      list = cities
+        .map((c) => ({ id: `${c.country}|${c.city}`, code: c.country, city: c.city, region: c.region, v: streets ? c.v - (c.exact ?? 0) : c.v, lonlat: [c.lon, c.lat] }))
+        .filter((d) => d.v > 0);
+      if (streets) {
+        for (const p of exact) {
+          list.push({ id: `exact|${p.lat},${p.lon}`, code: p.country, city: p.city, street: p.street, v: p.v, lonlat: [p.lon, p.lat], exact: true, point: p });
+        }
+      }
       for (const r of countries) {
         const placed = cities.filter((c) => c.country === r.label).reduce((sum, c) => sum + c.v, 0);
         if (r.v > placed && places.points[r.label]) list.push({ id: r.label, code: r.label, v: r.v - placed, lonlat: places.points[r.label], unplaced: true });
@@ -168,12 +242,12 @@ export function createGlobe(canvas, { onHover, onView } = {}) {
       ctx.fill();
       ctx.beginPath();
       ctx.arc(x, y, rad, 0, 2 * Math.PI);
-      ctx.fillStyle = d === hovered ? "#8af5b5" : d.unplaced ? "rgba(41, 196, 107, 0.55)" : LIVE;
+      ctx.fillStyle = d === hovered ? "#8af5b5" : d.unplaced ? "rgba(41, 196, 107, 0.55)" : d.exact ? "#4fe38a" : LIVE;
       ctx.fill();
       ctx.lineWidth = 1.5;
       ctx.strokeStyle = "#111315";
       ctx.stroke();
-      if (zoom >= LABEL_ZOOM && d.city) labels.push(d);
+      if (zoom >= LABEL_ZOOM && (d.city || d.exact)) labels.push(d);
     }
     // City names with their counts, each on a dark halo: the busiest first, to the right of the dot or else to the
     // left, and left off where it would cover another name.
@@ -182,7 +256,7 @@ export function createGlobe(canvas, { onHover, onView } = {}) {
     ctx.lineJoin = "round";
     const taken = [];
     for (const d of labels.sort((a, b) => b.v - a.v)) {
-      const text = `${d.city} · ${d.v}`, width = ctx.measureText(text).width, rad = radius(d), y = d.xy[1];
+      const text = `${d.exact ? d.street ?? d.point.area ?? "Shared location" : d.city} · ${d.v}`, width = ctx.measureText(text).width, rad = radius(d), y = d.xy[1];
       for (const x of [d.xy[0] + rad + 7, d.xy[0] - rad - 7 - width]) {
         const box = [x - 3, y - 9, x + width + 3, y + 9];
         if (taken.some((b) => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) continue;
@@ -218,13 +292,14 @@ export function createGlobe(canvas, { onHover, onView } = {}) {
     if (still && !frame) draw(performance.now());
   };
 
+  const level = (z) => (z >= STREET_ZOOM ? 2 : z >= CITY_ZOOM ? 1 : 0);
   function setZoom(next, flight = false) {
-    const before = zoom >= CITY_ZOOM;
+    const before = level(zoom);
     zoom = Math.max(1, Math.min(MAX_ZOOM, next));
     if (zoom >= CITY_ZOOM - 0.6) loadDetail();
-    if (before !== zoom >= CITY_ZOOM) placeDots();
+    if (before !== level(zoom)) placeDots();
     // Zoomed back out to the whole world: the country or city in focus is let go.
-    if (!flight && zoom < 1.5 && focus.country) setFocus({ country: null, region: null, city: null });
+    if (!flight && zoom < 1.5 && focus.country) setFocus({ country: null, region: null, city: null, street: null });
   }
   function setFocus(next) {
     focus = next;
@@ -250,12 +325,18 @@ export function createGlobe(canvas, { onHover, onView } = {}) {
       const [[x0, y0], [x1, y1]] = geoBounds(land);
       span = Math.max(((x1 - x0 + 360) % 360) * Math.cos((center[1] * Math.PI) / 180), y1 - y0, 1.5);
     }
-    setFocus({ country: code, region: null, city: null });
+    setFocus({ country: code, region: null, city: null, street: null });
     flyTo(center, 1 / Math.sin((Math.min(80, span * 0.75) * Math.PI) / 180));
   }
   function focusCity(city) {
-    setFocus({ country: city.country, region: city.region, city: city.city });
+    setFocus({ country: city.country, region: city.region, city: city.city, street: null });
     flyTo([city.lon, city.lat], Math.max(zoom * 2, 40));
+  }
+  // Down to the street a visitor shared, a few hundred metres across.
+  function focusPoint(p) {
+    const city = cities.find((c) => c.city === p.city && c.country === p.country);
+    setFocus({ country: p.country, region: city?.region ?? null, city: p.city, street: p.street ?? p.area ?? "Shared location" });
+    flyTo([p.lon, p.lat], 6000);
   }
 
   // Pointers: drag to turn, two fingers to pinch, a tap to fly to what's under it.
@@ -303,8 +384,9 @@ export function createGlobe(canvas, { onHover, onView } = {}) {
     idleUntil = performance.now() + 3000;
     if (tap) {
       const point = at(e), dot = dotAt(point);
-      const city = dot?.city && cities.find((c) => `${c.country}|${c.city}` === dot.id);
-      if (city) focusCity(city);
+      const city = dot?.city && !dot.exact && cities.find((c) => `${c.country}|${c.city}` === dot.id);
+      if (dot?.exact) focusPoint(dot.point);
+      else if (city) focusCity(city);
       else if (dot) focusCountry(dot.code);
       else {
         const lonlat = projection.invert(point);
@@ -340,10 +422,11 @@ export function createGlobe(canvas, { onHover, onView } = {}) {
   wake();
 
   return {
-    // countryRows: [{ label: country code, v }]; cityRows: [{ country, city, lat, lon, v }]
-    update(countryRows, cityRows = []) {
+    // countryRows: [{ label, v }]; cityRows: [{ country, city, region, lat, lon, v, exact }]; pointRows: [{ lat, lon, street, city, country, v }]
+    update(countryRows, cityRows = [], pointRows = []) {
       countries = countryRows;
       cities = cityRows;
+      exact = pointRows;
       lit = new Set(countryRows.map((r) => r.label));
       layerKey = "";
       placeDots();
@@ -351,11 +434,12 @@ export function createGlobe(canvas, { onHover, onView } = {}) {
     },
     focusCountry,
     focusCity,
+    focusPoint,
     zoomBy(factor) {
       flyTo([-rotation[0], -rotation[1]], zoom * factor);
     },
     world() {
-      setFocus({ country: null, region: null, city: null });
+      setFocus({ country: null, region: null, city: null, street: null });
       flyTo([-rotation[0], 25], 1);
     },
     destroy() {

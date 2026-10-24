@@ -3,6 +3,7 @@
 //   GET  /s.js      the script
 //   POST /e         one event (a plain-text JSON body, so browsers send it without a preflight)
 //   POST /v1/app    a batch of events from an app (see app.ts)
+//   GET  /v1/site   what the script needs to know about its site (whether to ask for a visitor's location)
 //   GET  /healthz   for Render
 // Nothing here logs or stores an IP.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -11,16 +12,21 @@ import pg from "pg";
 import { createDashboard } from "../dashboard/server.ts";
 import { buildTracker } from "../tracker/build.ts";
 import { collectApp, MAX_APP_BODY } from "./app.ts";
-import { collect, MAX_BODY, type Deps } from "./collect.ts";
+import { collect, MAX_BODY, siteConfig, type Deps } from "./collect.ts";
 import { Geo } from "./geo.ts";
 import { Installs } from "./installs.ts";
 import { Hub } from "./live.ts";
+import { Streets, type Geocoder } from "./streets.ts";
 import { Projects } from "./projects.ts";
 import { Salts } from "./salts.ts";
 import { Sessions } from "./sessions.ts";
 import { Writer } from "./writer.ts";
 
-export type Options = { databaseUrl: string; trustProxy: boolean; geoPath: string | URL; cityPath?: string | URL; flushMs?: number; dashboard?: boolean };
+export type Options = {
+  databaseUrl: string; trustProxy: boolean; geoPath: string | URL; cityPath?: string | URL; flushMs?: number; dashboard?: boolean;
+  // Street names for shared locations; tests pass their own instead of asking OpenStreetMap.
+  geocode?: Geocoder;
+};
 
 const CORS = {
   "access-control-allow-origin": "*",
@@ -65,7 +71,7 @@ export async function createApp(options: Options) {
   const sessions = new Sessions(pool);
   const writer = new Writer(pool, sessions);
   const salts = new Salts(pool);
-  const deps: Deps = { projects: new Projects(pool), salts, sessions, installs: new Installs(pool, salts), writer, geo: new Geo(options.geoPath, options.cityPath), hub: new Hub() };
+  const deps: Deps = { projects: new Projects(pool), salts, sessions, installs: new Installs(pool, salts), writer, geo: new Geo(options.geoPath, options.cityPath), hub: new Hub(), streets: new Streets(options.geocode) };
 
   const script = await buildTracker();
   // The dashboard tells the ingest side when a site's domains change, so the cached copy goes at once.
@@ -74,6 +80,7 @@ export async function createApp(options: Options) {
     onSiteChanged: (key) => deps.projects.cache.delete(key),
     presence: (projectId) => sessions.present(projectId),
     hub: deps.hub,
+    streets: deps.streets,
   });
   const etag = `"${createHash("sha256").update(script).digest("base64url").slice(0, 16)}"`;
 
@@ -99,6 +106,12 @@ export async function createApp(options: Options) {
         if (body === null) return send(res, 413, "body too large");
         const outcome = await collect(deps, body, String(req.headers["user-agent"] ?? ""), clientIp(req, options.trustProxy));
         return send(res, outcome.status, outcome.message);
+      }
+      if (path === "/v1/site" && req.method === "OPTIONS") return send(res, 204, "");
+      if (path === "/v1/site" && req.method === "GET") {
+        const key = new URL(req.url ?? "/", "http://x").searchParams.get("k") ?? "";
+        const { cache, ...config } = await siteConfig(deps, key, String(req.headers["user-agent"] ?? ""), clientIp(req, options.trustProxy));
+        return send(res, 200, JSON.stringify(config), { "content-type": "application/json", "cache-control": cache ? "public, max-age=300" : "no-store" });
       }
       if (path === "/v1/app") {
         if (req.method !== "POST") return send(res, 405, "use POST");

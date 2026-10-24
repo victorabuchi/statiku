@@ -4,6 +4,7 @@ import { agentOf, isBot } from "./agent.ts";
 import type { Geo } from "./geo.ts";
 import type { Installs } from "./installs.ts";
 import type { Hub } from "./live.ts";
+import type { Streets } from "./streets.ts";
 import { hostAllowed, type Projects } from "./projects.ts";
 import { hash63, networkOf, type Salts } from "./salts.ts";
 import type { Sessions } from "./sessions.ts";
@@ -22,11 +23,25 @@ export type Hit = {
   revenue: { minor: number; currency: string } | null;
 };
 
-export type Deps = { projects: Projects; salts: Salts; sessions: Sessions; installs: Installs; writer: Writer; geo: Geo; hub: Hub };
+export type Deps = { projects: Projects; salts: Salts; sessions: Sessions; installs: Installs; writer: Writer; geo: Geo; hub: Hub; streets: Streets };
 
 // The script's check-in from an open page and its goodbye when the page closes: they keep the live view and a
 // visit's length right, and are never stored as events.
 const BEAT = "_p", GONE = "_l";
+// On sites that ask, the point a visitor chose to share, or their "not now". Never stored as events either.
+const SHARED = "_loc", DECLINED = "_noloc";
+const round3 = (n: number) => Math.round(n * 1000) / 1000;
+
+// What the script needs to know about its site: whether it asks visitors for their location, and whether to ask this
+// visitor now (not if they've been asked already this visit). An answer of "no" is the same for everyone, so it can be
+// cached; a "yes" depends on the visit.
+export async function siteConfig(deps: Deps, key: string, ua: string, ip: string, now = new Date()) {
+  const project = key ? await deps.projects.byKey(key) : null;
+  if (!project?.askLocation || isBot(ua)) return { ask: false, prompt: false, cache: true };
+  const visitor = hash63(await deps.salts.forDay(now), project.id, ip, ua);
+  const session = deps.sessions.live.get(`${project.id}:${visitor}`);
+  return { ask: true, prompt: !session?.asked && !session?.exact, site: project.domains[0], cache: false };
+}
 
 export type Outcome = { status: number; message: string };
 
@@ -96,6 +111,19 @@ export async function collect(deps: Deps, body: string, ua: string, ip: string, 
 
   const salt = await deps.salts.forDay(now);
   const visitor = hash63(salt, project.id, ip, ua);
+  if (hit.name === SHARED || hit.name === DECLINED) {
+    const session = project.askLocation ? await deps.sessions.beat(project.id, visitor, now, false) : null;
+    if (session) {
+      session.asked = true;
+      const lat = Number(hit.props?.lat), lon = Number(hit.props?.lon);
+      if (hit.name === SHARED && Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+        session.exact = { lat: round3(lat), lon: round3(lon) };
+        deps.streets.at(session.exact.lat, session.exact.lon);
+      }
+      deps.hub.publish(project.id, { t: "presence" });
+    }
+    return { status: 202, message: "ok" };
+  }
   if (hit.name === BEAT || hit.name === GONE) {
     const beating = await deps.sessions.beat(project.id, visitor, now, hit.name === GONE);
     if (beating) {
