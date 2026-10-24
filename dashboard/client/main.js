@@ -1056,10 +1056,29 @@ async function analyticsPage(key) {
       refreshed.textContent = `Last refreshed ${clock().slice(0, 5)}`;
       exportButton.disabled = false;
       draw();
+      waitForFirstVisit();
     } catch (err) {
       if (!(err instanceof SignedOut)) body.replaceChildren(failure(err));
     }
   }
+  // A site with no visits yet listens for its first one, and the report reloads once it's written down (Statiku
+  // writes every second), until the numbers show.
+  let listening = null;
+  const waitForFirstVisit = () => {
+    if (data.lastEventAt) {
+      if (!listening) return;
+      listening.close();
+      listening = null;
+      toast(`First visit received from ${site?.domains[0] ?? "your site"}`);
+      return;
+    }
+    if (listening) return;
+    listening = new EventSource(`/api/sites/${key}/stream`);
+    listening.onmessage = (m) => {
+      if (JSON.parse(m.data).t === "event") setTimeout(() => loadSites(true).then(load, load), 1500);
+    };
+  };
+  onLeave(() => listening?.close());
   const setFilter = (dim, value) => {
     state.filters = { ...state.filters, [dim]: state.filters[dim] === value ? null : value };
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1071,12 +1090,15 @@ async function analyticsPage(key) {
     const d = data;
     const totals = withPerVisit(d.totals), previous = withPerVisit(d.previous);
     const unit = d.range.unit;
-    if (!d.lastEventAt && !d.imported && !d.releases) {
-      body.replaceChildren(h("div", { class: "card status-card" }, h("span", { class: "icon wait" }, icon("wait", 22)),
-        h("div", { class: "what" }, h("b", { text: "No visits yet" }), h("span", { class: "muted", text: "Add the tracking code to your site, and your first visitors show here and in the live view. Have numbers from another tool? Import them." })),
-        h("a", { class: "btn primary", href: `/sites/${key}/setup` }, "Finish setup"), h("a", { class: "btn", href: `/sites/${key}/import` }, "Import history")));
-      return;
-    }
+    // Before the first visit it's the same report, at zero, with a note on top; it fills in the moment a visit arrives.
+    const domain = site?.domains[0] ?? d.site.domains[0];
+    const waitingNote = !d.lastEventAt && !d.imported && !d.releases
+      ? h("div", { class: "card status-card waiting" }, h("span", { class: "icon wait" }, h("i", { class: "dot idle pulse", style: { width: "12px", height: "12px" } })),
+        h("div", { class: "what" }, h("b", { text: `Waiting for the first visit to ${domain}` }),
+          h("span", { class: "muted", text: "Statiku is ready. These numbers fill in the moment someone opens your site; history from another tool can come in now." })),
+        h("a", { class: "btn", href: `https://${domain}`, target: "_blank", rel: "noopener", "data-external": "" }, `Open ${domain}`, icon("external", 14)),
+        h("a", { class: "btn plain", href: `/sites/${key}/import` }, "Import history"), h("a", { class: "btn plain", href: `/sites/${key}/setup` }, "Setup"))
+      : null;
     // What history the report holds, so imported numbers are never mistaken for Statiku's own.
     const names = (d.imported?.sources ?? []).map((s) => s.label.split(":")[0]);
     const historyNote = d.imported
@@ -1123,6 +1145,7 @@ async function analyticsPage(key) {
 
     const pageRows = d.pages[state.pagesTab];
     const content = [
+      waitingNote,
       historyNote,
       kpis,
       h("div", { class: "grid g-side" }, chartCard, breakdown),
