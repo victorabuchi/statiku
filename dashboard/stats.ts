@@ -92,6 +92,49 @@ const SERIES = `
     from buckets left join e using (t) left join s using (t) left join i using (t)
    order by buckets.t`;
 
+// History brought in from another tool (imports.ts): it counts for the days before Statiku's own first event on the
+// site ($6), in the site's time zone ($5), for one breakdown ($4), and only in reports nothing narrows, since another
+// tool's numbers can't be narrowed by Statiku's filters.
+const IMPORTED_ROWS = `
+  from imported_days d join imports i on i.id = d.import_id and i.status = 'done'
+ where d.project_id = $1 and d.dimension = $4 and d.day >= ($2::timestamptz at time zone $5)::date
+   and d.day <= (($3::timestamptz - interval '1 millisecond') at time zone $5)::date and d.day < $6::date`;
+const IMPORTED_SUMS = `coalesce(sum(visitors), 0)::int as visitors, coalesce(sum(visits), 0)::int as visits,
+  coalesce(sum(pageviews), 0)::int as pageviews, coalesce(sum(bounces), 0)::int as bounces, coalesce(sum(duration), 0)::float as duration,
+  coalesce(sum(measured), 0)::int as measured`;
+
+type Sums = { visitors: number; visits: number; pageviews: number; bounces: number; duration: number; measured: number };
+type Totals = { visitors: number; pageviews: number; visits: number; bounce: number | null; duration: number | null };
+
+// Statiku's own numbers and imported ones together. Every visit Statiku counted has a bounce and a duration; imported
+// visits only when the other tool said.
+function withImported<T extends Totals>(own: T, imported: Sums | undefined): T {
+  if (!imported || !(imported.visitors || imported.visits || imported.pageviews)) return own;
+  const measured = own.visits + imported.measured;
+  return {
+    ...own,
+    visitors: own.visitors + imported.visitors,
+    pageviews: own.pageviews + imported.pageviews,
+    visits: own.visits + imported.visits,
+    bounce: measured ? Math.round((((own.bounce ?? 0) / 100) * own.visits + imported.bounces) * 100 / measured) : own.bounce,
+    duration: measured ? Math.round(((own.duration ?? 0) * own.visits + imported.duration) / measured) : own.duration,
+  };
+}
+
+// A breakdown with imported rows added in, most first.
+function mergeRows<T extends { label: string; v: number; pageviews?: number }>(own: T[], imported: { label: string; v: number; pageviews: number }[], limit = 12): T[] {
+  if (!imported.length) return own;
+  const rows = new Map(own.map((r) => [r.label, { ...r }]));
+  for (const r of imported) {
+    const had = rows.get(r.label);
+    if (had) {
+      had.v += r.v;
+      if (had.pageviews !== undefined) had.pageviews += r.pageviews;
+    } else rows.set(r.label, { label: r.label, v: r.v, ...(own[0]?.pageviews !== undefined || r.pageviews ? { pageviews: r.pageviews } : {}) } as unknown as T);
+  }
+  return [...rows.values()].filter((r) => r.v > 0).sort((a, b) => b.v - a.v || a.label.localeCompare(b.label)).slice(0, limit);
+}
+
 // The SDK's own events, shown in the App section rather than among custom events.
 const APP_LIFECYCLE = "('install', 'active', 'update', 'state')";
 
@@ -109,13 +152,15 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 // A period's bounds and the previous period of the same length. A custom period runs from the start of its first
 // day to the end of its last (or now, if that's sooner), by hour for one day, by month past six months. All time runs
-// from the day of the site's first visit, and has nothing before it to compare with.
+// from the day of the site's first visit (or first imported day), and has nothing before it to compare with.
 async function bounds(pool: pg.Pool, siteId: string, tz: string, rangeId: string, custom: { from?: string | null; to?: string | null }) {
   if (rangeId === "all") {
     const { rows: [b] } = await pool.query(
       `select f at time zone $1 as "from", now() as "to"
-         from (select date_trunc('day', coalesce((select min(ts) from events where project_id = $2),
-                                                 (select created_at from projects where id = $2)) at time zone $1) as f) x`,
+         from (select date_trunc('day', least(
+                 coalesce((select min(ts) from events where project_id = $2), (select created_at from projects where id = $2)) at time zone $1,
+                 coalesce((select min(d.day)::timestamp from imported_days d join imports i on i.id = d.import_id and i.status = 'done'
+                            where d.project_id = $2), 'infinity'))) as f) x`,
       [tz, siteId],
     );
     const days = (b.to - b.from) / 86400e3;
@@ -167,10 +212,33 @@ export async function stats(pool: pg.Pool, site: Site, rangeId: string, filters:
     q(`select coalesce(${column}, 'Unknown') as label, count(*)::int as v from installs
         where ${WHERE_INSTALLS} and last_seen >= $2 and first_seen < $3 group by 1 order by 2 desc, 1 limit 12`, pi);
 
+  // Imported history: which imports the site has, and the day Statiku's own counting began.
+  const [{ rows: importsDone }, { rows: [own] }] = await Promise.all([
+    pool.query("select kind, label, first_day::text as first, last_day::text as last from imports where project_id = $1 and status = 'done' order by created_at", [site.id]),
+    pool.query("select (min(ts) at time zone $2)::date::text as day from events where project_id = $1", [site.id, tz]),
+  ]);
+  const history = importsDone.filter((s) => s.kind !== "github");
+  const narrowed = FILTERS.some((f) => filters[f]);
+  const withHistory = history.length > 0 && !narrowed;
+  const before = own?.day ?? "infinity";
+  const imp = (sql: string, dimension: string, from: Date, to: Date, extra: unknown[] = []) =>
+    withHistory ? q(sql, [site.id, from, to, dimension, tz, before, ...extra]) : Promise.resolve([]);
+  const importedBy = (dimension: string) =>
+    imp(`select value as label, coalesce(sum(case when $4 = 'entry' then visits else visitors end), 0)::int as v, coalesce(sum(pageviews), 0)::int as pageviews
+           ${IMPORTED_ROWS} group by 1`, dimension, b.from, b.to);
+  const seriesOf = (sql: string, from: Date, to: Date) => imp(sql, "total", from, to, [b.unit]);
+  const IMPORTED_SERIES = `select to_char(date_trunc($7, d.day::timestamp), 'YYYY-MM-DD"T"HH24:MI') as t, ${IMPORTED_SUMS} ${IMPORTED_ROWS} group by 1`;
+  // GitHub's release downloads, a measure of their own: all time by release, and in the period by day.
+  const github = importsDone.some((s) => s.kind === "github");
+  const downloads = (sql: string, params: unknown[]) => (github ? q(sql, params) : Promise.resolve([]));
+
   const [
     [totals], [previous], series, previousSeries, [appTotals], [appPrevious], sources, journeyBySource, [journeyApp],
     topPages, entryPages, exitPages, countries, devices, browsers, systems, campaigns, events, versions, states,
     appSystems, installSources, [appSeen], [last],
+    [importedTotals], [importedPrevious], importedSeries, importedPreviousSeries, importedSources, importedPages, importedEntries,
+    importedCountries, importedDevices, importedBrowsers, importedSystems,
+    releasesAll, [releasesPeriod], releasesSeries,
   ] = await Promise.all([
     q(TOTALS),
     q(TOTALS, prev),
@@ -219,21 +287,48 @@ export async function stats(pool: pg.Pool, site: Site, rangeId: string, filters:
         where ${WHERE_INSTALLS} and first_seen >= $2 and first_seen < $3 group by 1 order by 2 desc, 1 limit 12`, pi),
     q(`select max(last_seen) as at from installs where project_id = $1`, [site.id]),
     q(`select ts as at from events where project_id = $1 order by ts desc limit 1`, [site.id]),
+    imp(`select ${IMPORTED_SUMS} ${IMPORTED_ROWS}`, "total", b.from, b.to),
+    imp(`select ${IMPORTED_SUMS} ${IMPORTED_ROWS}`, "total", b.prevFrom, b.prevTo),
+    seriesOf(IMPORTED_SERIES, b.from, b.to),
+    seriesOf(IMPORTED_SERIES, b.prevFrom, b.prevTo),
+    importedBy("source"),
+    importedBy("page"),
+    importedBy("entry"),
+    importedBy("country"),
+    importedBy("device"),
+    importedBy("browser"),
+    importedBy("os"),
+    downloads(`select value as label, sum(downloads)::int as v from imported_days where project_id = $1 and dimension = 'release' group by 1 order by 2 desc, 1 limit 20`, [site.id]),
+    downloads(`select coalesce(sum(downloads), 0)::int as total,
+                      coalesce(sum(downloads) filter (where day >= ($2::timestamptz at time zone $4)::date and day <= (($3::timestamptz - interval '1 millisecond') at time zone $4)::date), 0)::int as period
+                 from imported_days where project_id = $1 and dimension = 'releases'`, [site.id, b.from, b.to, tz]),
+    downloads(`select to_char(date_trunc($5, day::timestamp), 'YYYY-MM-DD"T"HH24:MI') as t, sum(downloads)::int as v from imported_days
+                where project_id = $1 and dimension = 'releases' and day >= ($2::timestamptz at time zone $4)::date
+                  and day <= (($3::timestamptz - interval '1 millisecond') at time zone $4)::date group by 1`, [site.id, b.from, b.to, tz, b.unit]),
   ]);
+  const byBucket = (rows: (Sums & { t: string })[]) => new Map(rows.map((r) => [r.t, r]));
+  const mergeSeries = <T extends Totals & { t: string }>(own: T[], imported: (Sums & { t: string })[], released: { t: string; v: number }[] = []) => {
+    const at = byBucket(imported);
+    const gained = new Map(released.map((r) => [r.t, r.v]));
+    return own.map((row) => ({ ...withImported(row, at.get(row.t)), ...(github ? { releases: gained.get(row.t) ?? 0 } : {}) }));
+  };
 
   return {
     site: { key: site.key, name: site.name, domains: site.domains, timezone: tz },
     range: b,
     filters,
-    totals,
-    previous,
-    series,
-    previousSeries,
-    sources,
+    totals: withImported(totals, importedTotals),
+    previous: withImported(previous, importedPrevious),
+    series: mergeSeries(series, importedSeries, releasesSeries),
+    previousSeries: mergeSeries(previousSeries, importedPreviousSeries),
+    sources: mergeRows(sources, importedSources),
     journeyBySource,
-    pages: { top: topPages, entry: entryPages, exit: exitPages },
-    countries,
-    devices: { device: devices, browser: browsers, os: systems },
+    pages: { top: mergeRows(topPages, importedPages), entry: mergeRows(entryPages, importedEntries), exit: exitPages },
+    countries: mergeRows(countries, importedCountries),
+    devices: { device: mergeRows(devices, importedDevices), browser: mergeRows(browsers, importedBrowsers), os: mergeRows(systems, importedSystems) },
+    // What history the report holds: the imports, whether they're in it, and from which day Statiku counted itself.
+    imported: history.length ? { included: withHistory, narrowed, ownFrom: own?.day ?? null, sources: history } : null,
+    releases: github ? { total: releasesPeriod?.total ?? 0, period: releasesPeriod?.period ?? 0, byRelease: releasesAll, repo: importsDone.find((s) => s.kind === "github")?.label ?? null } : null,
     campaigns,
     events,
     app: {

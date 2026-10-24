@@ -14,7 +14,11 @@
 //   POST   /api/sites/:key/check   is the tracking code on the site?
 //   GET    /api/sites/:key/stats?range=&from=&to=&by=&source=&country=&device=&browser=&os=&page=
 //   GET    /api/sites/:key/live    who's on it right now        GET /api/sites/:key/stream   the same, pushed
+//   GET    /api/sites/:key/imports   POST { kind: ga4 | plausible | github, … }   POST …/imports/file (form data)
+//   DELETE /api/sites/:key/imports/:id   GET …/imports/google/start → Google → /api/imports/google/callback
+//   GET    /api/sites/:key/imports/google/properties?grant=
 import { createHash, randomBytes } from "node:crypto";
+import { Readable, Transform } from "node:stream";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -30,7 +34,12 @@ import {
   findByPassword, finishReset, loginCookie, resetFor, startLogin, startReset, userOf, type User,
 } from "./auth.ts";
 import { letter, smtpMailer, type Mailer } from "./mail.ts";
-import { checkInstall, fetchIcon, imageType } from "./check.ts";
+import { checkInstall, fetchIcon, imageType, openRequest, publicRequest, type Outbound } from "./check.ts";
+import {
+  addDownloadsSince, countsOf, GOOGLE, githubReleases, IMPORT_COLUMNS, importFiles, importGithub, importGoogle, importPlausible,
+  repoOf, Sink, startImport, googleProperties, type Google,
+} from "./imports.ts";
+import { canSeal, seal, unseal } from "./secrets.ts";
 import { FILTERS, live, overview, RANGE_IDS, siteFor, stats, type Filters, type Presence, type Site } from "./stats.ts";
 
 export type Request = { req: IncomingMessage; res: ServerResponse; path: string; ip: string; secure: boolean };
@@ -149,7 +158,12 @@ async function bundle() {
   return { js, css, icon, html, map, fonts };
 }
 
-export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (key: string) => void; presence: Presence; hub: Hub; streets: Streets; mailer?: Mailer }) {
+// Where imports reach other services. Tests point them at a stand-in.
+export type ImportApis = { request?: Outbound; open?: Outbound; google?: Partial<Google>; github?: string };
+
+export async function createDashboard(options: {
+  pool: pg.Pool; onSiteChanged: (key: string) => void; presence: Presence; hub: Hub; streets: Streets; mailer?: Mailer; imports?: ImportApis;
+}) {
   const { pool, onSiteChanged, presence, hub, streets } = options;
   const mailer = options.mailer ?? smtpMailer();
   const assets = await bundle();
@@ -211,6 +225,188 @@ export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (
       fetching.set(site.id, pending);
     }
     return pending;
+  }
+
+  // ---------- Imports ----------
+  const request = options.imports?.request ?? publicRequest;
+  const open = options.imports?.open ?? openRequest;
+  const google: Google = { ...GOOGLE, ...options.imports?.google };
+  const githubApi = options.imports?.github ?? "https://api.github.com";
+  // A Google sign-in, held in memory while the person picks a property and the import runs; never stored.
+  const googleStates = new Map<string, { userId: string; key: string; until: number }>();
+  const grants = new Map<string, { userId: string; key: string; access: string; refresh: string | null; expires: number; until: number }>();
+  const forget = (map: Map<string, { until: number }>) => {
+    for (const [k, v] of map) if (v.until < Date.now()) map.delete(k);
+  };
+  const googleCall = async (body: Record<string, string>) => {
+    const res = await open(new URL(google.token), {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: google.clientId ?? "", client_secret: google.clientSecret ?? "", ...body }).toString(),
+    });
+    const data = JSON.parse(res.body.toString("utf8") || "{}");
+    if (!data.access_token) throw new HttpError(400, "Google didn't let Statiku in. Try connecting again.");
+    return data as { access_token: string; expires_in: number; refresh_token?: string };
+  };
+  async function googleToken(grant: { access: string; refresh: string | null; expires: number }) {
+    if (grant.expires - 60_000 > Date.now() || !grant.refresh) return grant.access;
+    const data = await googleCall({ refresh_token: grant.refresh, grant_type: "refresh_token" });
+    grant.access = data.access_token;
+    grant.expires = Date.now() + data.expires_in * 1000;
+    return grant.access;
+  }
+  function grantFor(id: unknown, user: User, site: Site) {
+    forget(grants);
+    const grant = typeof id === "string" ? grants.get(id) : undefined;
+    if (!grant || grant.userId !== user.id || grant.key !== site.key) throw new HttpError(410, "The Google sign-in has expired. Connect again.");
+    return grant;
+  }
+  // The same import twice would count everything twice.
+  async function notImportedYet(site: Site, label: string | null, hash?: string) {
+    const { rows: [twice] } = await pool.query(
+      `select label from imports where project_id = $1 and status <> 'failed' and (label = $2 or ($3::text is not null and config->>'hash' = $3))`,
+      [site.id, label, hash ?? null],
+    );
+    if (twice) throw new HttpError(409, `That's already imported (${twice.label}). Delete it first to import it again.`);
+  }
+  const begin = (site: Site, user: User, kind: string, label: string, run: Parameters<typeof startImport>[1]["run"]) =>
+    startImport(pool, { projectId: site.id, userId: user.id, kind, label, run });
+
+  // GitHub's download counts grow every day: each repository is looked at again every few hours, and what its releases
+  // gained since is added on that day.
+  async function refreshDownloads() {
+    const { rows } = await pool.query(
+      `select i.id, i.project_id, i.config, p.timezone from imports i join projects p on p.id = i.project_id where i.kind = 'github' and i.status = 'done'`,
+    );
+    for (const row of rows) {
+      try {
+        const releases = await githubReleases(open, githubApi, row.config.repo, row.config.token ? unseal(row.config.token) : null);
+        const sink = new Sink(pool, row.id, row.project_id);
+        await addDownloadsSince(sink, releases, row.config.counts ?? {}, row.timezone);
+        await sink.flush();
+        await pool.query(
+          `update imports set config = config || $2::jsonb, rows = (select count(*) from imported_days where import_id = $1),
+                  last_day = (select max(day) from imported_days where import_id = $1) where id = $1`,
+          [row.id, JSON.stringify({ counts: countsOf(releases), refreshedAt: new Date().toISOString() })],
+        );
+      } catch (e) {
+        console.error("GitHub downloads:", (e as Error).message);
+      }
+    }
+  }
+  setInterval(() => void refreshDownloads(), 6 * 3600_000).unref();
+
+  // A form with files, up to 100 MB, read by the platform's own parser.
+  async function filesOf(req: IncomingMessage) {
+    let size = 0;
+    const limited = req.pipe(new Transform({
+      transform(chunk: Buffer, _, done) {
+        size += chunk.length;
+        done(size > 100_000_000 ? new HttpError(413, "That's more than 100 MB. Import the files a few at a time.") : null, chunk);
+      },
+    }));
+    const form = await new globalThis.Request("http://x/", {
+      method: "POST", headers: { "content-type": String(req.headers["content-type"] ?? "") },
+      body: Readable.toWeb(limited) as ReadableStream, duplex: "half",
+    } as RequestInit).formData().catch((e) => {
+      throw e instanceof HttpError ? e : new HttpError(400, "Send the files as a form.");
+    });
+    const files = await Promise.all(form.getAll("file").filter((f): f is File => typeof f !== "string").map(async (f) => ({ name: f.name.slice(0, 200), data: Buffer.from(await f.arrayBuffer()) })));
+    if (!files.length) throw new HttpError(400, "Choose a file to import.");
+    return files;
+  }
+
+  async function importsApi(r: Request, user: User, site: Site, sub: string | undefined) {
+    const { req, res } = r;
+    const method = req.method ?? "GET";
+    const url = new URL(req.url ?? "/", "http://x");
+    if (!sub && method === "GET") {
+      const { rows } = await pool.query(`select ${IMPORT_COLUMNS}, config->>'repo' as repo, config->>'refreshedAt' as "refreshedAt" from imports where project_id = $1 order by created_at desc`, [site.id]);
+      return json(res, 200, { imports: rows, google: !!(google.clientId && google.clientSecret), tokens: canSeal() });
+    }
+    ownerOnly(site);
+    if (sub === "google/start" && method === "GET") {
+      const back = (error: string) => {
+        res.writeHead(302, { location: `/sites/${site.key}/import?error=${encodeURIComponent(error)}`, ...HEADERS });
+        res.end();
+      };
+      if (!google.clientId || !google.clientSecret) return back("Signing in with Google isn't set up on this server yet. Export a CSV from Google Analytics instead.");
+      forget(googleStates);
+      const state = randomBytes(18).toString("base64url");
+      googleStates.set(state, { userId: user.id, key: site.key, until: Date.now() + 15 * 60_000 });
+      const to = new URL(google.auth);
+      to.search = new URLSearchParams({
+        client_id: google.clientId, redirect_uri: `${origin(r)}/api/imports/google/callback`, response_type: "code",
+        scope: "https://www.googleapis.com/auth/analytics.readonly", access_type: "offline", prompt: "consent", include_granted_scopes: "true", state,
+      }).toString();
+      res.writeHead(302, { location: to.href, ...HEADERS });
+      return res.end();
+    }
+    if (sub === "google/properties" && method === "GET") {
+      const grant = grantFor(url.searchParams.get("grant"), user, site);
+      return json(res, 200, { properties: await googleProperties(open, google, await googleToken(grant)) });
+    }
+    if (!sub && method === "POST") {
+      const body = await readJson(req);
+      if (body.kind === "ga4") {
+        const grant = grantFor(body.grant, user, site);
+        const property = text(body.property, 20);
+        const label = `Google Analytics: ${text(body.name, 80) || "property"} (GA4 ${property})`;
+        await notImportedYet(site, label);
+        // The sign-in lasts as long as the import needs it.
+        grant.until = Date.now() + 6 * 3600_000;
+        const { created } = await begin(site, user, "ga4", label, (sink) => importGoogle(sink, open, google, () => googleToken(grant), property));
+        return json(res, 202, { import: created });
+      }
+      if (body.kind === "plausible") {
+        let host: URL;
+        try {
+          host = new URL(text(body.host, 300) || "https://plausible.io");
+        } catch {
+          throw new HttpError(400, "Enter your Plausible's address, such as https://plausible.io.");
+        }
+        if (!/^https?:$/.test(host.protocol)) throw new HttpError(400, "Enter your Plausible's address, such as https://plausible.io.");
+        const key = text(body.key, 200), siteId = text(body.site, 253);
+        if (!key) throw new HttpError(400, "Paste your Plausible Stats API key.");
+        if (!siteId) throw new HttpError(400, "Enter the site's domain as it's named in Plausible.");
+        const label = `Plausible: ${siteId}${host.host === "plausible.io" ? "" : ` on ${host.host}`}`;
+        await notImportedYet(site, label);
+        const { created } = await begin(site, user, "plausible", label, (sink) => importPlausible(sink, request, { host, key, site: siteId }));
+        return json(res, 202, { import: created });
+      }
+      if (body.kind === "github") {
+        const repo = repoOf(body.repo);
+        if (!repo) throw new HttpError(400, "Enter the repository as owner/name, or its github.com address.");
+        const token = text(body.token, 300) || null;
+        const label = `GitHub: ${repo}`;
+        await notImportedYet(site, label);
+        const { created } = await begin(site, user, "github", label, async (sink) => {
+          const releases = await githubReleases(open, githubApi, repo, token);
+          if (!releases.length) throw new Error(`${repo} has no releases on GitHub.`);
+          await importGithub(sink, releases, site.timezone);
+          // A token is kept only sealed; without SECRET_KEY, later refreshes go without it.
+          return {
+            config: { repo, counts: countsOf(releases), refreshedAt: new Date().toISOString(), ...(token && canSeal() ? { token: seal(token) } : {}) },
+            note: token && !canSeal() ? "The token was used once and not kept, so daily refreshes only work if the repository is public." : null,
+          };
+        });
+        return json(res, 202, { import: created });
+      }
+      throw new HttpError(400, "Choose what to import from.");
+    }
+    if (sub === "file" && method === "POST") {
+      const files = await filesOf(req);
+      const hash = files.reduce((h, f) => h.update(f.data), createHash("sha256")).digest("hex");
+      const label = `File: ${files.map((f) => f.name).join(", ")}`.slice(0, 200);
+      await notImportedYet(site, null, hash);
+      const { created } = await begin(site, user, "file", label, async (sink) => ({ ...(await importFiles(sink, files, site.timezone)), config: { hash } }));
+      return json(res, 202, { import: created });
+    }
+    if (sub && /^[0-9a-f-]{36}$/.test(sub) && method === "DELETE") {
+      await pool.query("delete from imports where id = $1 and project_id = $2", [sub, site.id]);
+      return json(res, 200, { ok: true });
+    }
+    throw new HttpError(404, "Not found.");
   }
 
   async function invite(token: string) {
@@ -313,6 +509,28 @@ export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (
 
     const user = await signedIn(r);
     if (invitation?.[2] && method === "POST") return json(res, 200, { workspace: await acceptInvite(invitation[1], user.id) });
+
+    // Back from signing in with Google: the code becomes a grant this person can use for a while.
+    if (path === "/api/imports/google/callback" && method === "GET") {
+      const url = new URL(req.url ?? "/", "http://x");
+      forget(googleStates);
+      const state = googleStates.get(url.searchParams.get("state") ?? "");
+      if (!state || state.userId !== user.id) throw new HttpError(400, "That Google sign-in didn't start here. Try again from the Import page.");
+      googleStates.delete(url.searchParams.get("state")!);
+      let to = `/sites/${state.key}/import`;
+      const code = url.searchParams.get("code");
+      if (!code) to += `?error=${encodeURIComponent("Google sign-in was cancelled.")}`;
+      else {
+        const data = await googleCall({ code, redirect_uri: `${origin(r)}/api/imports/google/callback`, grant_type: "authorization_code" });
+        const id = randomBytes(18).toString("base64url");
+        grants.set(id, { userId: user.id, key: state.key, access: data.access_token, refresh: data.refresh_token ?? null, expires: Date.now() + data.expires_in * 1000, until: Date.now() + 30 * 60_000 });
+        to += `?google=${id}`;
+      }
+      res.writeHead(302, { location: to, ...HEADERS });
+      return res.end();
+    }
+    const importing = path.match(/^\/api\/sites\/(p_[a-z0-9]{6,20})\/imports(?:\/(file|google\/start|google\/properties|[0-9a-f-]{36}))?$/);
+    if (importing) return importsApi(r, user, await mySite(user, importing[1]), importing[2]);
 
     // ---------- Your account ----------
     if (path === "/api/me" && method === "GET") return json(res, 200, { user: me(user) });
@@ -509,7 +727,7 @@ export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (
     throw new HttpError(404, "Not found.");
   }
 
-  return async function handle(r: Request) {
+  return Object.assign(async function handle(r: Request) {
     const { req, res, path } = r;
     try {
       if (path.startsWith("/api/")) return await api(r);
@@ -526,5 +744,5 @@ export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (
       console.error("Dashboard:", (e as Error).message);
       if (!res.headersSent) json(res, 500, { error: "Something went wrong on our side. Try again." });
     }
-  };
+  }, { jobs: { refreshDownloads } });
 }

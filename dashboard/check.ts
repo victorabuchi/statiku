@@ -77,6 +77,38 @@ export async function fetchPublic(start: URL, { maxBytes = 2_000_000, accept = "
   }
 }
 
+// A request to another service's API. `publicRequest` is for addresses a user typed (a self-hosted Plausible): any
+// method, headers and body, through the same public-only lookup, and no redirects. `openRequest` is for the fixed
+// addresses of Google's and GitHub's APIs.
+export type Outbound = (url: URL, init?: { method?: string; headers?: Record<string, string>; body?: string; maxBytes?: number }) => Promise<{ status: number; type: string; body: Buffer }>;
+
+export const publicRequest: Outbound = (url, { method = "GET", headers = {}, body, maxBytes = 50_000_000 } = {}) =>
+  new Promise((resolve, reject) => {
+    if (!/^https?:$/.test(url.protocol)) return reject(Object.assign(new Error("not a web address"), { code: "EPROTO" }));
+    const send = url.protocol === "https:" ? httpsRequest : httpRequest;
+    const req = send(url, { method, lookup: publicLookup, timeout: 60_000, headers: { "user-agent": "Statiku/1.0 (import)", ...headers } }, (res) => {
+      let size = 0;
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > maxBytes) return req.destroy(Object.assign(new Error("the answer is too large"), { code: "ETOOBIG" }));
+        chunks.push(chunk);
+      });
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, type: String(res.headers["content-type"] ?? "").split(";")[0].trim(), body: Buffer.concat(chunks) }));
+      res.on("error", reject);
+    });
+    req.on("timeout", () => req.destroy(Object.assign(new Error("timed out"), { code: "ETIMEDOUT" })));
+    req.on("error", reject);
+    req.end(body);
+  });
+
+export const openRequest: Outbound = async (url, { method = "GET", headers = {}, body, maxBytes = 50_000_000 } = {}) => {
+  const res = await fetch(url, { method, headers: { "user-agent": "Statiku/1.0 (import)", ...headers }, body, signal: AbortSignal.timeout(60_000) });
+  const data = Buffer.from(await res.arrayBuffer());
+  if (data.length > maxBytes) throw Object.assign(new Error("the answer is too large"), { code: "ETOOBIG" });
+  return { status: res.status, type: (res.headers.get("content-type") ?? "").split(";")[0].trim(), body: data };
+};
+
 export type CheckResult = { found: boolean; url: string; message: string; otherKey?: string };
 
 export async function checkInstall(domain: string, key: string): Promise<CheckResult> {

@@ -10,7 +10,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createHash } from "node:crypto";
 import pg from "pg";
 import type { Mailer } from "../dashboard/mail.ts";
-import { createDashboard } from "../dashboard/server.ts";
+import { createDashboard, type ImportApis } from "../dashboard/server.ts";
 import { buildTracker } from "../tracker/build.ts";
 import { collectApp, MAX_APP_BODY } from "./app.ts";
 import { collect, MAX_BODY, siteConfig, type Deps } from "./collect.ts";
@@ -29,6 +29,8 @@ export type Options = {
   geocode?: Geocoder;
   // Email to the people who use the dashboard; tests keep what would be sent.
   mailer?: Mailer;
+  // Where imports reach Google, GitHub and Plausible; tests use stand-ins.
+  imports?: ImportApis;
 };
 
 const CORS = {
@@ -85,6 +87,7 @@ export async function createApp(options: Options) {
     hub: deps.hub,
     streets: deps.streets,
     mailer: options.mailer,
+    imports: options.imports,
   });
   const etag = `"${createHash("sha256").update(script).digest("base64url").slice(0, 16)}"`;
 
@@ -161,7 +164,7 @@ export async function createApp(options: Options) {
     await pool.end();
   }
 
-  return { server, pool, deps, writer, dropMarks, close };
+  return { server, pool, deps, writer, dropMarks, close, jobs: dashboard?.jobs };
 }
 
 if (import.meta.main) {

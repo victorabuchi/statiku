@@ -2,7 +2,10 @@
 // and for each one its analytics, a live view with a globe, the steps to add it to the site, and its settings, plus
 // the account's own settings and team. Everything shown comes from /api, and everything from the server goes into
 // the page as text.
-import { siFramer, siGoogletagmanager, siShopify, siSquarespace, siWebflow, siWix, siWordpress } from "simple-icons";
+import {
+  siCloudflare, siFathom, siFramer, siGithub, siGoogleanalytics, siGoogletagmanager, siMatomo, siPlausibleanalytics, siShopify, siSimpleanalytics,
+  siSquarespace, siUmami, siWebflow, siWix, siWordpress,
+} from "simple-icons";
 import { lineChart, minuteBars, sparkline } from "./charts.js";
 import { createGlobe } from "./globe.js";
 
@@ -55,6 +58,9 @@ const ICONS = {
   app: '<rect x="3" y="4" width="14" height="10" rx="1.8"/><path d="M7.5 16.5h5M10 14v2.5"/>',
   logout: '<path d="M8 16.5H5a1.5 1.5 0 0 1-1.5-1.5V5A1.5 1.5 0 0 1 5 3.5h3M12.5 13.5 16 10l-3.5-3.5M16 10H8"/>',
   trash: '<path d="M4 6h12M8 6V4.5h4V6M5.5 6l.7 10a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9l.7-10"/>',
+  // A clock turning back: history from before.
+  history: '<path d="M3.5 10a6.5 6.5 0 1 0 1.9-4.6L3.5 7.3"/><path d="M3.5 3.8v3.5H7M10 6.5V10l2.4 1.6"/>',
+  file: '<path d="M11.5 3H6a1.5 1.5 0 0 0-1.5 1.5v11A1.5 1.5 0 0 0 6 17h8a1.5 1.5 0 0 0 1.5-1.5V7Z"/><path d="M11.5 3v4h4M7.5 11h5M7.5 14h3"/>',
 };
 function icon(name, size = 18) {
   const t = document.createElement("template"), shape = ICONS[name];
@@ -322,6 +328,7 @@ function shell(site, active, content) {
         navItem(`/sites/${site.key}/live`, "live", "Live view", active === "live",
           h("span", { class: "count", id: "nav-live", hidden: !site.live }, h("i", { class: "dot pulse" }), h("span", { text: String(site.live) }))),
         navItem(`/sites/${site.key}/setup`, "code", "Setup", active === "setup"),
+        navItem(`/sites/${site.key}/import`, "history", "Import history", active === "import"),
       ] : null),
     h("div", { class: "foot" }, site
       ? navItem(`/sites/${site.key}/settings`, "settings", "Settings", active === "settings")
@@ -960,12 +967,21 @@ async function analyticsPage(key) {
     const d = data;
     const totals = withPerVisit(d.totals), previous = withPerVisit(d.previous);
     const unit = d.range.unit;
-    if (!d.lastEventAt) {
+    if (!d.lastEventAt && !d.imported && !d.releases) {
       body.replaceChildren(h("div", { class: "card status-card" }, h("span", { class: "icon wait" }, icon("wait", 22)),
-        h("div", { class: "what" }, h("b", { text: "No visits yet" }), h("span", { class: "muted", text: "Add the tracking code to your site, and your first visitors show here and in the live view." })),
-        h("a", { class: "btn primary", href: `/sites/${key}/setup` }, "Finish setup")));
+        h("div", { class: "what" }, h("b", { text: "No visits yet" }), h("span", { class: "muted", text: "Add the tracking code to your site, and your first visitors show here and in the live view. Have numbers from another tool? Import them." })),
+        h("a", { class: "btn primary", href: `/sites/${key}/setup` }, "Finish setup"), h("a", { class: "btn", href: `/sites/${key}/import` }, "Import history")));
       return;
     }
+    // What history the report holds, so imported numbers are never mistaken for Statiku's own.
+    const names = (d.imported?.sources ?? []).map((s) => s.label.split(":")[0]);
+    const historyNote = d.imported
+      ? h("div", { class: "history-note" }, icon("history", 16),
+        d.imported.included
+          ? h("span", {}, `Includes history imported from ${[...new Set(names)].join(" and ")}${d.imported.ownFrom ? `, for the days before ${day(`${d.imported.ownFrom}T12:00`)}, when Statiku started counting` : ""}. `)
+          : h("span", { text: "Imported history isn't in filtered reports: other tools' numbers can't be narrowed by Statiku's filters. " }),
+        h("a", { href: `/sites/${key}/import`, text: "Imports" }))
+      : null;
     const series = d.series.map((s) => withPerVisit(s)), prevSeries = d.previousSeries.map((s) => withPerVisit(s));
     const values = (id) => series.map((s) => s[id] ?? 0);
 
@@ -1003,6 +1019,7 @@ async function analyticsPage(key) {
 
     const pageRows = d.pages[state.pagesTab];
     const content = [
+      historyNote,
       kpis,
       h("div", { class: "grid g-side" }, chartCard, breakdown),
       h("div", { class: "grid g3" },
@@ -1016,6 +1033,7 @@ async function analyticsPage(key) {
         card("Browsers", bars(d.devices.browser, { head: ["Browser", "Visitors"], ...by("browser") })),
         card("Operating systems", bars(d.devices.os, { head: ["System", "Visitors"], ...by("os") }))),
       conversions(d, (name) => setFilter("source", name)),
+      d.releases ? releasesCard(d, values("releases")) : null,
       h("div", { class: "grid g2" },
         card("Events", d.events.length ? h("div", { class: "table-wrap" }, h("table", {},
           h("thead", {}, h("tr", {}, ["Event", "Count", "Visits", ...(d.app.has ? ["Installs"] : []), "Props"].map((x) => h("th", { text: x })))),
@@ -1050,6 +1068,15 @@ async function analyticsPage(key) {
   return h("div", { class: "page" },
     pageHead([icon("chart", 20), h("h1", { text: "Analytics" }), h("span", { class: "muted", text: site?.domains[0] }), refreshed], [rangeButton, exportButton, liveButton]),
     chips, body);
+}
+
+// Downloads of the GitHub repository's releases, counted by GitHub: all time, in this period, and by release.
+function releasesCard(d, perBucket) {
+  const r = d.releases;
+  return h("div", { class: "grid g-side" },
+    card("Downloads from GitHub releases", bars(r.byRelease, { head: ["Release", "Downloads, all time"] }), { sub: r.repo?.replace(/^GitHub: /, "") }),
+    h("div", { class: "card kpi" }, h("span", { class: "label", text: "Release downloads" }), h("span", { class: "value", text: int(r.period) }),
+      h("span", { class: "delta", text: `In this period. ${int(r.total)} all time.` }), sparkline(perBucket)));
 }
 
 // Visits that went on to download, install, check out or buy, by source, beside the steps overall.
@@ -1307,6 +1334,149 @@ async function livePage(key) {
 }
 
 // ---------- A site's settings ----------
+// ---------- Import history ----------
+// Numbers from before Statiku, from another tool or from GitHub. They fill the days before Statiku's own first visit.
+const IMPORT_KINDS = {
+  ga4: { name: "Google Analytics", logo: siGoogleanalytics },
+  plausible: { name: "Plausible", logo: siPlausibleanalytics },
+  github: { name: "GitHub releases", logo: siGithub },
+  file: { name: "A file", logo: null },
+};
+const FILE_TOOLS = [siFathom, siMatomo, siUmami, siSimpleanalytics, siCloudflare];
+
+async function importPage(key) {
+  const site = state.sites.find((s) => s.key === key);
+  const owner = site?.role === "owner";
+  const query = new URLSearchParams(location.search);
+  let info = await api(`/api/sites/${key}/imports`);
+  const listHost = h("div");
+  const logoOf = (kind, size = 20) => (IMPORT_KINDS[kind]?.logo ? brand(IMPORT_KINDS[kind].logo, size) : icon("file", size));
+  const reload = async () => {
+    info = await api(`/api/sites/${key}/imports`);
+    drawList();
+  };
+  // A running import is checked on every few seconds until it's done.
+  every(2500, () => info.imports.some((x) => x.status === "running") && reload());
+  const started = async (promise, button) => {
+    button.disabled = true;
+    try {
+      await promise;
+      toast("Import started");
+      history.replaceState({}, "", `/sites/${key}/import`);
+      await reload();
+      listHost.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (err) {
+      if (!(err instanceof SignedOut)) toast(err.message);
+    } finally {
+      button.disabled = false;
+    }
+  };
+
+  function drawList() {
+    if (!info.imports.length) return listHost.replaceChildren();
+    listHost.replaceChildren(card("Your imports", h("div", { class: "imports" }, info.imports.map((x) => {
+      const days = x.firstDay && x.lastDay ? `${day(`${x.firstDay}T12:00`)}, ${x.firstDay.slice(0, 4)} – ${day(`${x.lastDay}T12:00`)}, ${x.lastDay.slice(0, 4)}` : null;
+      const status = x.status === "running" ? h("span", { class: "muted" }, h("i", { class: "dot idle pulse" }), " Importing…")
+        : x.status === "failed" ? h("span", { class: "bad", text: x.error ?? "It failed." })
+        : h("span", { class: "muted", text: [days, x.kind === "github" && x.refreshedAt ? `refreshed ${ago(x.refreshedAt)}` : null].filter(Boolean).join(" · ") });
+      return h("div", { class: "import-row" }, h("span", { class: "logo" }, logoOf(x.kind)),
+        h("div", { class: "what" }, h("b", { text: x.label }), status, x.note ? h("span", { class: "muted small", text: x.note }) : null),
+        owner && x.status !== "running" ? h("button", {
+          class: "btn plain", type: "button", "aria-label": `Delete ${x.label}`,
+          onclick: async () => {
+            if (!(await confirmDialog({ title: "Delete this import?", body: `${x.label}: its numbers leave every report. You can import it again later.`, confirm: "Delete", danger: true }))) return;
+            await api(`/api/sites/${key}/imports/${x.id}`, { method: "DELETE" });
+            toast("Import deleted");
+            reload();
+          },
+        }, icon("trash", 16)) : null);
+    })), { sub: "Imported days are counted only before Statiku's own first visit, and a day two imports share is counted once." }));
+  }
+  drawList();
+
+  // Each source opens its own small form.
+  let fields = 0;
+  const field = (label, input, help) => {
+    input.id = `i-${++fields}`;
+    return h("div", { class: "field" }, h("label", { for: input.id, text: label }), input, help ? h("span", { class: "help", text: help }) : null);
+  };
+  const error = query.get("error");
+
+  // Google Analytics: sign in with Google, then pick the property.
+  const google = h("div", { class: "form" });
+  if (query.get("google")) {
+    const pick = h("select", { class: "input" }, h("option", { text: "Loading your properties…" }));
+    const importButton = h("button", { class: "btn primary", type: "button", text: "Import", disabled: true });
+    google.append(field("Google Analytics 4 property", pick), importButton);
+    api(`/api/sites/${key}/imports/google/properties?grant=${encodeURIComponent(query.get("google"))}`).then(({ properties }) => {
+      pick.replaceChildren(...properties.map((p) => h("option", { value: p.id, text: `${p.name} (${p.account}, ${p.id})` })));
+      if (!properties.length) pick.replaceChildren(h("option", { text: "This Google account has no GA4 properties" }));
+      importButton.disabled = !properties.length;
+      importButton.onclick = () => started(api(`/api/sites/${key}/imports`, {
+        method: "POST", body: { kind: "ga4", grant: query.get("google"), property: pick.value, name: properties.find((p) => p.id === pick.value)?.name },
+      }), importButton);
+    }, (err) => google.replaceChildren(failure(err), h("a", { class: "btn", href: `/api/sites/${key}/imports/google/start`, "data-external": "", text: "Connect again" })));
+  } else {
+    google.append(h("a", { class: info.google ? "btn primary" : "btn", href: `/api/sites/${key}/imports/google/start`, "data-external": "" }, brand(siGoogleanalytics, 16), "Connect Google Analytics"),
+      info.google ? null : h("span", { class: "help", text: "Signing in with Google isn't set up on this server yet. Download a CSV from Google Analytics and add it as a file instead." }));
+  }
+
+  // Plausible: a Stats API key.
+  const pKey = h("input", { class: "input", type: "password", autocomplete: "off", placeholder: "Stats API key" });
+  const pSite = h("input", { class: "input", value: site?.domains[0] ?? "" });
+  const pHost = h("input", { class: "input", value: "https://plausible.io" });
+  const pGo = h("button", { class: "btn primary", type: "submit", text: "Import" });
+  const plausible = h("form", { class: "form", onsubmit: (e) => { e.preventDefault(); started(api(`/api/sites/${key}/imports`, { method: "POST", body: { kind: "plausible", key: pKey.value, site: pSite.value, host: pHost.value } }), pGo); } },
+    field("Stats API key", pKey, "In Plausible: your account settings → API Keys → New API Key, for the Stats API."),
+    field("Site, as Plausible names it", pSite), field("Plausible's address", pHost, "Change this only if you host Plausible yourself."), pGo);
+
+  // GitHub: the repository whose releases people download.
+  const gRepo = h("input", { class: "input", placeholder: "owner/repository" });
+  const gToken = h("input", { class: "input", type: "password", autocomplete: "off", placeholder: "Only for a private repository" });
+  const gGo = h("button", { class: "btn primary", type: "submit", text: "Import" });
+  const githubForm = h("form", { class: "form", onsubmit: (e) => { e.preventDefault(); started(api(`/api/sites/${key}/imports`, { method: "POST", body: { kind: "github", repo: gRepo.value, token: gToken.value } }), gGo); } },
+    field("Repository", gRepo, "Every release's downloads so far, on the day it came out; then what they gain, every day."),
+    field("Token", gToken, `A fine-grained token with read access to the repository's contents.${info.tokens ? "" : " This server doesn't keep tokens, so it's used once."}`), gGo);
+
+  // A file from any other tool.
+  const input = h("input", { type: "file", multiple: true, accept: ".csv,.tsv,.txt,.zip", hidden: true });
+  const fGo = h("button", { class: "btn primary", type: "button", text: "Choose files" });
+  const send = (files) => {
+    if (!files.length) return;
+    const form = new FormData();
+    for (const f of files) form.append("file", f, f.name);
+    started(fetch(`/api/sites/${key}/imports/file`, { method: "POST", body: form, credentials: "same-origin" }).then(async (res) => {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "That couldn't be imported.");
+    }), fGo);
+  };
+  input.onchange = () => send([...input.files]);
+  fGo.onclick = () => input.click();
+  const drop = h("div", {
+    class: "drop", ondragover: (e) => { e.preventDefault(); drop.classList.add("over"); }, ondragleave: () => drop.classList.remove("over"),
+    ondrop: (e) => { e.preventDefault(); drop.classList.remove("over"); send([...e.dataTransfer.files]); },
+  }, icon("file", 22), h("b", { text: "Drop CSV or ZIP files here" }), h("span", { class: "muted", text: "Several at once is fine: they become one import." }), fGo, input);
+  const fileForm = h("div", { class: "form" }, drop,
+    h("div", { class: "tools" }, FILE_TOOLS.map((logo) => h("span", { title: logo.title }, brand(logo, 16), logo.title))),
+    h("p", { class: "help", text: "Export daily numbers, a row for each day, with visitors, visits or page views; sources, pages or countries can come as files of their own. Plausible's ZIP export, Google Analytics' CSV downloads and Umami's data export work as they are." }));
+
+  const source = (kind, title, sub, body) => h("div", { class: "card import-source" },
+    h("div", { class: "card-head" }, h("span", { class: "logo" }, logoOf(kind, 22)), h("div", {}, h("h2", { text: title }), h("span", { class: "sub", text: sub }))),
+    h("div", { class: "card-body" }, body));
+
+  return h("div", { class: "page narrow" },
+    pageHead([icon("history", 20), h("h1", { text: "Import history" }), h("span", { class: "muted", text: site?.domains[0] })]),
+    h("p", { class: "lede", text: "Statiku counts from the moment its code is on your site. Bring in what another tool counted before, and your reports reach back to your first visitor." }),
+    error ? h("div", { class: "error", role: "alert", text: error }) : null,
+    owner ? h("div", { class: "grid g2 import-sources" },
+      source("ga4", "Google Analytics", "Sign in with Google and pick a property", google),
+      source("plausible", "Plausible", "With a Stats API key", plausible),
+      source("github", "GitHub releases", "Download counts of your app's releases", githubForm),
+      source("file", "From a file", "Fathom, Matomo, Umami, Simple Analytics, a spreadsheet…", fileForm))
+      : h("p", { class: "muted", text: "Only the site's owner can import history." }),
+    listHost);
+}
+
 async function siteSettingsPage(key) {
   const { site, snippet } = await api(`/api/sites/${key}`);
   const owner = site.role === "owner";
@@ -1568,8 +1738,9 @@ const ROUTES = [
   [/^\/sites\/(p_[a-z0-9]+)\/live$/, (k) => ["live", k, livePage(k)]],
   [/^\/sites\/(p_[a-z0-9]+)\/setup$/, (k) => ["setup", k, setupPage(k)]],
   [/^\/sites\/(p_[a-z0-9]+)\/settings$/, (k) => ["settings", k, siteSettingsPage(k)]],
+  [/^\/sites\/(p_[a-z0-9]+)\/import$/, (k) => ["import", k, importPage(k)]],
 ];
-const TITLES = { home: "Websites", account: "Settings", add: "Add a website", analytics: "Analytics", live: "Live view", setup: "Setup", settings: "Site settings" };
+const TITLES = { home: "Websites", account: "Settings", add: "Add a website", analytics: "Analytics", live: "Live view", setup: "Setup", settings: "Site settings", import: "Import history" };
 
 let rendering = 0;
 async function render() {

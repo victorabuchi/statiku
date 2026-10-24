@@ -65,6 +65,13 @@ export function siteName(host: string): string {
   return SITES.find(([re]) => re.test(h))?.[1] ?? h;
 }
 
+// A source as another analytics tool names it ("google", "(direct)", "Direct / None", "t.co"), as Statiku would.
+export function sourceName(name: string): string {
+  const tag = name.trim();
+  if (!tag || /^\(?(direct|none|not set)\)?$|^direct\s*\/\s*none$/i.test(tag)) return "Direct";
+  return tagName(tag.replace(/^https?:\/\//i, "").replace(/\/.*$/, ""));
+}
+
 function tagName(tag: string): string {
   const alias = ALIASES.get(tag.toLowerCase().replace(/\s+/g, ""));
   if (alias) return alias;

@@ -2,10 +2,12 @@
 // TEST_DATABASE_URL (createdb statiku_test); the test empties that database first.
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import { crc32 } from "node:zlib";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import pg from "pg";
-import { checkInstall, fetchIcon, imageType, isPublicAddress } from "../dashboard/check.ts";
+import { checkInstall, fetchIcon, imageType, isPublicAddress, openRequest } from "../dashboard/check.ts";
 import { collect } from "../ingest/collect.ts";
 import { domainOf } from "../dashboard/server.ts";
 import { migrate } from "../db/migrate.ts";
@@ -17,6 +19,10 @@ const SAFARI = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.
 const CITIES = existsSync(new URL("../data/city.mmdb", import.meta.url)) ? new URL("../data/city.mmdb", import.meta.url) : undefined;
 
 let app: Awaited<ReturnType<typeof createApp>>;
+// Stand-ins for Plausible, GitHub and Google (see "imports" below).
+let elsewhere: Server;
+let elsewhereUrl: string;
+const github = { releases: [] as any[] };
 let pool: pg.Pool;
 let base: string;
 // What the app would have emailed.
@@ -34,12 +40,19 @@ before(async () => {
   await admin.end();
   await migrate(url!, () => {});
   pool = new pg.Pool({ connectionString: url });
+  elsewhere = createServer(standIn);
+  await new Promise<void>((resolve) => elsewhere.listen(0, "127.0.0.1", resolve));
+  elsewhereUrl = `http://127.0.0.1:${(elsewhere.address() as AddressInfo).port}`;
   // With the city database (npm run geo), live visitors get a city too; the tests check it's never stored.
   app = await createApp({
     databaseUrl: url!, trustProxy: true, geoPath: new URL("../data/country.mmdb", import.meta.url), cityPath: CITIES, flushMs: 60_000,
     // Instead of OpenStreetMap: every shared point is 8 metres from the same house in Kuopio.
     geocode: async () => ({ street: "Särkiniementie", number: "30", numberMetres: 8, area: "Saaristokaupunki", city: "Kuopio", region: "North Savo", country: "FI" }),
     mailer: async (mail) => void mailbox.push(mail),
+    imports: {
+      request: openRequest, github: elsewhereUrl,
+      google: { auth: `${elsewhereUrl}/auth`, token: `${elsewhereUrl}/token`, data: elsewhereUrl, admin: elsewhereUrl, clientId: "id", clientSecret: "secret" },
+    },
   });
   await new Promise<void>((resolve) => app.server.listen(0, resolve));
   base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
@@ -49,6 +62,7 @@ after(async () => {
   if (skip) return;
   await app.close();
   await pool.end();
+  elsewhere.close();
 });
 
 // A browser of its own: it keeps its cookie and comes from its own address, so sign-in limits don't overlap.
@@ -534,4 +548,228 @@ test("a forgotten password: a link by email that works once, for that account, a
   assert.equal((await browser()("/api/login", { method: "POST", body: { email: "forgetful@example.com", password: PASSWORD } })).status, 401);
   assert.equal((await browser()("/api/login", { method: "POST", body: { email: "forgetful@example.com", password: "a brand new password" } })).status, 200);
   assert.equal((await stranger("/api/password/reset/not-a-real-token-at-all-0123")).data.valid, false);
+});
+
+// ---------- Imports ----------
+
+// Plausible's Stats API, GitHub's releases and Google's sign-in and Analytics APIs, answering as they document.
+function standIn(req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) {
+  const chunks: Buffer[] = [];
+  req.on("data", (c) => chunks.push(c));
+  req.on("end", () => {
+    const body = Buffer.concat(chunks).toString();
+    const send = (status: number, data: unknown) => {
+      res.writeHead(status, { "content-type": "application/json" });
+      res.end(JSON.stringify(data));
+    };
+    const path = (req.url ?? "").split("?")[0];
+    if (path === "/api/v2/query") {
+      if (req.headers.authorization !== "Bearer plausible-key") return send(401, { error: "Invalid API key" });
+      const q = JSON.parse(body);
+      const by = q.dimensions[1] ?? "total";
+      const rows: Record<string, [string, string, number[]][]> = {
+        total: [["2025-01-01", "", [10, 12, 30, 50, 60]], ["2025-01-02", "", [20, 25, 50, 40, 120]], ["2025-01-03", "", [5, 5, 8, 100, 0]]],
+        "visit:source": [["2025-01-01", "Google", [6, 7, 18]], ["2025-01-01", "Direct / None", [4, 5, 12]], ["2025-01-02", "news.ycombinator.com", [20, 25, 50]]],
+        "event:page": [["2025-01-01", "/", [10, 20]], ["2025-01-01", "/pricing", [5, 10]]],
+        "visit:entry_page": [["2025-01-01", "/", [12]]],
+        "visit:country": [["2025-01-01", "FI", [7]], ["2025-01-01", "US", [3]]],
+        "visit:device": [["2025-01-01", "Desktop", [10]]],
+        "visit:browser": [["2025-01-01", "Safari", [10]]],
+        "visit:os": [["2025-01-01", "Mac", [10]]],
+      };
+      return send(200, { results: (rows[by] ?? []).map(([d, v, m]) => ({ dimensions: by === "total" ? [d] : [d, v], metrics: m })) });
+    }
+    if (path === "/repos/acme/app/releases") return send(200, github.releases);
+    if (path === "/repos/acme/missing/releases") return send(404, { message: "Not Found" });
+    if (path === "/token") {
+      const form = new URLSearchParams(body);
+      return form.get("code") === "good" ? send(200, { access_token: "ga-token", expires_in: 3600, refresh_token: "r" }) : send(400, { error: "invalid_grant" });
+    }
+    if (req.headers.authorization !== "Bearer ga-token") return send(401, { error: { message: "Request had invalid authentication credentials." } });
+    if (path === "/v1beta/accountSummaries") {
+      return send(200, { accountSummaries: [{ displayName: "Acme", propertySummaries: [{ property: "properties/123", displayName: "acme.com" }] }] });
+    }
+    if (path === "/v1beta/properties/123:runReport") {
+      const q = JSON.parse(body);
+      const by = q.dimensions[1]?.name ?? "total";
+      const values: Record<string, [string, string[]]> = {
+        total: ["", ["8", "10", "20", "0.5", "30"]], sessionSource: ["(direct)", ["8", "9", "20"]], pagePath: ["/docs?x=1", ["8", "20"]],
+        landingPage: ["/docs", ["9"]], countryId: ["SE", ["8"]], deviceCategory: ["mobile", ["8"]], browser: ["Chrome", ["8"]], operatingSystem: ["Android", ["8"]],
+      };
+      const [value, metrics] = values[by];
+      return send(200, { rowCount: 1, rows: [{ dimensionValues: [{ value: "20240601" }, ...(by === "total" ? [] : [{ value }])], metricValues: metrics.map((m) => ({ value: m })) }] });
+    }
+    send(404, { error: "not here" });
+  });
+}
+
+// A ZIP of the given files, stored as they are.
+function zip(files: Record<string, string>) {
+  const parts: Buffer[] = [], central: Buffer[] = [];
+  let offset = 0;
+  for (const [name, text] of Object.entries(files)) {
+    const data = Buffer.from(text), n = Buffer.from(name), crc = crc32(data);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(n.length, 26);
+    const entry = Buffer.alloc(46);
+    entry.writeUInt32LE(0x02014b50, 0); entry.writeUInt16LE(20, 4); entry.writeUInt16LE(20, 6); entry.writeUInt32LE(crc, 16);
+    entry.writeUInt32LE(data.length, 20); entry.writeUInt32LE(data.length, 24); entry.writeUInt16LE(n.length, 28); entry.writeUInt32LE(offset, 42);
+    parts.push(local, n, data);
+    central.push(entry, n);
+    offset += 30 + n.length + data.length;
+  }
+  const dir = Buffer.concat(central), end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(central.length / 2, 8); end.writeUInt16LE(central.length / 2, 10);
+  end.writeUInt32LE(dir.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...parts, dir, end]);
+}
+
+test("imports: Plausible, Google Analytics, files and GitHub releases, each day counted once", { skip }, async () => {
+  const owner = await signUp("history@example.com");
+  const { key } = (await owner("/api/sites", { method: "POST", body: { address: "history.example", timezone: "UTC" } })).data.site;
+  const settled = async () => {
+    for (let i = 0; i < 200; i++) {
+      const list = (await owner(`/api/sites/${key}/imports`)).data.imports;
+      if (list.every((x: any) => x.status !== "running")) return list;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    throw new Error("an import never finished");
+  };
+  const report = async (query: string) => (await owner(`/api/sites/${key}/stats?${query}`)).data;
+  const upload = async (files: Record<string, string | Buffer>) => {
+    const form = new FormData();
+    for (const [name, data] of Object.entries(files)) form.append("file", new Blob([data as BlobPart]), name);
+    const res = await fetch(`${base}/api/sites/${key}/imports/file`, { method: "POST", headers: { cookie: owner.cookie(), origin: base }, body: form });
+    return { status: res.status, data: await res.json() };
+  };
+
+  // Plausible: a wrong key fails with Plausible's reason; the right one brings every breakdown in.
+  assert.equal((await owner(`/api/sites/${key}/imports`, { method: "POST", body: { kind: "plausible", host: elsewhereUrl, key: "nope", site: "history.example" } })).status, 202);
+  let list = await settled();
+  assert.equal(list[0].status, "failed");
+  assert.match(list[0].error, /didn't accept that API key/);
+  await owner(`/api/sites/${key}/imports/${list[0].id}`, { method: "DELETE" });
+  assert.equal((await owner(`/api/sites/${key}/imports`, { method: "POST", body: { kind: "plausible", host: elsewhereUrl, key: "plausible-key", site: "history.example" } })).status, 202);
+  list = await settled();
+  assert.equal(list[0].status, "done");
+  assert.deepEqual([list[0].firstDay, list[0].lastDay], ["2025-01-01", "2025-01-03"]);
+  assert.equal((await owner(`/api/sites/${key}/imports`, { method: "POST", body: { kind: "plausible", host: elsewhereUrl, key: "plausible-key", site: "history.example" } })).status, 409);
+
+  let r = await report("range=custom&from=2025-01-01&to=2025-01-03");
+  assert.deepEqual({ visitors: r.totals.visitors, visits: r.totals.visits, pageviews: r.totals.pageviews, bounce: r.totals.bounce, duration: r.totals.duration },
+    { visitors: 35, visits: 42, pageviews: 88, bounce: 50, duration: 89 });
+  assert.deepEqual(r.sources.map((s: any) => [s.label, s.v]), [["Hacker News", 20], ["Google", 6], ["Direct", 4]]);
+  assert.deepEqual(r.pages.top.map((p: any) => [p.label, p.v, p.pageviews]), [["/", 10, 20], ["/pricing", 5, 10]]);
+  assert.deepEqual(r.pages.entry.map((p: any) => [p.label, p.v]), [["/", 12]]);
+  assert.deepEqual(r.countries.map((c: any) => [c.label, c.v]), [["FI", 7], ["US", 3]]);
+  assert.deepEqual([r.devices.device[0].label, r.devices.browser[0].label, r.devices.os[0].label], ["Desktop", "Safari", "macOS"]);
+  assert.deepEqual(r.series.map((p: any) => p.visitors), [10, 20, 5]);
+  assert.equal(r.imported.included, true);
+  // Another tool's numbers can't be narrowed by Statiku's filters, so a filtered report leaves them out and says so.
+  r = await report("range=custom&from=2025-01-01&to=2025-01-03&country=FI");
+  assert.equal(r.totals.visitors, 0);
+  assert.deepEqual([r.imported.included, r.imported.narrowed], [false, true]);
+
+  // Google Analytics: sign in, pick the property, and its history joins in. The sign-in lives only in memory.
+  const start = await fetch(`${base}/api/sites/${key}/imports/google/start`, { headers: { cookie: owner.cookie() }, redirect: "manual" });
+  assert.equal(start.status, 302);
+  const auth = new URL(start.headers.get("location")!);
+  assert.equal(auth.origin + auth.pathname, `${elsewhereUrl}/auth`);
+  assert.equal(auth.searchParams.get("scope"), "https://www.googleapis.com/auth/analytics.readonly");
+  const back = await fetch(`${base}/api/imports/google/callback?code=good&state=${auth.searchParams.get("state")}`, { headers: { cookie: owner.cookie() }, redirect: "manual" });
+  const grant = new URL(back.headers.get("location")!, base).searchParams.get("google");
+  assert.ok(grant);
+  assert.equal((await fetch(`${base}/api/imports/google/callback?code=good&state=${auth.searchParams.get("state")}`, { headers: { cookie: owner.cookie() }, redirect: "manual" })).status, 400);
+  assert.deepEqual((await owner(`/api/sites/${key}/imports/google/properties?grant=${grant}`)).data.properties, [{ id: "123", name: "acme.com", account: "Acme" }]);
+  assert.equal((await browser()(`/api/sites/${key}/imports/google/properties?grant=${grant}`)).status, 401);
+  assert.equal((await owner(`/api/sites/${key}/imports`, { method: "POST", body: { kind: "ga4", grant, property: "123", name: "acme.com" } })).status, 202);
+  list = await settled();
+  assert.equal(list[0].status, "done");
+  r = await report("range=all");
+  assert.equal(r.range.from.slice(0, 10), "2024-06-01");
+  r = await report("range=custom&from=2024-06-01&to=2024-06-01");
+  assert.deepEqual([r.totals.visitors, r.totals.visits, r.totals.pageviews, r.totals.bounce, r.totals.duration], [8, 10, 20, 50, 30]);
+  assert.deepEqual([r.sources[0].label, r.pages.top[0].label, r.countries[0].label, r.devices.device[0].label], ["Direct", "/docs", "SE", "Mobile"]);
+
+  // A file: Google Analytics' CSV, a day the other imports don't have and one they do (left out, and the note says so).
+  assert.equal((await upload({ "ga.csv": "# Google Analytics\n# Start date: 20240101\n\nDate,Total users,Sessions,Views\n20240301,4,5,9\n20250102,999,999,999\n" })).status, 202);
+  list = await settled();
+  assert.equal(list[0].status, "done");
+  assert.match(list[0].note, /1 day was already covered/);
+  assert.equal((await report("range=custom&from=2024-03-01&to=2024-03-01")).totals.pageviews, 9);
+  assert.equal((await report("range=custom&from=2025-01-02&to=2025-01-02")).totals.visitors, 20);
+  assert.equal((await upload({ "ga.csv": "# Google Analytics\n# Start date: 20240101\n\nDate,Total users,Sessions,Views\n20240301,4,5,9\n20250102,999,999,999\n" })).status, 409);
+
+  // Plausible's own export, zipped: totals and sources go in; exit pages, which Statiku doesn't keep, are skipped.
+  const exported = zip({
+    "imported_visitors.csv": "date,visitors,pageviews,bounces,visits,visit_duration\n2024-04-01,3,6,1,4,200\n",
+    "imported_sources.csv": "date,source,referrer,utm_source,visitors,visits\n2024-04-01,Reddit,reddit.com,,2,3\n2024-04-01,Reddit,old.reddit.com,,1,1\n",
+    "imported_exit_pages.csv": "date,exit_page,visitors,exits\n2024-04-01,/bye,3,3\n",
+  });
+  assert.equal((await upload({ "plausible-export.zip": exported })).status, 202);
+  list = await settled();
+  assert.equal(list[0].status, "done");
+  assert.match(list[0].note, /imported_exit_pages\.csv was skipped/);
+  r = await report("range=custom&from=2024-04-01&to=2024-04-01");
+  assert.deepEqual([r.totals.visitors, r.totals.bounce, r.totals.duration, r.sources[0].label, r.sources[0].v], [3, 25, 50, "Reddit", 3]);
+
+  // One row per page view (Umami's export): counted up by day, visitor and visit, in the site's time zone.
+  assert.equal((await upload({
+    "website_event.csv": "created_at,session_id,visit_id,url_path,referrer_domain,country,device,browser,os,event_type\n" +
+      "2024-05-01 10:00:00,s1,v1,/a,github.com,DE,laptop,firefox,Linux,1\n2024-05-01 10:01:00,s1,v1,/b,,DE,laptop,firefox,Linux,1\n" +
+      "2024-05-01 11:00:00,s2,v2,/a,,FR,mobile,ios,iOS,1\n2024-05-01 11:00:05,s2,v2,/a,,FR,mobile,ios,iOS,2\n",
+  })).status, 202);
+  list = await settled();
+  assert.equal(list[0].status, "done");
+  r = await report("range=custom&from=2024-05-01&to=2024-05-01");
+  assert.deepEqual([r.totals.visitors, r.totals.visits, r.totals.pageviews], [2, 2, 3]);
+  assert.deepEqual(r.pages.entry.map((p: any) => [p.label, p.v]), [["/a", 2]]);
+  assert.deepEqual(r.sources.map((s: any) => [s.label, s.v]), [["Direct", 2], ["GitHub", 1]]);
+  assert.deepEqual(r.devices.browser.map((b: any) => b.label).sort(), ["Firefox", "Safari"]);
+  assert.equal((await upload({ "nothing.csv": "name,colour\nbob,blue\n" })).status, 202);
+  list = await settled();
+  assert.equal(list[0].status, "failed");
+
+  // Statiku's own first event ends the imported history: from that day on, its own numbers count.
+  const today = new Date().toISOString().slice(0, 10);
+  assert.equal((await upload({ "today.csv": `date,visitors\n${today},500\n2023-12-31,1\n` })).status, 202);
+  await settled();
+  await visit(key, "https://history.example/", "91.152.40.90");
+  await app.writer.flush();
+  r = await report(`range=custom&from=${today}&to=${today}`);
+  assert.equal(r.totals.visitors, 1);
+  assert.equal(r.imported.ownFrom, today);
+  assert.equal((await report("range=custom&from=2023-12-31&to=2023-12-31")).totals.visitors, 1);
+
+  // GitHub: every release's downloads on the day it came out, then what they gain, day by day.
+  github.releases = [
+    { id: 1, tag_name: "v1.0", published_at: "2025-01-01T10:00:00Z", created_at: "2025-01-01T09:00:00Z", assets: [{ id: 11, download_count: 100 }] },
+    { id: 2, tag_name: "v1.1", published_at: "2025-01-02T22:30:00Z", created_at: "2025-01-02T22:00:00Z", assets: [{ id: 21, download_count: 50 }, { id: 22, download_count: 5 }] },
+    { id: 3, tag_name: "v2.0-draft", draft: true, created_at: "2025-02-01T00:00:00Z", assets: [{ id: 31, download_count: 9 }] },
+  ];
+  assert.equal((await owner(`/api/sites/${key}/imports`, { method: "POST", body: { kind: "github", repo: "acme/missing" } })).status, 202);
+  list = await settled();
+  assert.match(list[0].error, /no public repository acme\/missing/);
+  assert.equal((await owner(`/api/sites/${key}/imports`, { method: "POST", body: { kind: "github", repo: "https://github.com/acme/app" } })).status, 202);
+  list = await settled();
+  assert.equal(list[0].status, "done");
+  r = await report("range=all");
+  assert.deepEqual([r.releases.total, r.releases.byRelease], [155, [{ label: "v1.0", v: 100 }, { label: "v1.1", v: 55 }]]);
+  github.releases[0].assets[0].download_count = 110;
+  github.releases[1].assets[0].download_count = 62;
+  await app.jobs!.refreshDownloads();
+  r = await report("range=today");
+  assert.deepEqual([r.releases.total, r.releases.period], [177, 22]);
+  assert.equal(r.series.reduce((n: number, p: any) => n + p.releases, 0), 22);
+
+  // Only the owner imports; deleting an import takes its history out of every report.
+  const member = await signUp("history-member@example.com");
+  const { link } = (await owner("/api/team/invites", { method: "POST" })).data;
+  await member(`/api/invites/${link.split("/join/")[1]}/accept`, { method: "POST" });
+  assert.equal((await member(`/api/sites/${key}/imports`)).status, 200);
+  assert.equal((await member(`/api/sites/${key}/imports`, { method: "POST", body: { kind: "github", repo: "acme/other" } })).status, 403);
+  const plausible = list.find((x: any) => x.label.startsWith("Plausible"));
+  await owner(`/api/sites/${key}/imports/${plausible.id}`, { method: "DELETE" });
+  assert.equal((await report("range=custom&from=2025-01-01&to=2025-01-03")).totals.visitors, 0);
 });
