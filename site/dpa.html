@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data processing agreement · Statiku</title>
+<meta name="description" content="How Statiku processes the personal data of your visitors on your behalf, under Article 28 of the GDPR.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/site/site.css?v={{V_CSS}}">
+</head>
+<body class="legal">
+<nav class="legalnav"><a class="logo" href="/"><img src="/favicon.svg" alt="" width="28" height="28"><span>Statiku</span></a><a href="/signup">Start free</a></nav>
+<main class="legalbody">
+<h1>Data processing agreement</h1>
+<p class="updated">Last updated 24 October 2026</p>
+
+<p>This agreement is between you, the customer (the “controller”), and Victor Abuchi, Kuopio, Finland, who runs
+Statiku (the “processor”). It's part of the <a href="/terms">terms of service</a> and applies whenever Statiku processes
+personal data for you, as Article 28 of the General Data Protection Regulation (GDPR) requires. If you need it signed
+on paper, email <a href="mailto:contact@victorabuchi.com">contact@victorabuchi.com</a>.</p>
+
+<h2>1. What, why and for how long</h2>
+<table>
+  <tbody>
+    <tr><th>Purpose</th><td>Providing Statiku to you: counting visits and app use, showing reports and the live view, sending your alerts, and importing your history.</td></tr>
+    <tr><th>People</th><td>Visitors of your websites and users of your apps.</td></tr>
+    <tr><th>Data</th><td>A visitor code (a hash with a key that changes daily); page addresses, referrers and campaign tags; country (kept) and approximate city (in memory only, while they visit); browser, system and device type; the events you choose to send; app install IDs, versions and licence state; exact location only when a visitor agrees to share it (held in memory, to about 10 metres, while they visit). IP addresses are used in memory and never stored.</td></tr>
+    <tr><th>Special data</th><td>None. Don't send special categories of data, or details that identify people, to Statiku.</td></tr>
+    <tr><th>Duration</th><td>For as long as you use Statiku, until you delete the site or your account.</td></tr>
+  </tbody>
+</table>
+
+<h2>2. What we promise</h2>
+<ul>
+  <li>We process the data only on your documented instructions: these terms and the settings you choose in Statiku,
+    unless EU or Finnish law requires otherwise, in which case we'll tell you first if the law allows.</li>
+  <li>Everyone who can reach the data is bound to keep it confidential.</li>
+  <li>We protect it with the measures in section 6.</li>
+  <li>We help you answer requests from the people whose data it is, and with data protection impact assessments and
+    consultations, as far as we reasonably can.</li>
+  <li>We tell you of a personal data breach without undue delay, and within 48 hours of learning of it, with what we
+    know and what we're doing about it.</li>
+  <li>When you delete a site or your account, its data is deleted from our database at once; copies in our backups are
+    gone within 7 days.</li>
+  <li>We give you the information you need to show that this agreement is kept, and allow an audit by you or an auditor
+    you choose, at your cost, with reasonable notice, at most once a year unless a breach calls for more.</li>
+</ul>
+
+<h2>3. Sub-processors</h2>
+<p>You authorise us to use these sub-processors. We bind each to data protection obligations as strict as these, and
+remain responsible for them. We'll email you at least 30 days before adding or replacing one; if you object for
+good reason and we can't solve it, you may end the terms and get back what you paid for the time that remains.</p>
+<table>
+  <thead><tr><th>Sub-processor</th><th>What for</th><th>Where the data is</th></tr></thead>
+  <tbody>
+    <tr><td>Render Services, Inc.</td><td>Servers and database</td><td>Frankfurt, Germany</td></tr>
+    <tr><td>OpenStreetMap Foundation</td><td>Street names for the locations visitors agree to share; only on sites that turn exact location on</td><td>United Kingdom</td></tr>
+  </tbody>
+</table>
+
+<h2>4. Transfers</h2>
+<p>Your visitors' data is stored in the EU. Where a sub-processor outside the EU can reach it, the transfer relies on an
+adequacy decision of the European Commission (the United Kingdom; US companies certified under the EU-US Data Privacy
+Framework) or on the Commission's standard contractual clauses.</p>
+
+<h2>5. Your part</h2>
+<p>You're responsible for having a lawful basis for counting your visitors, for telling them about it in your privacy
+policy, and for asking for consent where your law requires, including before you turn on exact location.</p>
+
+<h2>6. How the data is protected</h2>
+<ul>
+  <li>Everything travels encrypted (HTTPS). The database runs in Frankfurt on disks that our host, Render, encrypts.</li>
+  <li>IP addresses are never stored. The key behind each day's visitor codes is deleted after a day, so codes can't be
+    traced back to anyone or linked across days.</li>
+  <li>No cookies or identifiers are stored on visitors' devices.</li>
+  <li>Approximate cities and shared locations are held only in memory, while the visitor is on the site.</li>
+  <li>Customers' passwords are hashed with scrypt; sign-in tokens, reset links and invitations are kept only as hashes;
+    tokens from other services are sealed with AES-256-GCM.</li>
+  <li>Sign-ins and password resets are limited against guessing; requests that change data must come from Statiku's
+    own pages; addresses Statiku fetches for you can't reach private networks.</li>
+  <li>Each customer sees only their own sites, and only the people they invite see them too.</li>
+  <li>The database can be restored to any moment in the last days, and restores are tested.</li>
+</ul>
+</main>
+</body>
+</html>

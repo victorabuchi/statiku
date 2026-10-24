@@ -28,12 +28,21 @@ Notchlight ([notchlight.com](https://notchlight.com)) is the first customer.
       devices, conversions, events and campaigns, by hour, day, week, month or year, back to the first visit; a live
       view with a globe that changes the moment someone arrives or leaves and zooms in to countries and cities; the app's installs, versions and licences; each site's own icon; account settings, a profile photo and
       team invitations by link
+- [x] History from before Statiku: Google Analytics (signing in with Google), Plausible (an API key), GitHub
+      release downloads (refreshed every six hours) and files from any other tool (CSV or ZIP). Imported days count
+      only before Statiku's own first event, never twice, and never in filtered reports.
+- [x] Plans through Polar: a 30-day trial, then four plans by events a month; checkout, the billing portal and signed
+      webhooks. After an unpaid trial the reports close while counting goes on.
+- [x] Email through any SMTP service: password resets, and alerts when a site goes quiet (down, its code gone, or just
+      quiet), when visits come back, and when a rush of visitors arrives
+- [x] Statiku's own pages: a landing page with a film of real screens, pricing, terms, privacy policy and a data
+      processing agreement
 - [ ] Revenue from Polar and Stripe webhooks, credited to the source of the visit
-- [ ] Email (verification, password reset, sending invitations) and plans
+- [ ] Email verification, and invitations sent by email
 
 The full plan, the stack and the data model are in [docs/PLAN.md](docs/PLAN.md).
 
-## Privacy
+## Visitors' data
 
 - **Nothing in the browser:** no cookies, no localStorage, no identifier sent.
 - **Live, not tracked:** while a page is in view, the script checks in every 30 seconds (for up to half an hour) and
@@ -142,17 +151,22 @@ With the ingest service running, the Swift package's live test sends a real inst
 | Folder | What's in it |
 | --- | --- |
 | `ingest/` | The service: the script (`/s.js`), events from websites (`/e`) and apps (`/v1/app`), and the dashboard at every other address |
-| `dashboard/` | Accounts, the dashboard's API (`/api`) and the installation check; `client/` is the app, bundled when the service starts |
+| `dashboard/` | Accounts, the dashboard's API (`/api`), imports, plans, alerts and email; `client/` is the app, bundled when the service starts |
+| `site/` | Statiku's own pages: the landing page and its film (pictures made by `scripts/shots.ts`), terms, privacy, DPA |
 | `tracker/` | The website script and its build |
 | `sdk/swift/` | The Swift package for Mac, iPhone and iPad apps |
 | `db/` | Migrations and the migration runner |
-| `scripts/` | Projects, the text report, the location databases, the globe's country points and the browser test |
+| `scripts/` | Projects, plans by hand, the text report, the location databases, demo data, the film's pictures, the restore check and the browser test |
 | `test/` | Unit and integration tests |
 
 ## Deploy
 
 `render.yaml` is a Render Blueprint for the service and Postgres, both in Frankfurt. Migrations run before each
-deploy, and the dashboard is at the service's own address. A project made in the service's Shell before accounts
+deploy, and the dashboard is at the service's own address. [docs/OPERATIONS.md](docs/OPERATIONS.md) sets up email,
+Google sign-in for imports and Polar for payments, and covers alerts, backups and the monthly restore drill.
+
+The film on the landing page plays real screens on demo data. After a change to the dashboard, take its pictures
+again with `DATABASE_URL=postgres://localhost/statiku_demo node scripts/shots.ts` (it needs Chrome). A project made in the service's Shell before accounts
 existed goes into an account with `npm run project -- move <key> <email>`, after that person signs up.
 
 Location data: [IP Geolocation by DB-IP](https://db-ip.com), CC BY 4.0.

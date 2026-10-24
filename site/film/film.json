@@ -1,0 +1,260 @@
+{
+ "desktop": {
+  "size": [
+   1280,
+   800
+  ],
+  "frames": {
+   "live-world": "d-live-world.webp",
+   "live-finland": "d-live-finland.webp",
+   "live-kuopio": "d-live-kuopio.webp",
+   "live-street": "d-live-street.webp",
+   "an-30": "d-an-30.webp",
+   "an-range": "d-an-range.webp",
+   "an-90": "d-an-90.webp",
+   "an-hn": "d-an-hn.webp",
+   "conv": "d-conv.webp",
+   "app": "d-app.webp",
+   "import": "d-import.webp",
+   "an-all": "d-an-all.webp",
+   "add": "d-add.webp",
+   "setup-wait": "d-setup-wait.webp",
+   "setup-ok": "d-setup-ok.webp",
+   "alerts": "d-alerts.webp",
+   "email": "d-email.webp"
+  },
+  "rects": {
+   "liveCount": {
+    "x": 285,
+    "y": 163,
+    "w": 187,
+    "h": 40
+   },
+   "rowFinland": {
+    "x": 950,
+    "y": 399,
+    "w": 285,
+    "h": 30
+   },
+   "rowKuopio": {
+    "x": 950,
+    "y": 399,
+    "w": 285,
+    "h": 30
+   },
+   "rowShared": {
+    "x": 950,
+    "y": 471,
+    "w": 285,
+    "h": 30
+   },
+   "rangeButton": {
+    "x": 885,
+    "y": 76,
+    "w": 141,
+    "h": 32
+   },
+   "kpiVisitors": {
+    "x": 264,
+    "y": 174,
+    "w": 239,
+    "h": 106
+   },
+   "item90": {
+    "x": 892,
+    "y": 267,
+    "w": 266,
+    "h": 36
+   },
+   "chip": {
+    "x": 264,
+    "y": 120,
+    "w": 179,
+    "h": 30
+   },
+   "convHN": {
+    "x": 285,
+    "y": 167,
+    "w": 604,
+    "h": 39
+   },
+   "funnel": {
+    "x": 285,
+    "y": 16,
+    "w": 144,
+    "h": 20
+   },
+   "installs": {
+    "x": 264,
+    "y": 60,
+    "w": 239,
+    "h": 106
+   },
+   "googleButton": {
+    "x": 285,
+    "y": 247,
+    "w": 382,
+    "h": 32
+   },
+   "drop": {
+    "x": 721,
+    "y": 701,
+    "w": 382,
+    "h": 164
+   },
+   "historyNote": {
+    "x": 264,
+    "y": 124,
+    "w": 992,
+    "h": 38
+   },
+   "addButton": {
+    "x": 285,
+    "y": 399,
+    "w": 103,
+    "h": 32
+   },
+   "wordpress": {
+    "x": 418,
+    "y": 443,
+    "w": 120,
+    "h": 36
+   },
+   "status": {
+    "x": 264,
+    "y": 120,
+    "w": 860,
+    "h": 94
+   },
+   "surge": {
+    "x": 285,
+    "y": 382,
+    "w": 818,
+    "h": 40
+   },
+   "mailButton": {
+    "x": 400,
+    "y": 267,
+    "w": 123,
+    "h": 43
+   }
+  }
+ },
+ "phone": {
+  "size": [
+   390,
+   780
+  ],
+  "frames": {
+   "live-world": "p-live-world.webp",
+   "live-finland": "p-live-finland.webp",
+   "live-kuopio": "p-live-kuopio.webp",
+   "live-street": "p-live-street.webp",
+   "an-30": "p-an-30.webp",
+   "an-range": "p-an-range.webp",
+   "an-90": "p-an-90.webp",
+   "an-hn": "p-an-hn.webp",
+   "conv": "p-conv.webp",
+   "app": "p-app.webp",
+   "import": "p-import.webp",
+   "an-all": "p-an-all.webp",
+   "add": "p-add.webp",
+   "setup-wait": "p-setup-wait.webp",
+   "setup-ok": "p-setup-ok.webp",
+   "alerts": "p-alerts.webp",
+   "email": "p-email.webp"
+  },
+  "rects": {
+   "liveCount": {
+    "x": 31,
+    "y": 215,
+    "w": 133,
+    "h": 34
+   },
+   "rangeButton": {
+    "x": 16,
+    "y": 108,
+    "w": 141,
+    "h": 32
+   },
+   "kpiVisitors": {
+    "x": 16,
+    "y": 338,
+    "w": 173,
+    "h": 98
+   },
+   "item90": {
+    "x": 23,
+    "y": 299,
+    "w": 266,
+    "h": 36
+   },
+   "chip": {
+    "x": 16,
+    "y": 192,
+    "w": 179,
+    "h": 30
+   },
+   "convHN": {
+    "x": 33,
+    "y": 167,
+    "w": 604,
+    "h": 39
+   },
+   "funnel": {
+    "x": 33,
+    "y": 16,
+    "w": 144,
+    "h": 20
+   },
+   "installs": {
+    "x": 16,
+    "y": 60,
+    "w": 173,
+    "h": 98
+   },
+   "googleButton": {
+    "x": 33,
+    "y": 259,
+    "w": 324,
+    "h": 32
+   },
+   "historyNote": {
+    "x": 16,
+    "y": 196,
+    "w": 358,
+    "h": 130
+   },
+   "addButton": {
+    "x": 33,
+    "y": 411,
+    "w": 103,
+    "h": 32
+   },
+   "wordpress": {
+    "x": 166,
+    "y": 625,
+    "w": 120,
+    "h": 36
+   },
+   "status": {
+    "x": 16,
+    "y": 112,
+    "w": 358,
+    "h": 158
+   },
+   "surge": {
+    "x": 33,
+    "y": 185,
+    "w": 324,
+    "h": 80
+   },
+   "mailButton": {
+    "x": 45,
+    "y": 313,
+    "w": 123,
+    "h": 43
+   }
+  }
+ }
+}

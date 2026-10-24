@@ -1,6 +1,8 @@
 // The dashboard, served by the same service as the script: accounts, teams, the sites a person tracks, and their
 // numbers. The pages are one app (client/), bundled when the service starts; everything it shows comes from /api.
+// Statiku's own pages (site/) are served here too: the landing page at / for anyone not signed in, and the legal pages.
 //   GET    /  /login  /signup  /join/…  /settings  /sites/…    the app
+//   GET    /  /terms  /privacy  /dpa  /site/…                  Statiku's own pages, when not signed in
 //   POST   /api/signup  /api/login  /api/logout
 //   POST   /api/password/forgot { email }    GET /api/password/reset/:token   POST { password }
 //   GET    /api/me              PATCH { name?, email? }   DELETE { password }
@@ -19,7 +21,9 @@
 //   GET    /api/sites/:key/imports/google/properties?grant=
 //   GET    /api/billing   POST /api/billing/checkout { plan, interval }   POST /api/billing/portal   POST /api/polar/webhook
 import { createHash, randomBytes } from "node:crypto";
+import { readdirSync } from "node:fs";
 import { Readable, Transform } from "node:stream";
+import * as icons from "simple-icons";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -173,7 +177,48 @@ async function bundle() {
       .replace("/app.js", `/app.js?v=${js.hash}`).replace("/app.css", `/app.css?v=${css.hash}`).replace("/fonts/latin.woff2", `/fonts/latin.woff2?v=${fonts["/fonts/latin.woff2"].hash}`),
     "text/html; charset=utf-8",
   );
-  return { js, css, icon, html, map, fonts };
+  return { js, css, icon, html, map, fonts, site: siteBundle(asset, fonts) };
+}
+
+// Statiku's own pages, filled in once: the files' versions, the website builders' and tools' logos, and the plans'
+// prices from billing.ts, so the landing page never disagrees with Settings.
+type Asset = { data: Buffer; gzip: Buffer; type: string; hash: string };
+function siteBundle(asset: (body: string | Uint8Array, type: string) => Asset, fonts: Record<string, { hash: string }>) {
+  const dir = new URL("../site/", import.meta.url);
+  const read = (name: string) => readFileSync(new URL(name, dir), "utf8");
+  let styles = read("site.css");
+  for (const [path, file] of Object.entries(fonts)) styles = styles.replace(`url("${path}")`, `url("${path}?v=${file.hash}")`);
+  const files: Record<string, Asset> = {
+    "/site/site.css": asset(styles, "text/css; charset=utf-8"),
+    "/site/site.js": asset(read("site.js"), "text/javascript; charset=utf-8"),
+    "/site/film.js": asset(read("film.js"), "text/javascript; charset=utf-8"),
+    "/site/film-scenes.js": asset(read("film-scenes.js"), "text/javascript; charset=utf-8"),
+  };
+  // The film's pictures share film.json's version, so a new set of pictures gets new addresses.
+  const filmDir = new URL("film/", dir);
+  const filmData = asset(readFileSync(new URL("film.json", filmDir)), "application/json");
+  files["/site/film/film.json"] = filmData;
+  for (const name of readdirSync(filmDir).filter((n) => n.endsWith(".webp"))) {
+    files[`/site/film/${name}`] = { ...asset(readFileSync(new URL(name, filmDir)), "image/webp"), hash: filmData.hash };
+  }
+  const logo = (i: { title: string; hex: string; path: string }, size = 20) =>
+    `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="#${i.hex}" aria-hidden="true"><path d="${i.path}"/></svg>`;
+  const builders = [icons.siWordpress, icons.siShopify, icons.siWix, icons.siSquarespace, icons.siWebflow, icons.siFramer, icons.siGoogletagmanager]
+    .map((i) => `<span>${logo(i)}${i.title}</span>`).join("");
+  const sources = [icons.siGoogleanalytics, icons.siPlausibleanalytics, icons.siGithub, icons.siFathom, icons.siMatomo, icons.siUmami]
+    .map((i) => `<div class="src">${logo(i.hex === "181717" ? { ...i, hex: "ffffff" } : i, 22)}${i.title === "Plausible Analytics" ? "Plausible" : i.title}</div>`).join("")
+    + `<div class="into"><img src="/favicon.svg" alt="" width="26" height="26">Your reports, back to day one</div>`;
+  const plans = PLANS.map((p, i) => `<article class="plan${i === 1 ? " pick" : ""}">${i === 1 ? '<span class="tag">Most chosen</span>' : ""}<h3>${p.name}</h3>
+    <div class="price" data-month="€${p.month}" data-year="€${p.year}"><b>€${p.month}</b><span>a month</span></div>
+    <span class="events">Up to ${p.events.toLocaleString("en-US")} events a month</span>
+    <a class="btn ${i === 1 ? "btn-primary" : "btn-light"}" href="/signup">Start free</a></article>`).join("");
+  const fill = (html: string) => html
+    .replaceAll("{{V_CSS}}", files["/site/site.css"].hash).replaceAll("{{V_JS}}", files["/site/site.js"].hash)
+    .replaceAll("{{V_FILM}}", files["/site/film.js"].hash).replaceAll("{{V_SCENES}}", files["/site/film-scenes.js"].hash)
+    .replaceAll("{{V_FILMDATA}}", filmData.hash).replaceAll("{{FONT}}", `/fonts/latin.woff2?v=${fonts["/fonts/latin.woff2"].hash}`)
+    .replace("{{BUILDERS}}", builders).replace("{{SOURCES}}", sources).replace("{{PLANS}}", plans).replace("{{YEAR}}", String(new Date().getFullYear()));
+  const pages = Object.fromEntries((["index", "terms", "privacy", "dpa"] as const).map((name) => [name, asset(fill(read(`${name}.html`)), "text/html; charset=utf-8")]));
+  return { files, pages };
 }
 
 // Where imports reach other services. Tests point them at a stand-in.
@@ -198,7 +243,7 @@ export async function createDashboard(options: {
   const resets = new Attempts(5, 15 * 60_000);
   const resetsTo = new Attempts(3, 60 * 60_000);
 
-  function sendAsset(r: Request, asset: Awaited<ReturnType<typeof bundle>>["js"], cache: string) {
+  function sendAsset(r: Request, asset: Asset, cache: string) {
     const gzip = /\bgzip\b/.test(r.req.headers["accept-encoding"] ?? "");
     // Asked for by another build's name: during a deploy the old and new versions both answer for a moment, and a
     // browser must not keep this build's file under the other's name for a year. It gets this one, uncached.
@@ -829,6 +874,11 @@ export async function createDashboard(options: {
       if (path === "/favicon.svg") return sendAsset(r, assets.icon, "public, max-age=86400");
       if (path === "/geo/countries-50m.json") return sendAsset(r, assets.map, "public, max-age=604800");
       if (Object.hasOwn(assets.fonts, path)) return sendAsset(r, assets.fonts[path as keyof typeof assets.fonts], "public, max-age=31536000, immutable");
+      if (Object.hasOwn(assets.site.files, path)) return sendAsset(r, assets.site.files[path], "public, max-age=31536000, immutable");
+      const legal = path.match(/^\/(terms|privacy|dpa)$/);
+      if (legal) return sendAsset(r, assets.site.pages[legal[1]], "no-cache");
+      // The landing page for anyone not signed in; the app for everyone who is.
+      if (path === "/" && !(await userOf(pool, req))) return sendAsset(r, assets.site.pages.index, "no-cache");
       // Every other address is a page of the app, which works out what to show.
       return sendAsset(r, assets.html, "no-cache");
     } catch (e) {

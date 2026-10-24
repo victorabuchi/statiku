@@ -944,3 +944,18 @@ test("the deep health check asks the database", { skip }, async () => {
   assert.equal(res.status, 200);
   assert.match(await res.text(), /database answering/);
 });
+
+test("Statiku's own pages: the landing page for anyone not signed in, the app for everyone who is", { skip }, async () => {
+  const landing = await fetch(`${base}/`);
+  const html = await landing.text();
+  assert.match(html, /See who's on your site <em>right now<\/em>/);
+  // The prices come from the plans billing sells, and every file the page names is served.
+  assert.match(html, /data-month="€19" data-year="€190"/);
+  for (const path of html.match(/\/site\/[\w./-]+\?v=[\w-]+/g)!) assert.equal((await fetch(base + path)).status, 200, path);
+  const film = await (await fetch(`${base}/site/film/film.json`)).json();
+  assert.equal((await fetch(`${base}/site/film/${film.desktop.frames["live-world"]}`)).headers.get("content-type"), "image/webp");
+  for (const page of ["/terms", "/privacy", "/dpa"]) assert.equal((await fetch(base + page)).status, 200, page);
+  const owner = await signUp("landing@example.com");
+  assert.doesNotMatch((await owner("/")).data, /See who's on your site/);
+  assert.match((await owner("/")).data, /\/app\.js\?v=/);
+});
