@@ -53,7 +53,8 @@ import { FILTERS, live, overview, RANGE_IDS, siteFor, stats, type Filters, type 
 export type Request = { req: IncomingMessage; res: ServerResponse; path: string; ip: string; secure: boolean };
 
 const MAX_SITES = 50;
-const ICON_DAYS = 7;
+// How long an icon is trusted before the site is looked at again: a day, or half an hour while it has none.
+const ICON_FRESH = { found: 86400_000, missing: 30 * 60_000 };
 const INVITE_DAYS = 7;
 const HEADERS = {
   "content-security-policy":
@@ -229,8 +230,9 @@ export async function createDashboard(options: {
   pool: pg.Pool; onSiteChanged: (key: string) => void; presence: Presence; hub: Hub; streets: Streets; mailer?: Mailer; imports?: ImportApis;
   // Polar, for Statiku's own plans; tests use a stand-in.
   polar?: Polar & { request?: Outbound };
-  // How the site watcher looks at a site; tests use a stand-in.
+  // How the site watcher looks at a site, and how icons are fetched; tests use stand-ins.
   probe?: Probe;
+  fetchIcon?: typeof fetchIcon;
 }) {
   const { pool, onSiteChanged, presence, hub, streets } = options;
   const mailer = options.mailer ?? smtpMailer();
@@ -295,13 +297,22 @@ export async function createDashboard(options: {
     };
   }
 
-  // Site icons: fetched from the site by this server, so no third party learns which sites someone tracks.
+  // Site icons: fetched from the site by this server, so no third party learns which sites someone tracks. Each gets a
+  // fingerprint, which is in its address, so a changed icon is a new address and browsers fetch it again.
   const fetching = new Map<string, Promise<void>>();
-  function refreshIcon(site: { id: string; domains: string[] }) {
+  const getIcon = options.fetchIcon ?? fetchIcon;
+  function refreshIcon(site: { id: string; domains: string[] }, newAddress = false) {
     let pending = fetching.get(site.id);
     if (!pending) {
-      pending = fetchIcon(site.domains[0])
-        .then((icon) => pool.query("update projects set icon = $2, icon_type = $3, icon_checked_at = now() where id = $1", [site.id, icon?.data ?? null, icon?.type ?? null]))
+      pending = getIcon(site.domains[0])
+        .then((icon) => icon
+          ? pool.query(
+            "update projects set icon = $2, icon_type = $3, icon_version = $4, icon_checked_at = now() where id = $1",
+            [site.id, icon.data, icon.type, createHash("sha256").update(icon.data).digest("hex").slice(0, 12)],
+          )
+          // None found: an icon found before stays, as the site may only be unreachable for a moment, unless the site
+          // has a new address.
+          : pool.query(`update projects set icon_checked_at = now()${newAddress ? ", icon = null, icon_type = null, icon_version = null" : ""} where id = $1`, [site.id]))
         .then(() => {}, (e) => console.error("Icon:", (e as Error).message))
         .finally(() => fetching.delete(site.id));
       fetching.set(site.id, pending);
@@ -756,7 +767,7 @@ export async function createDashboard(options: {
     }
 
     // ---------- Sites ----------
-    if (path === "/api/sites" && method === "GET") return json(res, 200, { sites: await overview(pool, user.id, presence) });
+    if (path === "/api/sites" && method === "GET") return json(res, 200, { sites: await overview(pool, user.id, presence, (s) => void refreshIcon(s)) });
     if (path === "/api/sites" && method === "POST") {
       const body = await readJson(req);
       const domain = domainOf(body.address);
@@ -811,7 +822,7 @@ export async function createDashboard(options: {
         [site.id, name, domains, timezone, askLocation, alertQuiet, alertSurge],
       );
       onSiteChanged(site.key);
-      if (domains[0] !== site.domains[0]) void refreshIcon({ id: site.id, domains });
+      if (domains[0] !== site.domains[0]) void refreshIcon({ id: site.id, domains }, true);
       return json(res, 200, { site: { key: site.key, name, domains, timezone, askLocation, alertQuiet, alertSurge } });
     }
     if (action === "" && method === "DELETE") {
@@ -825,11 +836,11 @@ export async function createDashboard(options: {
     if (action === "/icon" && method === "GET") {
       const read = async () => (await pool.query("select icon, icon_type, icon_checked_at from projects where id = $1", [site.id])).rows[0];
       let row = await read();
-      // Never looked for: wait for it (briefly). Over a week old: show the old one and look again behind it.
+      // Never looked for: wait for it (briefly). Due for another look: show the one there is and look again behind it.
       if (!row.icon_checked_at) {
         await Promise.race([refreshIcon(site), new Promise((resolve) => setTimeout(resolve, 9000))]);
         row = await read();
-      } else if (Date.now() - row.icon_checked_at.getTime() > ICON_DAYS * 86400_000) {
+      } else if (Date.now() - row.icon_checked_at.getTime() > (row.icon ? ICON_FRESH.found : ICON_FRESH.missing)) {
         void refreshIcon(site);
       }
       if (!row.icon) throw new HttpError(404, "No icon.");

@@ -426,16 +426,19 @@ export async function live(pool: pg.Pool, site: Site, present: Session[], street
   };
 }
 
-// Every site the person can see, with today's numbers, who's on it now and a fortnight of daily visitors.
-export async function overview(pool: pg.Pool, userId: string, presence: Presence) {
+// Every site the person can see, with today's numbers, who's on it now and a fortnight of daily visitors. Sites whose
+// icon is due for another look (daily, or every half hour while none has been found) are handed to `staleIcon`.
+export async function overview(pool: pg.Pool, userId: string, presence: Presence, staleIcon: (site: { id: string; domains: string[] }) => void = () => {}) {
   const { rows: sites } = await pool.query(
-    `select p.id, p.key, p.name, p.domains, p.timezone, p.created_at, m.role, p.icon is not null as has_icon, p.icon_checked_at,
+    `select p.id, p.key, p.name, p.domains, p.timezone, p.created_at, m.role, p.icon_version, p.icon_checked_at,
+            (p.icon_checked_at is null or p.icon_checked_at < now() - case when p.icon is null then interval '30 minutes' else interval '1 day' end) as icon_stale,
             (select ts from events e where e.project_id = p.id order by ts desc limit 1) as last_event_at
        from projects p join memberships m on m.workspace_id = p.workspace_id
       where m.user_id = $1 order by p.created_at`,
     [userId],
   );
   if (!sites.length) return [];
+  for (const s of sites) if (s.icon_stale) staleIcon(s);
   const { rows: days } = await pool.query(
     `select e.project_id, to_char((e.ts at time zone p.timezone)::date, 'YYYY-MM-DD') as day,
             count(distinct e.visitor)::int as visitors, (count(*) filter (where e.name = 'pageview'))::int as pageviews
@@ -457,7 +460,8 @@ export async function overview(pool: pg.Pool, userId: string, presence: Presence
     const todayRow = mine.get(keys[13]);
     return {
       key: s.key, name: s.name, domains: s.domains, timezone: s.timezone, createdAt: s.created_at, lastEventAt: s.last_event_at,
-      role: s.role, icon: s.has_icon ? new Date(s.icon_checked_at).getTime() : s.icon_checked_at ? false : null,
+      // The icon's fingerprint, false when the site has none (yet), null before anyone looked.
+      role: s.role, icon: s.icon_version ?? (s.icon_checked_at ? false : null),
       live: new Set(presence(s.id).map((v) => v.visitor)).size,
       visitorsToday: todayRow?.visitors ?? 0, pageviewsToday: todayRow?.pageviews ?? 0, spark,
     };

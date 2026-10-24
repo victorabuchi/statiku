@@ -27,6 +27,8 @@ let elsewhereUrl: string;
 const github = { releases: [] as any[] };
 // Polar's stand-in keeps the checkouts asked for and knows which customers exist.
 const polar = { checkouts: [] as any[], customers: new Set<string>() };
+// Each site's icon as the stand-in for the web serves it (none unless a test says).
+const icons: Record<string, { data: Buffer; type: string } | null> = {};
 // How the site watcher finds each site when it looks.
 const probes: Record<string, { status: number; html: string } | { error: string }> = {};
 const POLAR_SECRET = `whsec_${randomBytes(24).toString("base64")}`;
@@ -61,6 +63,7 @@ before(async () => {
       google: { auth: `${elsewhereUrl}/auth`, token: `${elsewhereUrl}/token`, data: elsewhereUrl, admin: elsewhereUrl, clientId: "id", clientSecret: "secret" },
     },
     probe: async (domain) => probes[domain] ?? { error: "ENOTFOUND" },
+    fetchIcon: async (domain) => icons[domain] ?? null,
     polar: {
       api: elsewhereUrl, token: "polar-token", secret: POLAR_SECRET, request: openRequest,
       products: { "starter:month": "prod-starter-month", "growth:month": "prod-growth-month", "growth:year": "prod-growth-year" },
@@ -964,4 +967,48 @@ test("Statiku's own pages: the landing page for anyone not signed in, the app fo
   const owner = await signUp("landing@example.com");
   assert.doesNotMatch((await owner("/")).data, /See who's on your site/);
   assert.match((await owner("/")).data, /\/app\.js\?v=/);
+});
+
+test("site icons: looked for again while missing, kept through a failed look, and a new address when they change", { skip }, async () => {
+  const owner = await signUp("icons@example.com");
+  const { key } = (await owner("/api/sites", { method: "POST", body: { address: "icons.example" } })).data.site;
+  const iconOf = async () => (await owner("/api/sites")).data.sites.find((s: any) => s.key === key).icon;
+  const until = async (check: (icon: unknown) => boolean) => {
+    for (let i = 0; i < 60; i++) {
+      const icon = await iconOf();
+      if (check(icon)) return icon;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    throw new Error("the icon never changed");
+  };
+  const ago = (interval: string) => pool.query(`update projects set icon_checked_at = now() - interval '${interval}' where key = $1`, [key]);
+  const png = (n: number) => ({ data: Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from([n])]), type: "image/png" });
+
+  // None yet: the letter, and another look after half an hour, which finds it.
+  assert.equal(await until((icon) => icon === false), false);
+  icons["icons.example"] = png(1);
+  await ago("10 minutes");
+  assert.equal(await iconOf(), false);
+  await ago("31 minutes");
+  const first = await until((icon) => typeof icon === "string");
+  const served = await owner(`/api/sites/${key}/icon?v=${first}`);
+  assert.equal(served.headers.get("content-type"), "image/png");
+
+  // A failed look keeps the icon there was: the site may only be unreachable for a moment.
+  icons["icons.example"] = null;
+  await ago("25 hours");
+  await iconOf();
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(await iconOf(), first);
+
+  // The site changes its icon: within a day it has a new fingerprint, so browsers fetch the new one.
+  icons["icons.example"] = png(2);
+  await ago("25 hours");
+  const second = await until((icon) => typeof icon === "string" && icon !== first);
+  assert.notEqual(second, first);
+
+  // A new address starts afresh: no icon from the old one.
+  icons["moved.example"] = null;
+  await owner(`/api/sites/${key}`, { method: "PATCH", body: { domains: ["moved.example"] } });
+  assert.equal(await until((icon) => icon === false), false);
 });

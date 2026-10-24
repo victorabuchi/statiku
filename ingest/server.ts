@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import pg from "pg";
 import type { Mailer } from "../dashboard/mail.ts";
 import type { Polar } from "../dashboard/billing.ts";
-import type { Outbound } from "../dashboard/check.ts";
+import type { fetchIcon, Outbound } from "../dashboard/check.ts";
 import type { Probe } from "../dashboard/monitor.ts";
 import { createDashboard, type ImportApis } from "../dashboard/server.ts";
 import { buildTracker } from "../tracker/build.ts";
@@ -36,6 +36,7 @@ export type Options = {
   imports?: ImportApis;
   polar?: Polar & { request?: Outbound };
   probe?: Probe;
+  fetchIcon?: typeof fetchIcon;
 };
 
 const CORS = {
@@ -95,6 +96,7 @@ export async function createApp(options: Options) {
     imports: options.imports,
     polar: options.polar,
     probe: options.probe,
+    fetchIcon: options.fetchIcon,
   });
   const etag = `"${createHash("sha256").update(script).digest("base64url").slice(0, 16)}"`;
 
