@@ -28,7 +28,7 @@ Notchlight (notchlight.com) is the first customer.
 | Country lookup | DB-IP Country Lite (`.mmdb`, CC BY 4.0), downloaded at build time, read with `mmdb-lib` | Country only, offline, no third-party calls |
 | Website script | `tracker/`: plain JS, minified with esbuild, served at `/s.js` | Under 2 KB |
 | App SDK | `sdk/swift/`: a Swift package for macOS and iOS, no dependencies, sending to `/v1/app` | Notchlight first |
-| Dashboard | `dashboard/`: one page and a JSON API on `node:http`, Pursecast-style UI; local only until sign-in exists | Small, no build step, same stack as ingest |
+| Dashboard | `dashboard/`: accounts and a JSON API in the same `node:http` service as ingest; the app in `client/` is plain JS modules bundled by esbuild at start, in Onshipy's Shopify-admin style; the live globe uses d3-geo and world-atlas | One service to run; nothing loaded from other sites |
 | SaaS billing (later) | Polar as merchant of record | It handles EU VAT, and you already use it |
 | Hosting | Render Blueprint (`render.yaml`): ingest web service + Postgres, both in Frankfurt | Your current host |
 
@@ -74,12 +74,13 @@ Notchlight (notchlight.com) is the first customer.
 
 ## Data model
 
-Accounts (built with the dashboard):
+Accounts (built):
 
-- `users` (id, email, name, password_hash, email_verified_at)
-- `workspaces` (id, name, plan, billing ids): the billing unit
-- `memberships` (workspace, user, role: owner, admin or member)
-- `invites` (workspace, email, role, token hash, expires_at, accepted_at)
+- `users` (id, email, name, password_hash as scrypt)
+- `workspaces` (id, name, plan): the billing unit; each person starts with one
+- `memberships` (workspace, user, role)
+- `logins` (hash of the cookie's token, user, expires_at): 30-day sign-ins
+- next: `invites` (workspace, email, role, token hash, expires_at, accepted_at), email verification and password reset
 
 Collection (built now):
 
@@ -116,7 +117,8 @@ Revenue (after that):
 2. **Swift SDK and app ingestion** (built; not yet in Notchlight): `/v1/app`, installs, active installs by version,
    trial and licensed state, opt-out, install attribution. Into Notchlight with the privacy page updated the same day.
 3. **Revenue:** Polar and Stripe webhooks, attributed back to the source. Paddle, Lemon Squeezy and the App Store later.
-4. **Accounts and dashboard:** sign-up, workspaces, projects, invites, and per project: visitors, pages, sources,
-   countries, devices, the funnel, installs, revenue by source.
+4. **Accounts and dashboard** (built, apart from invites and email): sign-up, workspaces, adding a website without
+   code knowledge, and per site: analytics, a live view with a globe, conversions, installs. Revenue by source comes
+   with step 3.
 5. **Billing:** a free tier, then paid plans by monthly events, through Polar.
 6. **Launch:** a name and domain, the landing page, docs, privacy policy and DPA.

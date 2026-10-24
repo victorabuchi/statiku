@@ -21,10 +21,12 @@ Notchlight ([notchlight.com](https://notchlight.com)) is the first customer.
 - [x] Ingest service: sessions, daily-rotating visitor hashes, batched writes to Postgres partitioned by month
 - [x] Swift package for macOS and iOS: an anonymous install, the days it's used, versions, trial and licence state,
       custom events and an opt-out. Each install is credited to the website visit it was downloaded from.
-- [x] Dashboard (runs locally, no sign-in yet): totals and trends, the journey by source from visit to licence, pages,
-      countries, devices, events, and the app's installs, versions and licences
+- [x] Accounts and the dashboard, served by the same service: sign up, add a website by its address with steps for
+      WordPress, Shopify, Wix, Squarespace, Webflow, Framer and Tag Manager, and an installation check; analytics
+      against the previous period, sources, pages, locations, devices, conversions, events and campaigns; a live view
+      with a globe of the visitors on the site right now; the app's installs, versions and licences
 - [ ] Revenue from Polar and Stripe webhooks, credited to the source of the visit
-- [ ] Accounts, team invites and plans, then the hosted dashboard
+- [ ] Team invites, password reset by email, and plans
 
 The full plan, the stack and the data model are in [docs/PLAN.md](docs/PLAN.md).
 
@@ -100,24 +102,22 @@ createdb statiku && createdb statiku_test
 npm install
 npm run geo          # DB-IP's country database, into data/
 npm run migrate
-npm run dev          # the ingest service, http://localhost:8787
-npm run dashboard    # the dashboard, http://localhost:8788
-npm run seed         # 30 days of sample traffic and installs to look at
-npm run notchlight   # Notchlight's site with the script, http://localhost:8790
+npm run dev          # the service and the dashboard, http://localhost:8787
 ```
 
-Projects are created from the command line until accounts exist:
+Open http://localhost:8787, create an account and add a website. From the command line:
 
 ```sh
-npm run project -- create "My site" example.com --timezone Europe/Helsinki
-npm run stats -- <project key>   # a text report
+npm run project -- list
+npm run project -- move <project key> you@example.com   # a project made here into your account
+npm run stats -- <project key>                          # a text report
 ```
 
 ## Tests
 
 ```sh
-npm test         # unit tests and the ingest service against Postgres (uses statiku_test and empties it)
-npm run e2e      # the script on Notchlight's real pages in Chrome; needs Chrome Canary and ../notchlight
+npm test         # unit tests, the ingest service and the dashboard's API against Postgres (uses statiku_test and empties it)
+npm run e2e      # the script on Notchlight's real pages in Chrome; needs Chrome Canary and ../notchlight; cleans up after
 npm run build    # minifies the script and fails over 2 KB
 cd sdk/swift && swift test   # the Swift package
 ```
@@ -129,18 +129,18 @@ With the ingest service running, the Swift package's live test sends a real inst
 
 | Folder | What's in it |
 | --- | --- |
-| `ingest/` | The service that serves the script (`/s.js`) and takes events from websites (`/e`) and apps (`/v1/app`) |
-| `dashboard/` | The dashboard page and its JSON API. Without sign-in it only listens on localhost |
+| `ingest/` | The service: the script (`/s.js`), events from websites (`/e`) and apps (`/v1/app`), and the dashboard at every other address |
+| `dashboard/` | Accounts, the dashboard's API (`/api`) and the installation check; `client/` is the app, bundled when the service starts |
 | `tracker/` | The website script and its build |
 | `sdk/swift/` | The Swift package for Mac, iPhone and iPad apps |
 | `db/` | Migrations and the migration runner |
-| `scripts/` | Projects, the text report, sample traffic and installs, the country database, the local Notchlight site and the browser test |
+| `scripts/` | Projects, the text report, the country database, the globe's country points and the browser test |
 | `test/` | Unit and integration tests |
 
 ## Deploy
 
-`render.yaml` is a Render Blueprint for the ingest service and Postgres, both in Frankfurt. Migrations run before
-each deploy. Create projects from the service's Shell with `npm run project -- create …`. The dashboard stays local
-until sign-in exists.
+`render.yaml` is a Render Blueprint for the service and Postgres, both in Frankfurt. Migrations run before each
+deploy, and the dashboard is at the service's own address. A project made in the service's Shell before accounts
+existed goes into an account with `npm run project -- move <key> <email>`, after that person signs up.
 
 Country data: [IP Geolocation by DB-IP](https://db-ip.com), CC BY 4.0.
