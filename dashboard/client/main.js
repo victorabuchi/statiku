@@ -24,8 +24,9 @@ function h(tag, props, ...kids) {
 }
 
 const ICONS = {
-  // Three panels side by side, the outer two turned towards us: every website at once.
-  websites: '<path d="M2.6 5.3a.8.8 0 0 1 1-.77l2.6.72a.8.8 0 0 1 .58.77v7.96a.8.8 0 0 1-.58.77l-2.6.72a.8.8 0 0 1-1-.77Z"/><rect x="8.1" y="6.2" width="3.8" height="7.6" rx=".9"/><path d="M17.4 5.3a.8.8 0 0 0-1-.77l-2.6.72a.8.8 0 0 0-.58.77v7.96a.8.8 0 0 0 .58.77l2.6.72a.8.8 0 0 0 1-.77Z"/>',
+  // Two windows, one behind the other: every website at once. A filled shape from Material Symbols (Apache 2.0),
+  // on its own grid.
+  websites: { box: "0 -960 960 960", path: '<path d="M640-160v-360H160v360h480Zm80-200v-80h80v-360H320v200h-80v-200q0-33 23.5-56.5T320-880h480q33 0 56.5 23.5T880-800v360q0 33-23.5 56.5T800-360h-80ZM160-80q-33 0-56.5-23.5T80-160v-360q0-33 23.5-56.5T160-600h480q33 0 56.5 23.5T720-520v360q0 33-23.5 56.5T640-80H160Z"/>' },
   minus: '<path d="M4.5 10h11"/>',
   globe: '<circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c1.9 2.1 2.9 4.4 2.9 7s-1 4.9-2.9 7c-1.9-2.1-2.9-4.4-2.9-7s1-4.9 2.9-7Z"/>',
   chart: '<path d="M4 16.5v-4M8 16.5v-8M12 16.5v-6M16 16.5V4"/>',
@@ -56,8 +57,10 @@ const ICONS = {
   trash: '<path d="M4 6h12M8 6V4.5h4V6M5.5 6l.7 10a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9l.7-10"/>',
 };
 function icon(name, size = 18) {
-  const t = document.createElement("template");
-  t.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
+  const t = document.createElement("template"), shape = ICONS[name];
+  t.innerHTML = typeof shape === "string"
+    ? `<svg width="${size}" height="${size}" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${shape}</svg>`
+    : `<svg width="${size}" height="${size}" viewBox="${shape.box}" fill="currentColor" aria-hidden="true">${shape.path}</svg>`;
   return t.content.firstChild;
 }
 

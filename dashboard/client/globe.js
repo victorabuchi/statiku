@@ -251,7 +251,7 @@ export function createGlobe(canvas, { onHover, onView, onTiles } = {}) {
     }
     // City names with their counts, each on a dark halo: the busiest first, to the right of the dot or else to the
     // left, and left off where it would cover another name.
-    ctx.font = "600 12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+    ctx.font = "600 12px 'Bricolage Grotesque', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
     ctx.textBaseline = "middle";
     ctx.lineJoin = "round";
     const taken = [];

@@ -127,16 +127,24 @@ async function bundle() {
     const hash = createHash("sha256").update(data).update(process.env.RENDER_GIT_COMMIT ?? "").digest("base64url").slice(0, 12);
     return { data, gzip: gzipSync(data), type, hash };
   };
+  const require = createRequire(import.meta.url);
   const js = asset(outputFiles[0].contents, "text/javascript; charset=utf-8");
-  const css = asset(readFileSync(new URL("app.css", dir)), "text/css; charset=utf-8");
+  // The app's typeface, served from here rather than from a font service, so no one else learns who opens the
+  // dashboard: Latin, and the rest of Europe's letters for the pages that need them.
+  const font = (set: string) => asset(readFileSync(require.resolve(`@fontsource-variable/bricolage-grotesque/files/bricolage-grotesque-${set}-standard-normal.woff2`)), "font/woff2");
+  const fonts = { "/fonts/latin.woff2": font("latin"), "/fonts/latin-ext.woff2": font("latin-ext") };
+  let styles = readFileSync(new URL("app.css", dir), "utf8");
+  for (const [path, file] of Object.entries(fonts)) styles = styles.replace(`url("${path}")`, `url("${path}?v=${file.hash}")`);
+  const css = asset(styles, "text/css; charset=utf-8");
   const icon = asset(readFileSync(new URL("icon.svg", dir)), "image/svg+xml");
   // The detailed map the globe switches to when zoomed in, loaded only then.
-  const map = asset(readFileSync(createRequire(import.meta.url).resolve("world-atlas/countries-50m.json")), "application/json");
+  const map = asset(readFileSync(require.resolve("world-atlas/countries-50m.json")), "application/json");
   const html = asset(
-    readFileSync(new URL("index.html", dir), "utf8").replace("/app.js", `/app.js?v=${js.hash}`).replace("/app.css", `/app.css?v=${css.hash}`),
+    readFileSync(new URL("index.html", dir), "utf8")
+      .replace("/app.js", `/app.js?v=${js.hash}`).replace("/app.css", `/app.css?v=${css.hash}`).replace("/fonts/latin.woff2", `/fonts/latin.woff2?v=${fonts["/fonts/latin.woff2"].hash}`),
     "text/html; charset=utf-8",
   );
-  return { js, css, icon, html, map };
+  return { js, css, icon, html, map, fonts };
 }
 
 export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (key: string) => void; presence: Presence; hub: Hub; streets: Streets }) {
@@ -465,6 +473,7 @@ export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (
       if (path === "/app.css") return sendAsset(r, assets.css, "public, max-age=31536000, immutable");
       if (path === "/favicon.svg") return sendAsset(r, assets.icon, "public, max-age=86400");
       if (path === "/geo/countries-50m.json") return sendAsset(r, assets.map, "public, max-age=604800");
+      if (Object.hasOwn(assets.fonts, path)) return sendAsset(r, assets.fonts[path as keyof typeof assets.fonts], "public, max-age=31536000, immutable");
       // Every other address is a page of the app, which works out what to show.
       return sendAsset(r, assets.html, "no-cache");
     } catch (e) {
