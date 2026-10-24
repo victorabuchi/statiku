@@ -11,18 +11,20 @@
 //
 // Clicks on files (.dmg, .zip, .exe…) send "download". Clicks on Polar and Stripe checkout links send "checkout" with
 // a reference added to the link, which the payment webhook brings back so the purchase is credited to its source.
+// While the page is in view it checks in every 30 seconds, and it says when the page closes, so the live view shows who
+// is there right now and a visit's length is the time spent on it; neither is stored as an event.
 (function () {
-  var w = window, d = document, loc = location, nav = navigator, script = d.currentScript, last;
+  var w = window, d = document, loc = location, nav = navigator, script = d.currentScript, last, beats = 0;
   if (!script) return;
   var attr = function (name) { return script.getAttribute("data-" + name); };
   var key = attr("project"), api = attr("api") || new URL("e", script.src).href, hashRoutes = attr("hash") != null;
-  var CHECKOUT = /^https:\/\/(buy\.polar\.sh|buy\.stripe\.com)\//;
+  var CHECKOUT = /^https:\/\/buy\.(polar\.sh|stripe\.com)\//;
   var FILE = /\.(dmg|pkg|zip|exe|msi|appimage|deb|rpm|apk)$/i;
 
   function send(name, opts) {
     opts = opts || {};
     if ((/^(localhost|127\.|\[::1\])/.test(loc.hostname) && attr("local") == null) || loc.protocol == "file:") return;
-    if (nav.webdriver || w.Cypress) return;
+    if (nav.webdriver) return;
     try { if (localStorage.statiku_ignore) return; } catch (e) {}
     var tags = loc.search.slice(1).split("&").filter(function (p) { return /^(utm_[a-z]+|ref|source|via)=/.test(p); }).join("&");
     var body = JSON.stringify({
@@ -34,13 +36,13 @@
       p: opts.props,
       $: opts.revenue
     });
-    // A plain-text body keeps it a simple request with no preflight; both ways finish after the page closes.
-    (nav.sendBeacon && nav.sendBeacon(api, body)) || fetch(api, { method: "POST", body: body, keepalive: true }).catch(function () {});
+    // A beacon is a plain-text POST with no preflight, and it is delivered even as the page closes.
+    nav.sendBeacon(api, body);
   }
 
   function page() {
     var p = loc.pathname + (hashRoutes ? loc.hash : "");
-    if (p != last) { last = p; send("pageview"); }
+    if (p != last) { last = p; beats = 0; send("pageview"); }
   }
 
   function click(e) {
@@ -54,7 +56,7 @@
     if (a && CHECKOUT.test(a.href)) {
       url = new URL(a.href);
       param = /stripe/.test(url.host) ? "client_reference_id" : "reference_id";
-      props.ref = url.searchParams.get(param) || "stk_" + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+      props.ref = url.searchParams.get(param) || "stk_" + Date.now().toString(36) + Math.random().toString(36).slice(2);
       url.searchParams.set(param, props.ref);
       // Rewritten before the page's own handlers run, so a checkout opened in an overlay gets it too.
       a.href = url.href;
@@ -83,4 +85,7 @@
   w.addEventListener("pageshow", function (e) { if (e.persisted) { last = null; page(); } });
   if (d.prerendering) d.addEventListener("prerenderingchange", page, { once: true });
   else page();
+  // In view: a check-in every 30 seconds, for up to half an hour on one page. Closing the page: gone at once.
+  setInterval(function () { d.hidden || beats++ > 59 || send("_p"); }, 3e4);
+  w.addEventListener("pagehide", function () { send("_l"); });
 })();

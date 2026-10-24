@@ -1,8 +1,15 @@
 // The numbers behind the dashboard: a site's analytics for a period, what's happening on it right now, and the
-// overview of every site on the home page. All of it is read from the tables the ingest service writes.
+// overview of every site on the home page. Periods are read from the tables the ingest service writes; "right now"
+// comes from the visits it holds in memory, so arrivals and departures show at once.
 import type pg from "pg";
+import type { Session } from "../ingest/sessions.ts";
 
-export type Site = { id: string; key: string; name: string; domains: string[]; timezone: string };
+export type Site = { id: string; key: string; name: string; domains: string[]; timezone: string; role: string };
+export type Presence = (projectId: string) => Session[];
+
+// Narrowing a report to one value of a breakdown. A page means the visits that viewed that page.
+export const FILTERS = ["source", "country", "device", "browser", "os", "page"] as const;
+export type Filters = Record<(typeof FILTERS)[number], string | null>;
 
 // Each period, as local times in the site's time zone ($1). The previous period is the same span just before: for
 // Today, yesterday up to the same hour.
@@ -19,12 +26,16 @@ const RANGES: Record<string, { from: string; to: string; length: string; unit: "
   d90: { from: "date_trunc('day', now() at time zone $1) - interval '89 days'", to: "now()", length: "90 days", unit: "day" },
   m12: { from: "date_trunc('month', now() at time zone $1) - interval '11 months'", to: "now()", length: "12 months", unit: "month" },
 };
-export const RANGE_IDS = Object.keys(RANGES);
+export const RANGE_IDS = [...Object.keys(RANGES), "custom"];
 
-// Every query takes the same parameters: site, from, to, source (or null for all), time zone.
-const WHERE_EVENTS = "project_id = $1 and ts >= $2 and ts < $3 and ($4::text is null or source = $4)";
-const WHERE_SESSIONS = "project_id = $1 and started_at >= $2 and started_at < $3 and ($4::text is null or source = $4)";
-const WHERE_INSTALLS = "project_id = $1 and ($4::text is null or source = $4)";
+// Every query takes the same parameters: site, from, to, then each filter or null: source ($4), country ($5),
+// device ($6), browser ($7), system ($8) and page ($9). Installs have only a source and a country to filter by.
+const PAGE_VISITS = "(select session_id from events where project_id = $1 and ts >= $2 and ts < $3::timestamptz + interval '1 day' and name = 'pageview' and path = $9)";
+const DIMENSIONS = `($4::text is null or source = $4) and ($5::text is null or country = $5) and ($6::text is null or device = $6)
+  and ($7::text is null or browser = $7) and ($8::text is null or os = $8)`;
+const WHERE_EVENTS = `project_id = $1 and ts >= $2 and ts < $3 and ${DIMENSIONS} and ($9::text is null or session_id in ${PAGE_VISITS})`;
+const WHERE_SESSIONS = `project_id = $1 and started_at >= $2 and started_at < $3 and ${DIMENSIONS} and ($9::text is null or id in ${PAGE_VISITS})`;
+const WHERE_INSTALLS = "project_id = $1 and ($4::text is null or source = $4) and ($5::text is null or country = $5)";
 
 const TOTALS = `
   select
@@ -48,24 +59,24 @@ const APP_TOTALS = `
     (select count(*) from installs where ${WHERE_INSTALLS} and trial_at >= $2 and trial_at < $3)::int as trials,
     (select count(*) from installs where ${WHERE_INSTALLS} and licensed_at >= $2 and licensed_at < $3)::int as licensed`;
 
-// Every measure per hour, day or month ($6), with empty buckets as zeros.
+// Every measure per hour, day or month ($11) in the site's time zone ($10), with empty buckets as zeros.
 const SERIES = `
   with buckets as (
-    select generate_series(date_trunc($6, $2::timestamptz at time zone $5), date_trunc($6, ($3::timestamptz - interval '1 millisecond') at time zone $5), ('1 ' || $6)::interval) as t),
+    select generate_series(date_trunc($11, $2::timestamptz at time zone $10), date_trunc($11, ($3::timestamptz - interval '1 millisecond') at time zone $10), ('1 ' || $11)::interval) as t),
   e as (
-    select date_trunc($6, ts at time zone $5) as t, count(distinct visitor)::int as visitors,
+    select date_trunc($11, ts at time zone $10) as t, count(distinct visitor)::int as visitors,
            (count(*) filter (where name = 'pageview'))::int as pageviews,
            (count(distinct session_id) filter (where name = 'download'))::int as downloads,
            (count(distinct session_id) filter (where name = 'checkout'))::int as checkouts,
            count(distinct install_id)::int as active
       from events where ${WHERE_EVENTS} group by 1),
   s as (
-    select date_trunc($6, started_at at time zone $5) as t, count(*)::int as visits,
+    select date_trunc($11, started_at at time zone $10) as t, count(*)::int as visits,
            round(100.0 * count(*) filter (where events = 1) / nullif(count(*), 0))::int as bounce,
            round(extract(epoch from avg(last_seen - started_at)))::int as duration
       from sessions where ${WHERE_SESSIONS} group by 1),
   i as (
-    select date_trunc($6, at at time zone $5) as t, count(*) filter (where kind = 'install')::int as installs,
+    select date_trunc($11, at at time zone $10) as t, count(*) filter (where kind = 'install')::int as installs,
            count(*) filter (where kind = 'trial')::int as trials, count(*) filter (where kind = 'licensed')::int as licensed
       from installs cross join lateral (values ('install', first_seen), ('trial', trial_at), ('licensed', licensed_at)) k(kind, at)
      where ${WHERE_INSTALLS} and at >= $2 and at < $3 group by 1)
@@ -81,7 +92,7 @@ const APP_LIFECYCLE = "('install', 'active', 'update', 'state')";
 
 export async function siteFor(pool: pg.Pool, userId: string, key: string): Promise<Site | null> {
   const { rows: [site] } = await pool.query(
-    `select p.id, p.key, p.name, p.domains, p.timezone from projects p
+    `select p.id, p.key, p.name, p.domains, p.timezone, m.role from projects p
        join memberships m on m.workspace_id = p.workspace_id
       where p.key = $1 and m.user_id = $2`,
     [key, userId],
@@ -89,18 +100,43 @@ export async function siteFor(pool: pg.Pool, userId: string, key: string): Promi
   return site ?? null;
 }
 
-export async function stats(pool: pg.Pool, site: Site, rangeId: string, source: string | null) {
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+// A period's bounds and the previous period of the same length. A custom period runs from the start of its first
+// day to the end of its last (or now, if that's sooner), by hour for one day, by month past six months.
+async function bounds(pool: pg.Pool, tz: string, rangeId: string, custom: { from?: string | null; to?: string | null }) {
+  if (rangeId === "custom" && DAY.test(custom.from ?? "") && DAY.test(custom.to ?? "")) {
+    const { rows: [b] } = await pool.query(
+      `select f at time zone $1 as "from", least((t + interval '1 day') at time zone $1, now()) as "to", n,
+              (f - make_interval(days => n)) at time zone $1 as prev_from
+         from (select least($2::date, $3::date)::timestamp as f, greatest($2::date, $3::date)::timestamp as t,
+                      abs($3::date - $2::date) + 1 as n) x`,
+      [tz, custom.from, custom.to],
+    );
+    if (b.n <= 732 && b.from < b.to) {
+      const unit = b.n === 1 ? "hour" : b.n > 180 ? "month" : "day";
+      return { id: "custom", unit, from: b.from, to: b.to, prevFrom: b.prev_from, prevTo: new Date(b.prev_from.getTime() + (b.to - b.from)) };
+    }
+  }
   const id = rangeId in RANGES ? rangeId : "d30";
   const range = RANGES[id];
-  const tz = site.timezone;
   const { rows: [b] } = await pool.query(
     `select f at time zone $1 as "from", t as "to", (f - $2::interval) at time zone $1 as prev_from,
             ((f - $2::interval) at time zone $1) + (t - (f at time zone $1)) as prev_to
        from (select ${range.from} as f, ${range.to} as t) x`,
     [tz, range.length],
   );
-  const p = [site.id, b.from, b.to, source];
-  const prev = [site.id, b.prev_from, b.prev_to, source];
+  return { id, unit: range.unit, from: b.from, to: b.to, prevFrom: b.prev_from, prevTo: b.prev_to };
+}
+
+export async function stats(pool: pg.Pool, site: Site, rangeId: string, filters: Filters, custom: { from?: string | null; to?: string | null } = {}) {
+  const tz = site.timezone;
+  const b = await bounds(pool, tz, rangeId, custom);
+  const narrow = FILTERS.map((f) => filters[f]);
+  const p = [site.id, b.from, b.to, ...narrow];
+  const prev = [site.id, b.prevFrom, b.prevTo, ...narrow];
+  // Queries on installs alone take only the filters installs have.
+  const pi = [site.id, b.from, b.to, filters.source, filters.country];
   const q = async (sql: string, params: unknown[] = p) => (await pool.query(sql, params)).rows;
 
   // Visitors in breakdowns count a visitor once per day, like the total.
@@ -110,7 +146,7 @@ export async function stats(pool: pg.Pool, site: Site, rangeId: string, source: 
   // Installs used in the period, by what they last reported.
   const installsBy = (column: string) =>
     q(`select coalesce(${column}, 'Unknown') as label, count(*)::int as v from installs
-        where ${WHERE_INSTALLS} and last_seen >= $2 and first_seen < $3 group by 1 order by 2 desc, 1 limit 12`);
+        where ${WHERE_INSTALLS} and last_seen >= $2 and first_seen < $3 group by 1 order by 2 desc, 1 limit 12`, pi);
 
   const [
     [totals], [previous], series, previousSeries, [appTotals], [appPrevious], sources, journeyBySource, [journeyApp],
@@ -119,8 +155,8 @@ export async function stats(pool: pg.Pool, site: Site, rangeId: string, source: 
   ] = await Promise.all([
     q(TOTALS),
     q(TOTALS, prev),
-    q(SERIES, [...p, tz, range.unit]),
-    q(SERIES, [...prev, tz, range.unit]),
+    q(SERIES, [...p, tz, b.unit]),
+    q(SERIES, [...prev, tz, b.unit]),
     q(APP_TOTALS),
     q(APP_TOTALS, prev),
     visitorsBy("source"),
@@ -135,12 +171,11 @@ export async function stats(pool: pg.Pool, site: Site, rangeId: string, source: 
               count(*)::int as visits, (count(*) filter (where steps.download))::int as downloads,
               (count(*) filter (where steps.checkout))::int as checkouts, coalesce(sum(inst.installs), 0)::int as installs,
               coalesce(sum(inst.trials), 0)::int as trials, coalesce(sum(inst.licensed), 0)::int as licensed
-         from sessions s left join steps on steps.session_id = s.id left join inst on inst.session_id = s.id
-        where s.project_id = $1 and s.started_at >= $2 and s.started_at < $3 and ($4::text is null or s.source = $4)
+         from (select * from sessions where ${WHERE_SESSIONS}) s left join steps on steps.session_id = s.id
+         left join inst on inst.session_id = s.id
         group by 1 order by 2 desc, 1 limit 20`),
     q(`select count(*)::int as installs, count(i.trial_at)::int as trials, count(i.licensed_at)::int as licensed
-         from installs i join sessions s on s.project_id = i.project_id and s.id = i.session_id
-        where s.project_id = $1 and s.started_at >= $2 and s.started_at < $3 and ($4::text is null or s.source = $4)`),
+         from installs i join (select * from sessions where ${WHERE_SESSIONS}) s on s.project_id = i.project_id and s.id = i.session_id`),
     q(`select path as label, count(distinct visitor)::int as v, count(*)::int as pageviews from events
         where ${WHERE_EVENTS} and name = 'pageview' group by 1 order by 2 desc, 1 limit 12`),
     q(`select entry_path as label, count(*)::int as v from sessions where ${WHERE_SESSIONS} group by 1 order by 2 desc, 1 limit 12`),
@@ -151,27 +186,26 @@ export async function stats(pool: pg.Pool, site: Site, rangeId: string, source: 
     visitorsBy("os"),
     q(`select utm_campaign as label, source, count(*)::int as v from sessions
         where ${WHERE_SESSIONS} and utm_campaign is not null group by 1, 2 order by 3 desc, 1 limit 12`),
-    q(`select e.name, count(*)::int as count, count(distinct e.session_id)::int as visits,
-              count(distinct e.install_id)::int as installs,
-              (select string_agg(distinct k, ', ') from events e2 cross join lateral jsonb_object_keys(coalesce(e2.props, '{}')) k
-                where e2.project_id = $1 and e2.ts >= $2 and e2.ts < $3 and ($4::text is null or e2.source = $4) and e2.name = e.name) as props
-         from events e
-        where e.project_id = $1 and e.ts >= $2 and e.ts < $3 and ($4::text is null or e.source = $4) and e.name <> 'pageview'
-          and not (e.install_id is not null and e.name in ${APP_LIFECYCLE})
-        group by 1 order by 2 desc limit 20`),
+    q(`with ev as (
+         select name, session_id, install_id, props from events
+          where ${WHERE_EVENTS} and name <> 'pageview' and not (install_id is not null and name in ${APP_LIFECYCLE}))
+       select name, count(*)::int as count, count(distinct session_id)::int as visits, count(distinct install_id)::int as installs,
+              (select string_agg(distinct k, ', ') from ev e2 cross join lateral jsonb_object_keys(coalesce(e2.props, '{}')) k
+                where e2.name = ev.name) as props
+         from ev group by 1 order by 2 desc limit 20`),
     installsBy("app_version"),
     installsBy("state"),
     installsBy("platform || ' ' || split_part(os_version, '.', 1)"),
     q(`select coalesce(source, 'Not matched') as label, count(*)::int as v from installs
-        where ${WHERE_INSTALLS} and first_seen >= $2 and first_seen < $3 group by 1 order by 2 desc, 1 limit 12`),
+        where ${WHERE_INSTALLS} and first_seen >= $2 and first_seen < $3 group by 1 order by 2 desc, 1 limit 12`, pi),
     q(`select max(last_seen) as at from installs where project_id = $1`, [site.id]),
     q(`select ts as at from events where project_id = $1 order by ts desc limit 1`, [site.id]),
   ]);
 
   return {
     site: { key: site.key, name: site.name, domains: site.domains, timezone: tz },
-    range: { id, unit: range.unit, from: b.from, to: b.to, prevFrom: b.prev_from, prevTo: b.prev_to },
-    source,
+    range: b,
+    filters,
     totals,
     previous,
     series,
@@ -198,21 +232,24 @@ export async function stats(pool: pg.Pool, site: Site, rangeId: string, source: 
   };
 }
 
-// Right now: the visits seen in the last five minutes, where they are and what they're reading, today's totals,
-// page views minute by minute for the last half hour, and the latest events. No visitor hash leaves the server.
-export async function live(pool: pg.Pool, site: Site) {
+// Visitors on the site right now, counted by one of their details, most first.
+function countBy(present: Session[], pick: (s: Session) => string | null) {
+  const groups = new Map<string, Set<string>>();
+  for (const s of present) {
+    const label = pick(s) ?? "Unknown";
+    if (!groups.has(label)) groups.set(label, new Set());
+    groups.get(label)!.add(s.visitor);
+  }
+  return [...groups].map(([label, visitors]) => ({ label, v: visitors.size })).sort((a, b) => b.v - a.v || a.label.localeCompare(b.label)).slice(0, 10);
+}
+
+// Right now: who is on the site, where they are and what they're reading (from memory, so it's current to the
+// second), today's totals, page views minute by minute for the last half hour, and the latest events. No visitor
+// hash leaves the server.
+export async function live(pool: pg.Pool, site: Site, present: Session[]) {
   const tz = site.timezone;
   const q = async (sql: string, params: unknown[] = [site.id]) => (await pool.query(sql, params)).rows;
-  // A visit can't have started more than a day ago (the visitor hash changes daily), which keeps this on recent partitions.
-  const NOW = "project_id = $1 and started_at > now() - interval '1 day' and last_seen > now() - interval '5 minutes'";
-  const by = (column: string) =>
-    q(`select coalesce(${column}, 'Unknown') as label, count(distinct visitor)::int as v from sessions where ${NOW} group by 1 order by 2 desc, 1 limit 10`);
-  const [[now], countries, pages, sources, devices, [today], perMinute, recent] = await Promise.all([
-    q(`select count(distinct visitor)::int as visitors from sessions where ${NOW}`),
-    by("country"),
-    by("exit_path"),
-    by("source"),
-    by("device"),
+  const [[today], perMinute, recent] = await Promise.all([
     q(`select count(distinct visitor)::int as visitors, (count(*) filter (where name = 'pageview'))::int as pageviews,
               count(distinct session_id)::int as visits, (count(distinct session_id) filter (where name = 'download'))::int as downloads
          from events where project_id = $1 and ts >= date_trunc('day', now() at time zone $2) at time zone $2`, [site.id, tz]),
@@ -224,16 +261,21 @@ export async function live(pool: pg.Pool, site: Site) {
     q(`select ts, name, path, country, source, device, browser, os, install_id is not null as app
          from events where project_id = $1 and ts > now() - interval '30 minutes' order by ts desc limit 25`),
   ]);
-  return { visitors: now.visitors, countries, pages, sources, devices, today, perMinute, recent, at: new Date() };
+  return {
+    visitors: new Set(present.map((s) => s.visitor)).size,
+    countries: countBy(present, (s) => s.country),
+    pages: countBy(present, (s) => s.exitPath),
+    sources: countBy(present, (s) => s.source),
+    devices: countBy(present, (s) => s.device),
+    today, perMinute, recent, at: new Date(),
+  };
 }
 
 // Every site the person can see, with today's numbers, who's on it now and a fortnight of daily visitors.
-export async function overview(pool: pg.Pool, userId: string) {
+export async function overview(pool: pg.Pool, userId: string, presence: Presence) {
   const { rows: sites } = await pool.query(
-    `select p.id, p.key, p.name, p.domains, p.timezone, p.created_at,
-            (select ts from events e where e.project_id = p.id order by ts desc limit 1) as last_event_at,
-            (select count(distinct visitor) from sessions s where s.project_id = p.id and s.started_at > now() - interval '1 day'
-                and s.last_seen > now() - interval '5 minutes')::int as live
+    `select p.id, p.key, p.name, p.domains, p.timezone, p.created_at, m.role, p.icon is not null as has_icon, p.icon_checked_at,
+            (select ts from events e where e.project_id = p.id order by ts desc limit 1) as last_event_at
        from projects p join memberships m on m.workspace_id = p.workspace_id
       where m.user_id = $1 order by p.created_at`,
     [userId],
@@ -260,7 +302,9 @@ export async function overview(pool: pg.Pool, userId: string) {
     const todayRow = mine.get(keys[13]);
     return {
       key: s.key, name: s.name, domains: s.domains, timezone: s.timezone, createdAt: s.created_at, lastEventAt: s.last_event_at,
-      live: s.live, visitorsToday: todayRow?.visitors ?? 0, pageviewsToday: todayRow?.pageviews ?? 0, spark,
+      role: s.role, icon: s.has_icon ? new Date(s.icon_checked_at).getTime() : s.icon_checked_at ? false : null,
+      live: new Set(presence(s.id).map((v) => v.visitor)).size,
+      visitorsToday: todayRow?.visitors ?? 0, pageviewsToday: todayRow?.pageviews ?? 0, spark,
     };
   });
 }

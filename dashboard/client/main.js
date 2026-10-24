@@ -1,6 +1,7 @@
-// Statiku's dashboard: one page app. Signed out it shows sign-in and sign-up; signed in, the websites, and for each
-// one its analytics, a live view with a globe, the steps to add it to the site, and its settings. Everything shown
-// comes from /api, and everything from the server goes into the page as text.
+// Statiku's dashboard: one page app. Signed out it shows sign-in, sign-up and invitations; signed in, the websites,
+// and for each one its analytics, a live view with a globe, the steps to add it to the site, and its settings, plus
+// the account's own settings and team. Everything shown comes from /api, and everything from the server goes into
+// the page as text.
 import { lineChart, minuteBars, sparkline } from "./charts.js";
 import { createGlobe } from "./globe.js";
 
@@ -22,11 +23,14 @@ function h(tag, props, ...kids) {
 }
 
 const ICONS = {
-  home: '<path d="M3.5 9 10 4l6.5 5v7a1 1 0 0 1-1 1H12v-4.5H8V17H4.5a1 1 0 0 1-1-1V9Z"/>',
+  websites: '<rect x="2.75" y="3.75" width="14.5" height="12.5" rx="2"/><path d="M2.75 7.5h14.5"/><path d="M5.25 5.6h.01M7.25 5.6h.01M9.25 5.6h.01" stroke-width="1.9"/>',
   chart: '<path d="M4 16.5v-4M8 16.5v-8M12 16.5v-6M16 16.5V4"/>',
   live: '<circle cx="10" cy="10" r="1.8"/><path d="M6.8 13.2a4.5 4.5 0 0 1 0-6.4M13.2 6.8a4.5 4.5 0 0 1 0 6.4M4.3 15.7a8 8 0 0 1 0-11.4M15.7 4.3a8 8 0 0 1 0 11.4"/>',
   code: '<path d="m7 6-4 4 4 4M13 6l4 4-4 4"/>',
-  settings: '<path d="M4 6.5h7M15.5 6.5H16M4 13.5h.5M9 13.5h7"/><circle cx="13.25" cy="6.5" r="2"/><circle cx="6.75" cy="13.5" r="2"/>',
+  // A cog (after Feather's, MIT), drawn on a 24 grid and scaled to this one.
+  settings: '<g transform="scale(0.8333)" stroke-width="1.9"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></g>',
+  person: '<circle cx="10" cy="7.3" r="3.1"/><path d="M4.2 16.6c.9-2.9 3.1-4.4 5.8-4.4s4.9 1.5 5.8 4.4"/>',
+  team: '<circle cx="7.5" cy="7.5" r="2.6"/><path d="M2.8 15.8c.7-2.4 2.5-3.7 4.7-3.7s4 1.3 4.7 3.7"/><circle cx="14" cy="6.8" r="2.1"/><path d="M13.6 11.6c1.8 0 3.1 1 3.7 3"/>',
   plus: '<path d="M10 4.5v11M4.5 10h11"/>',
   down: '<path d="m6 8 4 4 4-4"/>',
   calendar: '<rect x="3.5" y="4.5" width="13" height="12" rx="2"/><path d="M3.5 8.5h13M7 3v3M13 3v3"/>',
@@ -34,17 +38,18 @@ const ICONS = {
   menu: '<path d="M3.5 6h13M3.5 10h13M3.5 14h13"/>',
   check: '<path d="m4.5 10.5 3.5 3.5 7.5-8"/>',
   back: '<path d="M12 15 7 10l5-5"/>',
-  globe: '<circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c1.9 2.1 2.9 4.4 2.9 7s-1 4.9-2.9 7c-1.9-2.1-2.9-4.4-2.9-7s1-4.9 2.9-7Z"/>',
   copy: '<rect x="7" y="7" width="9.5" height="9.5" rx="2"/><path d="M13 7V5.5A2 2 0 0 0 11 3.5H5.5a2 2 0 0 0-2 2V11a2 2 0 0 0 2 2H7"/>',
   external: '<path d="M11.5 3.5h5v5M16.5 3.5 9 11M14 12v3.5a1 1 0 0 1-1 1H4.5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1H8"/>',
   mail: '<rect x="3" y="5" width="14" height="10.5" rx="2"/><path d="m3.5 6 6.5 5 6.5-5"/>',
   wait: '<circle cx="10" cy="10" r="7"/><path d="M10 6.3V10l2.5 1.8"/>',
   eye: '<path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5Z"/><circle cx="10" cy="10" r="2.2"/>',
   download: '<path d="M10 3.5v9M6.3 9l3.7 3.7L13.7 9M4 16.5h12"/>',
+  export: '<path d="M10 12.5v-9M6.3 7.2 10 3.5l3.7 3.7M4 12v3.5a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V12"/>',
   cart: '<path d="M3 4h2l1.6 8.2a1 1 0 0 0 1 .8h6.6a1 1 0 0 0 1-.8L16.5 7H6"/><circle cx="8.5" cy="16" r="1"/><circle cx="14" cy="16" r="1"/>',
   spark: '<path d="M10 3.5v3M10 13.5v3M3.5 10h3M13.5 10h3M5.4 5.4l2.1 2.1M12.5 12.5l2.1 2.1M5.4 14.6l2.1-2.1M12.5 7.5l2.1-2.1"/>',
   app: '<rect x="3" y="4" width="14" height="10" rx="1.8"/><path d="M7.5 16.5h5M10 14v2.5"/>',
   logout: '<path d="M8 16.5H5a1.5 1.5 0 0 1-1.5-1.5V5A1.5 1.5 0 0 1 5 3.5h3M12.5 13.5 16 10l-3.5-3.5M16 10H8"/>',
+  trash: '<path d="M4 6h12M8 6V4.5h4V6M5.5 6l.7 10a1 1 0 0 0 1 .9h5.6a1 1 0 0 0 1-.9l.7-10"/>',
 };
 function icon(name, size = 18) {
   const t = document.createElement("template");
@@ -67,13 +72,30 @@ function ago(at) {
   const s = Math.max(0, Math.round((Date.now() - new Date(at)) / 1000));
   return s < 10 ? "just now" : s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`;
 }
-const clock = (d = new Date()) => d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+const clock = (d = new Date()) => d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const day = (d) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+// A site's first letter on a colour of its own, while it has no icon of its own.
 const LETTERS = ["#2a78d6", "#008060", "#6250d6", "#eb6834", "#d55181", "#1baf7a", "#c98500", "#e34948"];
 function letter(site, size = 32) {
   const name = site.name || site.domains?.[0] || "?";
   let hash = 0;
   for (const ch of site.domains?.[0] ?? name) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
-  return h("span", { class: "letter", style: { background: LETTERS[hash % LETTERS.length], width: `${size}px`, height: `${size}px` }, "aria-hidden": "true", text: name.trim()[0]?.toUpperCase() ?? "?" });
+  return h("span", { class: "letter", style: { background: LETTERS[hash % LETTERS.length], width: `${size}px`, height: `${size}px`, fontSize: `${Math.round(size * 0.44)}px`, borderRadius: `${Math.round(size / 4)}px` }, "aria-hidden": "true", text: name.trim()[0]?.toUpperCase() ?? "?" });
+}
+// The site's own icon, fetched from the site by Statiku's server; its letter when it has none.
+function siteIcon(site, size = 32) {
+  if (site.icon === false) return letter(site, size);
+  const img = h("img", { class: "site-icon", src: `/api/sites/${site.key}/icon?v=${site.icon ?? 0}`, alt: "", width: size, height: size, style: { width: `${size}px`, height: `${size}px`, borderRadius: `${Math.round(size / 4)}px`, padding: size > 24 ? "3px" : "1px" } });
+  img.addEventListener("error", () => img.replaceWith(letter(site, size)), { once: true });
+  return img;
+}
+// A person's photo, or an empty silhouette.
+function photo(user, size = 32) {
+  const box = h("span", { class: "photo", style: { width: `${size}px`, height: `${size}px` } });
+  if (user?.photo) box.append(h("img", { src: `/api/me/photo?v=${user.photo}`, alt: "" }));
+  else box.append(icon("person", Math.round(size * 0.62)));
+  return box;
 }
 // `text` with code spans: "Paste it before `</head>`."
 const rich = (text) => text.split("`").map((part, i) => (i % 2 ? h("code", { text: part }) : part));
@@ -82,7 +104,7 @@ function toast(message) {
   document.querySelector(".toast")?.remove();
   const t = h("div", { class: "toast", role: "status", text: message });
   document.body.append(t);
-  setTimeout(() => t.remove(), 2600);
+  setTimeout(() => t.remove(), 2800);
 }
 
 async function copy(text, button) {
@@ -90,13 +112,53 @@ async function copy(text, button) {
     await navigator.clipboard.writeText(text);
     toast("Copied");
     if (button) {
-      const before = button.textContent;
-      button.textContent = "Copied";
-      setTimeout(() => (button.textContent = before), 1600);
+      const before = [...button.childNodes];
+      button.replaceChildren(icon("check", 14), "Copied");
+      setTimeout(() => button.replaceChildren(...before), 1600);
     }
   } catch {
     toast("Couldn't copy. Select the text and copy it yourself.");
   }
+}
+
+// A confirmation over the page. With `typed`, the person types that text before confirming.
+function confirmDialog({ title, body, confirm, danger = false, typed = null }) {
+  return new Promise((resolve) => {
+    const input = typed ? h("input", { class: "input", placeholder: typed, "aria-label": `Type ${typed} to confirm`, autocomplete: "off", spellcheck: "false" }) : null;
+    const yes = h("button", { class: `btn ${danger ? "critical" : "primary"}`, type: "button", text: confirm, disabled: !!typed });
+    const close = (answer) => {
+      back.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(answer);
+    };
+    const onKey = (e) => e.key === "Escape" && close(false);
+    input?.addEventListener("input", () => (yes.disabled = input.value.trim().toLowerCase() !== typed.toLowerCase()));
+    yes.addEventListener("click", () => close(true));
+    const back = h("div", { class: "dialog-back", onclick: (e) => e.target === back && close(false) },
+      h("div", { class: "dialog", role: "dialog", "aria-modal": "true", "aria-label": title },
+        h("div", { class: "head" }, h("h2", { text: title })),
+        h("div", { class: "body" }, h("p", { text: body }), typed ? h("label", { class: "field" }, h("span", {}, "Type ", h("b", { text: typed }), " to confirm"), input) : null),
+        h("div", { class: "foot" }, h("button", { class: "btn", type: "button", text: "Cancel", onclick: () => close(false) }), yes)));
+    document.addEventListener("keydown", onKey);
+    document.body.append(back);
+    (input ?? yes).focus();
+  });
+}
+
+function download(name, text, type = "text/csv") {
+  const a = h("a", { href: URL.createObjectURL(new Blob([text], { type })), download: name });
+  document.body.append(a);
+  a.click();
+  setTimeout(() => {
+    URL.revokeObjectURL(a.href);
+    a.remove();
+  });
+}
+// A spreadsheet cell. Text that a spreadsheet would run as a formula (a page path such as "=HYPERLINK(…)") is quoted.
+function cell(value) {
+  let s = value == null ? "" : String(value);
+  if (typeof value === "string" && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 // ---------- Server ----------
@@ -109,7 +171,7 @@ async function api(path, { method = "GET", body } = {}) {
     credentials: "same-origin",
   });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && !path.startsWith("/api/login")) {
+  if (res.status === 401 && !/^\/api\/(login|me\/password|me$)/.test(path)) {
     state.user = null;
     go(`/login?next=${encodeURIComponent(location.pathname)}`, true);
     throw new SignedOut();
@@ -126,10 +188,14 @@ const saved = (() => {
     return {};
   }
 })();
-const state = { user: undefined, sites: null, range: saved.range ?? "d30", metric: "visitors", appMetric: "installs", source: null, pagesTab: "top", table: false };
+const NO_FILTERS = { source: null, country: null, device: null, browser: null, os: null, page: null };
+const state = {
+  user: undefined, sites: null, range: saved.range ?? "d30", from: saved.from ?? null, to: saved.to ?? null,
+  metric: "visitors", appMetric: "installs", filters: { ...NO_FILTERS }, pagesTab: "top", table: false,
+};
 const remember = () => {
   try {
-    localStorage.setItem("statiku", JSON.stringify({ range: state.range }));
+    localStorage.setItem("statiku", JSON.stringify({ range: state.range, from: state.from, to: state.to }));
   } catch {}
 };
 
@@ -146,11 +212,11 @@ function go(path, replace = false) {
 }
 document.addEventListener("click", (e) => {
   const a = e.target.closest?.("a[href]");
-  if (!a || a.target || a.hasAttribute("data-external") || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  if (!a || a.target || a.hasAttribute("data-external") || a.hasAttribute("download") || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   const url = new URL(a.href);
   if (url.origin !== location.origin || url.pathname.startsWith("/api/")) return;
   e.preventDefault();
-  go(url.pathname + url.search);
+  go(url.pathname + url.search + url.hash);
 });
 window.addEventListener("popstate", () => render());
 
@@ -178,7 +244,7 @@ function openPopover(anchor, items, { align = "left", width } = {}) {
   node.style.left = `${Math.max(12, Math.min(align === "right" ? r.right - w : r.left, innerWidth - w - 12))}px`;
   anchor.setAttribute("aria-expanded", "true");
   popover = { node, anchor };
-  node.querySelector("button, a")?.focus();
+  node.querySelector("button, a, input")?.focus();
 }
 document.addEventListener("pointerdown", (e) => {
   if (popover && !popover.node.contains(e.target) && !popover.anchor.contains(e.target)) closePopover();
@@ -208,27 +274,29 @@ function shell(site, active, content) {
     class: "switcher", type: "button", "aria-haspopup": "menu", "aria-expanded": "false",
     onclick: () => openPopover(switcher, [
       ...state.sites.map((s) => h("a", { class: "item", href: `/sites/${s.key}`, role: "menuitemradio", "aria-checked": String(s.key === site?.key), onclick: closePopover },
-        letter(s, 22), h("span", {}, h("span", { text: s.name })), s.live ? h("span", { class: "end live-pill" }, h("i", { class: "dot pulse" }), s.live) : null)),
+        siteIcon(s, 22), h("span", {}, h("span", { text: s.name })), s.live ? h("span", { class: "end live-pill" }, h("i", { class: "dot pulse" }), s.live) : null)),
       state.sites.length ? h("hr") : null,
-      h("a", { class: "item", href: "/", onclick: closePopover }, icon("home"), "All websites"),
+      h("a", { class: "item", href: "/", onclick: closePopover }, icon("websites"), "All websites"),
       h("a", { class: "item", href: "/sites/new", onclick: closePopover }, icon("plus"), "Add website"),
     ]),
-  }, site ? letter(site, 22) : icon("globe"), h("span", { class: "site-name", text: site ? site.name : "All websites" }),
+  }, site ? siteIcon(site, 22) : icon("websites"), h("span", { class: "site-name", text: site ? site.name : "All websites" }),
     site && site.name !== site.domains[0] ? h("span", { class: "site-domain", text: site.domains[0] }) : null, icon("down", 16));
 
-  const initials = state.user.name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
   const avatar = h("button", {
-    class: "avatar", type: "button", "aria-label": `Account: ${state.user.name}`, "aria-haspopup": "menu", "aria-expanded": "false", text: initials,
+    class: "avatar", type: "button", "aria-label": `Account: ${state.user.name}`, "aria-haspopup": "menu", "aria-expanded": "false",
     onclick: () => openPopover(avatar, [
-      h("div", { class: "who" }, h("b", { text: state.user.name }), h("span", { class: "muted", text: state.user.email })),
+      h("div", { class: "who" }, photo(state.user, 36), h("div", {}, h("b", { text: state.user.name }), h("span", { class: "muted", text: state.user.email }))),
+      h("a", { class: "item", href: "/settings", onclick: closePopover }, icon("settings"), "Account settings"),
+      h("a", { class: "item", href: "/settings#team", onclick: closePopover }, icon("team"), "Team"),
+      h("hr"),
       menuItem([icon("logout"), "Sign out"], async () => {
         await api("/api/logout", { method: "POST" }).catch(() => {});
         state.user = null;
         state.sites = null;
         go("/login", true);
       }),
-    ], { align: "right", width: 260 }),
-  });
+    ], { align: "right", width: 280 }),
+  }, state.user.photo ? h("img", { src: `/api/me/photo?v=${state.user.photo}`, alt: "" }) : icon("person", 18));
 
   const topbar = h("header", { class: "topbar" },
     h("button", { class: "menu-button", type: "button", "aria-label": "Menu", "aria-controls": "sidebar", onclick: () => toggleMenu(!sidebar.classList.contains("open")) }, icon("menu", 22)),
@@ -236,17 +304,21 @@ function shell(site, active, content) {
     h("div", { class: "center" }, switcher),
     h("div", { class: "actions" }, avatar));
 
+  // Settings sits at the foot: a site's own inside a site, the account's everywhere else.
   sidebar.append(
     h("nav", { "aria-label": "Main" },
-      navItem("/", "home", "Websites", active === "home"),
+      navItem("/", "websites", "Websites", active === "home"),
+      navItem("/sites/new", "plus", "Add website", active === "add"),
       site ? [
-        h("div", { class: "nav-label", text: site.domains[0] }),
+        h("div", { class: "nav-label" }, siteIcon(site, 16), h("span", { text: site.domains[0] })),
         navItem(`/sites/${site.key}`, "chart", "Analytics", active === "analytics"),
-        navItem(`/sites/${site.key}/live`, "live", "Live view", active === "live", site.live ? h("span", { class: "count" }, h("i", { class: "dot pulse" }), site.live) : null),
+        navItem(`/sites/${site.key}/live`, "live", "Live view", active === "live",
+          h("span", { class: "count", id: "nav-live", hidden: !site.live }, h("i", { class: "dot pulse" }), h("span", { text: String(site.live) }))),
         navItem(`/sites/${site.key}/setup`, "code", "Setup", active === "setup"),
-        navItem(`/sites/${site.key}/settings`, "settings", "Settings", active === "settings"),
       ] : null),
-    h("div", { class: "foot" }, navItem("/sites/new", "plus", "Add website", active === "add")));
+    h("div", { class: "foot" }, site
+      ? navItem(`/sites/${site.key}/settings`, "settings", "Settings", active === "settings")
+      : navItem("/settings", "settings", "Settings", active === "account")));
 
   return [topbar, sidebar, overlay, h("main", { class: "main", id: "main" }, content)];
 }
@@ -255,31 +327,34 @@ function pageHead(titleParts, tools) {
   return h("div", { class: "page-head" }, h("div", { class: "title" }, titleParts), tools ? h("div", { class: "tools" }, tools) : null);
 }
 const failure = (e) => h("div", { class: "error", role: "alert", text: e.message || String(e) });
+function card(title, body, { sub, end, id } = {}) {
+  return h("div", { class: "card", id }, h("div", { class: "card-head" }, h("h2", { text: title }), sub ? h("span", { class: "sub", text: sub }) : null, end ? h("div", { class: "end" }, end) : null),
+    h("div", { class: "card-body" }, body));
+}
 
-// ---------- Sign in and sign up ----------
-function authPage(mode) {
+// ---------- Sign in, sign up, invitations ----------
+function authForm(mode, { invite = null, onDone } = {}) {
   const signup = mode === "signup";
-  const next = new URLSearchParams(location.search).get("next");
   const error = h("div", { class: "error", role: "alert", hidden: true });
   const field = (label, name, type, autocomplete, help) => {
     const id = `f-${name}`;
     return h("div", { class: "field" }, h("label", { for: id, text: label }),
-      h("input", { class: "input big", id, name, type, autocomplete, required: true, ...(name === "password" ? { minlength: signup ? "8" : null } : {}) }),
+      h("input", { class: "input big", id, name, type, autocomplete, required: true }),
       help ? h("span", { class: "help", text: help }) : null);
   };
-  const button = h("button", { class: "btn primary big", type: "submit", text: signup ? "Create account" : "Sign in" });
+  const button = h("button", { class: "btn primary big", type: "submit", text: signup ? (invite ? "Create account and join" : "Create account") : "Sign in" });
   const form = h("form", {
     class: "form", novalidate: true,
     onsubmit: async (e) => {
       e.preventDefault();
-      const data = Object.fromEntries(new FormData(form));
+      const data = { ...Object.fromEntries(new FormData(form)), ...(invite ? { invite } : {}) };
       button.disabled = true;
       error.hidden = true;
       try {
         const { user } = await api(signup ? "/api/signup" : "/api/login", { method: "POST", body: data });
         state.user = user;
         state.sites = null;
-        go(next && next.startsWith("/") && !next.startsWith("//") ? next : signup ? "/sites/new" : "/", true);
+        onDone(user);
       } catch (err) {
         if (err instanceof SignedOut) return;
         error.textContent = err.message;
@@ -293,15 +368,57 @@ function authPage(mode) {
     field("Password", "password", "password", signup ? "new-password" : "current-password", signup ? "At least 8 characters." : null),
     button);
   setTimeout(() => form.querySelector("input")?.focus());
+  return form;
+}
+
+function authLayout(...kids) {
   return h("div", { class: "auth" }, h("div", { class: "box" },
-    h("div", { class: "logo" }, h("img", { src: "/favicon.svg", alt: "" }), "Statiku"),
+    h("div", { class: "logo" }, h("img", { src: "/favicon.svg", alt: "" }), "Statiku"), kids,
+    h("p", { class: "promise" }, h("span", { text: "No cookies on your visitors" }), h("span", { text: "No IP addresses stored" }), h("span", { text: "Data kept in the EU" }))));
+}
+
+function authPage(mode) {
+  const signup = mode === "signup";
+  const next = new URLSearchParams(location.search).get("next");
+  const safeNext = next && next.startsWith("/") && !next.startsWith("//") ? next : null;
+  return authLayout(
     h("div", { class: "card" },
       h("div", {}, h("h1", { text: signup ? "Create your account" : "Sign in" }),
         h("p", { class: "sub", text: signup ? "Add your website and see your visitors in minutes. No credit card." : "See who's visiting your websites." })),
-      form),
+      authForm(mode, { onDone: () => go(safeNext ?? (signup ? "/sites/new" : "/"), true) })),
     h("p", { class: "switch" }, signup ? "Already have an account? " : "New to Statiku? ",
-      h("a", { href: signup ? "/login" : "/signup", text: signup ? "Sign in" : "Create an account" })),
-    h("p", { class: "promise" }, h("span", { text: "No cookies on your visitors" }), h("span", { text: "No IP addresses stored" }), h("span", { text: "Data kept in the EU" }))));
+      h("a", { href: `${signup ? "/login" : "/signup"}${safeNext ? `?next=${encodeURIComponent(safeNext)}` : ""}`, text: signup ? "Sign in" : "Create an account" })));
+}
+
+async function joinPage(token) {
+  let info;
+  try {
+    info = await api(`/api/invites/${token}`);
+  } catch (err) {
+    return authLayout(h("div", { class: "card" }, h("h1", { text: "This invitation doesn't work" }), h("p", { class: "sub", text: err.message }), h("a", { class: "btn", href: "/" }, "Go to Statiku")));
+  }
+  const teamName = `${info.workspace}'s team`;
+  const intro = h("div", {}, h("h1", { text: `Join ${teamName}` }),
+    h("p", { class: "sub", text: `${info.invitedBy ?? "Someone"} invited you to see their websites' visitors on Statiku.` }));
+  if (!info.valid) return authLayout(h("div", { class: "card" }, intro, h("div", { class: "error", text: "This invitation has expired or was already used. Ask for a new one." })));
+  const accept = async () => {
+    try {
+      const { workspace } = await api(`/api/invites/${token}/accept`, { method: "POST" });
+      state.sites = null;
+      toast(`You've joined ${workspace}'s team`);
+      go("/", true);
+    } catch (err) {
+      if (!(err instanceof SignedOut)) toast(err.message);
+    }
+  };
+  if (state.user) {
+    return authLayout(h("div", { class: "card" }, intro,
+      h("p", { class: "muted", text: `You're signed in as ${state.user.email}.` }),
+      h("button", { class: "btn primary big", type: "button", text: `Join ${teamName}`, onclick: accept })));
+  }
+  return authLayout(
+    h("div", { class: "card" }, intro, authForm("signup", { invite: token, onDone: () => { toast(`You've joined ${teamName}`); go("/", true); } })),
+    h("p", { class: "switch" }, "Already have an account? ", h("a", { href: `/login?next=${encodeURIComponent(`/join/${token}`)}`, text: "Sign in to join" })));
 }
 
 // ---------- Websites ----------
@@ -318,15 +435,16 @@ async function homePage() {
         howItWorks());
       return;
     }
-    list.replaceChildren(h("div", { class: "sites" }, state.sites.map(siteCard)));
+    list.replaceChildren(h("div", { class: "sites" }, state.sites.map(siteCard),
+      h("a", { class: "add-card", href: "/sites/new" }, icon("plus", 22), "Add another website")));
   };
   draw();
-  every(30_000, async () => {
+  every(15_000, async () => {
     await loadSites(true);
     draw();
   });
   return h("div", { class: "page" },
-    pageHead([icon("home", 20), h("h1", { text: "Websites" }), sites.length ? h("span", { class: "muted", text: `${sites.length} ${sites.length === 1 ? "site" : "sites"}` }) : null],
+    pageHead([icon("websites", 20), h("h1", { text: "Websites" }), sites.length ? h("span", { class: "muted", text: `${sites.length} ${sites.length === 1 ? "site" : "sites"}` }) : null],
       sites.length ? h("a", { class: "btn primary", href: "/sites/new" }, icon("plus", 16), "Add website") : null),
     list);
 }
@@ -334,7 +452,7 @@ async function homePage() {
 function siteCard(s) {
   const ready = !!s.lastEventAt;
   return h("a", { class: "card site-card", href: ready ? `/sites/${s.key}` : `/sites/${s.key}/setup` },
-    h("div", { class: "top" }, letter(s), h("div", { class: "who" }, h("b", { text: s.name }), s.name !== s.domains[0] ? h("span", { text: s.domains[0] }) : null),
+    h("div", { class: "top" }, siteIcon(s, 36), h("div", { class: "who" }, h("b", { text: s.name }), s.name !== s.domains[0] ? h("span", { text: s.domains[0] }) : null),
       s.live ? h("span", { class: "live-pill" }, h("i", { class: "dot pulse" }), `${s.live} now`) : null),
     h("div", { class: "nums" },
       h("div", {}, h("b", { class: "num", text: int(s.visitorsToday) }), h("span", { text: "Visitors today" })),
@@ -349,8 +467,21 @@ function howItWorks() {
   return h("div", { class: "card", style: { marginTop: "12px" } }, h("div", { class: "card-body how-steps" },
     [["1. Add your address", "Type your website's address, like example.com."],
       ["2. Paste one line", "Copy the tracking code into your site. There are steps for every common website builder."],
-      ["3. Watch visitors arrive", "See them on the live globe within seconds, then where they came from and what they read."]]
+      ["3. Watch visitors arrive", "See them on the live globe the moment they arrive, then where they came from and what they read."]]
       .map(([title, text]) => h("div", {}, h("b", { text: title }), h("span", { class: "muted", text })))));
+}
+
+const zones = () => {
+  try {
+    return Intl.supportedValuesOf("timeZone");
+  } catch {
+    return [];
+  }
+};
+function zoneSelect(id, current) {
+  const list = zones();
+  if (!list.includes(current)) list.unshift(current);
+  return h("select", { class: "input", id }, list.map((z) => h("option", { value: z, text: z.replaceAll("_", " "), selected: z === current })));
 }
 
 function addSiteForm({ inline = false } = {}) {
@@ -362,14 +493,7 @@ function addSiteForm({ inline = false } = {}) {
     const guess = address.value.trim().replace(/^[a-z]+:\/\//i, "").replace(/^www\./i, "").replace(/[/?#].*$/, "");
     name.placeholder = guess || "Same as the address";
   });
-  const zones = (() => {
-    try {
-      return Intl.supportedValuesOf("timeZone");
-    } catch {
-      return [zone];
-    }
-  })();
-  const tz = h("select", { class: "input", id: "f-zone", name: "timezone" }, zones.map((z) => h("option", { value: z, text: z.replaceAll("_", " "), selected: z === zone })));
+  const tz = zoneSelect("f-zone", zone);
   const zoneField = h("div", { class: "field", hidden: true }, h("label", { for: "f-zone", text: "Time zone" }), tz, h("span", { class: "help", text: "Days in your reports start at midnight here." }));
   const zoneLine = h("p", { class: "muted" }, `Reports use ${zone.replaceAll("_", " ")} time. `,
     h("button", { class: "btn plain", type: "button", text: "Change", onclick: () => { zoneField.hidden = false; zoneLine.hidden = true; } }));
@@ -473,24 +597,25 @@ async function setupPage(key) {
       h("a", { class: "btn primary", href: `/sites/${key}` }, "View analytics"), h("a", { class: "btn", href: `/sites/${key}/live` }, "Live view")]
     : [h("span", { class: "icon wait" }, h("i", { class: "dot idle pulse", style: { width: "12px", height: "12px" } })),
       h("div", { class: "what" }, h("b", { text: "Waiting for the first visit" }),
-        h("span", { class: "muted", text: `Once the code is on your site, open ${domain} in your browser. This turns green within seconds.` })),
+        h("span", { class: "muted", text: `Once the code is on your site, open ${domain} in your browser. This turns green the moment you do.` })),
       h("a", { class: "btn", href: `https://${domain}`, target: "_blank", rel: "noopener", "data-external": "" }, `Open ${domain}`, icon("external", 14))]));
   drawStatus();
-  // Quick while waiting for the first visit, then now and then.
-  let since = 0;
-  every(4000, async () => {
-    if (lastEventAt && (since += 4000) < 30_000) return;
-    since = 0;
-    const fresh = await api(`/api/sites/${key}`).catch(() => null);
-    if (fresh && fresh.site.lastEventAt !== lastEventAt) {
-      const first = !lastEventAt;
-      lastEventAt = fresh.site.lastEventAt;
-      drawStatus();
-      if (first) {
-        toast(`First visit received from ${domain}`);
-        state.sites = null;
-      }
-    }
+  // The first visit turns this green as it arrives; a check every few seconds catches one that came in just
+  // before this page opened, while it was being saved.
+  const received = (at) => {
+    if (lastEventAt) return;
+    lastEventAt = at;
+    drawStatus();
+    toast(`First visit received from ${domain}`);
+    state.sites = null;
+  };
+  const stream = new EventSource(`/api/sites/${key}/stream`);
+  stream.onmessage = (m) => JSON.parse(m.data).t === "event" && received(new Date().toISOString());
+  onLeave(() => stream.close());
+  every(5000, async () => {
+    if (lastEventAt) return;
+    const at = (await api(`/api/sites/${key}`).catch(() => null))?.site.lastEventAt;
+    if (at) received(at);
   });
 
   const copyButton = h("button", { class: "btn copy", type: "button", onclick: () => copy(snippet, copyButton) }, icon("copy", 14), "Copy");
@@ -563,7 +688,7 @@ const METRICS = [
   { id: "visitors", label: "Visitors", fmt: int, tick: compact },
   { id: "visits", label: "Visits", fmt: int, tick: compact },
   { id: "pageviews", label: "Page views", fmt: int, tick: compact },
-  { id: "perVisit", label: "Views per visit", fmt: (n) => (n == null ? "–" : n.toFixed(2)), tick: (n) => n.toFixed(1), derived: true },
+  { id: "perVisit", label: "Views per visit", fmt: (n) => (n == null ? "–" : n.toFixed(2)), tick: (n) => n.toFixed(1) },
   { id: "bounce", label: "Bounce rate", fmt: (n) => (n == null ? "–" : `${n}%`), tick: (n) => `${n}%`, lower: true },
   { id: "duration", label: "Visit duration", fmt: duration, tick: (n) => (n < 60 ? `${n}s` : `${Math.round(n / 60)}m`) },
   { id: "downloads", label: "Downloads", fmt: int, tick: compact },
@@ -581,6 +706,8 @@ const LICENCE = [
   { id: "free", label: "Free", color: "var(--slot-3)" },
   { id: "expired", label: "Trial ended", color: "var(--lapsed)" },
 ];
+const FILTER_NAMES = { source: "Source", country: "Country", device: "Device", browser: "Browser", os: "System", page: "Page" };
+const filterValue = (dim, value) => (dim === "country" ? `${flag(value)} ${countryName(value)}` : value);
 const withPerVisit = (t) => ({ ...t, perVisit: t.visits ? t.pageviews / t.visits : null });
 
 // The change from the previous period, green when it's good news (for a bounce rate, a fall).
@@ -595,10 +722,10 @@ function delta(m, now, before, short = false) {
 function bucketLabel(t, unit, long = false) {
   const [date, time] = t.split("T");
   const [y, mo, d] = date.split("-").map(Number);
-  const day = new Date(y, mo - 1, d);
-  if (unit === "hour") return long ? `${day.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${time}` : time;
-  if (unit === "month") return day.toLocaleDateString("en-US", { month: "short", year: long ? "numeric" : undefined });
-  return day.toLocaleDateString("en-US", { month: "short", day: "numeric", year: long ? "numeric" : undefined });
+  const when = new Date(y, mo - 1, d);
+  if (unit === "hour") return long ? `${when.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${time}` : time;
+  if (unit === "month") return when.toLocaleDateString("en-US", { month: "short", year: long ? "numeric" : undefined });
+  return when.toLocaleDateString("en-US", { month: "short", day: "numeric", year: long ? "numeric" : undefined });
 }
 function spanName(from, to) {
   const a = new Date(from), b = new Date(new Date(to).getTime() - 1);
@@ -606,7 +733,7 @@ function spanName(from, to) {
   return a.toDateString() === b.toDateString() ? a.toLocaleDateString("en-US", opts) : `${a.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${b.toLocaleDateString("en-US", opts)}`;
 }
 
-function bars(rows, { head, fmt = int, onPick, canPick = () => true, label = (r) => r.label, lead } = {}) {
+function bars(rows, { head, fmt = int, onPick, canPick = () => true, label = (r) => r.label, lead, active } = {}) {
   if (!rows.length) return h("p", { class: "empty-note", text: "No data for this period" });
   const max = Math.max(...rows.map((r) => r.v), 1);
   const total = rows.reduce((a, r) => a + r.v, 0);
@@ -615,17 +742,12 @@ function bars(rows, { head, fmt = int, onPick, canPick = () => true, label = (r)
     rows.map((r) => {
       const pickable = onPick && canPick(r);
       return h(pickable ? "button" : "div", {
-        class: `bar-row${r.label === state.source && pickable ? " on" : ""}`, type: pickable ? "button" : null,
-        onclick: pickable ? () => onPick(r) : null,
+        class: `bar-row${pickable && r.label === active ? " on" : ""}`, type: pickable ? "button" : null,
+        title: pickable ? `Show only ${label(r)}` : null, onclick: pickable ? () => onPick(r) : null,
       }, h("span", { class: "wash", style: { width: `${(100 * r.v) / max}%` } }),
         h("span", { class: "l" }, lead?.(r), h("span", { text: label(r) })),
         h("span", { class: "r" }, fmt(r.v), h("small", { text: pct(r.v, total, 0) })));
     }));
-}
-
-function card(title, body, { sub, end } = {}) {
-  return h("div", { class: "card" }, h("div", { class: "card-head" }, h("h2", { text: title }), sub ? h("span", { class: "sub", text: sub }) : null, end ? h("div", { class: "end" }, end) : null),
-    h("div", { class: "card-body" }, body));
 }
 
 function tabs(items, current, pick) {
@@ -633,43 +755,116 @@ function tabs(items, current, pick) {
     h("button", { type: "button", role: "tab", "aria-selected": String(id === current), text: label, onclick: () => pick(id) })));
 }
 
+// A report as a spreadsheet: totals, the period bucket by bucket, and every breakdown.
+function exportCsv(d) {
+  const totals = withPerVisit(d.totals), previous = withPerVisit(d.previous);
+  const rows = [["Statiku report", d.site.domains[0], spanName(d.range.from, d.range.to)], [],
+    ["Measure", "This period", "Previous period"], ...METRICS.map((m) => [m.label, m.fmt(totals[m.id]), m.fmt(previous[m.id])]), [],
+    ["Time", ...METRICS.map((m) => m.label)], ...d.series.map((s) => withPerVisit(s)).map((s) => [bucketLabel(s.t, d.range.unit, true), ...METRICS.map((m) => s[m.id] ?? "")])];
+  const section = (title, list, labelOf = (r) => r.label) => rows.push([], [title, "Visitors or visits"], ...list.map((r) => [labelOf(r), r.v]));
+  section("Source", d.sources);
+  section("Page", d.pages.top);
+  section("Entry page", d.pages.entry);
+  section("Exit page", d.pages.exit);
+  section("Country", d.countries, (r) => countryName(r.label));
+  section("Device", d.devices.device);
+  section("Browser", d.devices.browser);
+  section("Operating system", d.devices.os);
+  rows.push([], ["Event", "Count", "Visits"], ...d.events.map((e) => [e.name, e.count, e.visits]));
+  download(`statiku-${d.site.domains[0]}-${new Date(d.range.from).toISOString().slice(0, 10)}.csv`, rows.map((r) => r.map(cell).join(",")).join("\r\n") + "\r\n");
+}
+
 async function analyticsPage(key) {
   const site = state.sites.find((s) => s.key === key);
+  // Filters live in the address, so a filtered report can be bookmarked or shared with the team.
+  const query = new URLSearchParams(location.search);
+  state.filters = Object.fromEntries(Object.keys(NO_FILTERS).map((f) => [f, query.get(f)]));
+  if (query.get("range")) {
+    state.range = query.get("range");
+    state.from = query.get("from");
+    state.to = query.get("to");
+  }
   const body = h("div", {}, h("p", { class: "muted", text: "Loading…" }));
   const refreshed = h("span", { class: "muted" });
   const rangeButton = h("button", { class: "btn", type: "button", "aria-haspopup": "menu", "aria-expanded": "false" });
   const liveButton = h("a", { class: "btn", href: `/sites/${key}/live` });
-  const filter = h("span");
+  const exportButton = h("button", { class: "btn", type: "button", disabled: true, onclick: () => data && exportCsv(data) }, icon("export", 16), "Export");
+  const chips = h("div", { class: "filters", hidden: true });
   let data = null;
 
+  const rangeLabel = () => (state.range === "custom" && state.from && state.to
+    ? `${day(`${state.from}T12:00`)} – ${day(`${state.to}T12:00`)}`
+    : RANGES.find(([id]) => id === state.range)?.[1] ?? "Last 30 days");
+
   const drawTools = () => {
-    rangeButton.replaceChildren(icon("calendar", 16), RANGES.find(([id]) => id === state.range)?.[1] ?? "Last 30 days", icon("down", 14));
-    rangeButton.onclick = () => openPopover(rangeButton, RANGES.map(([id, label]) =>
-      menuItem([label, id === state.range ? h("span", { class: "end" }, icon("check", 16)) : null], () => { state.range = id; remember(); load(); }, { role: "menuitemradio", "aria-checked": String(id === state.range) })));
+    rangeButton.replaceChildren(icon("calendar", 16), rangeLabel(), icon("down", 14));
+    rangeButton.onclick = () => {
+      const today = new Date().toISOString().slice(0, 10);
+      const fromInput = h("input", { class: "input", type: "date", required: true, max: today, value: state.from ?? new Date(Date.now() - 13 * 86400_000).toISOString().slice(0, 10) });
+      const toInput = h("input", { class: "input", type: "date", required: true, max: today, value: state.to ?? today });
+      openPopover(rangeButton, [
+        ...RANGES.map(([id, label]) => menuItem([label, id === state.range ? h("span", { class: "end" }, icon("check", 16)) : null],
+          () => { state.range = id; remember(); load(); }, { role: "menuitemradio", "aria-checked": String(id === state.range) })),
+        h("form", {
+          class: "custom-range",
+          onsubmit: (e) => {
+            e.preventDefault();
+            if (!fromInput.value || !toInput.value) return;
+            [state.from, state.to] = [fromInput.value, toInput.value].sort();
+            state.range = "custom";
+            remember();
+            closePopover();
+            load();
+          },
+        }, h("b", { text: "Custom range" }), h("div", { class: "row" }, h("label", {}, "From", fromInput), h("label", {}, "To", toInput)),
+          h("button", { class: "btn primary", type: "submit", text: "Apply" })),
+      ], { width: 280 });
+    };
     const live = state.sites.find((s) => s.key === key)?.live ?? 0;
     liveButton.replaceChildren(h("i", { class: `dot${live ? " pulse" : " idle"}` }), live ? `${live} ${live === 1 ? "visitor" : "visitors"} now` : "Live view");
-    filter.replaceChildren(state.source
-      ? h("span", { class: "chip" }, "Source: ", h("b", { text: state.source }), h("button", { type: "button", "aria-label": "Clear the source filter", onclick: () => { state.source = null; load(); } }, icon("close", 14)))
-      : "");
+    const active = Object.entries(state.filters).filter(([, v]) => v);
+    chips.hidden = !active.length;
+    chips.replaceChildren(...active.map(([dim, value]) => h("span", { class: "chip" },
+      h("span", {}, h("span", { class: "muted", text: `${FILTER_NAMES[dim]}${dim === "page" ? " (visits that viewed it)" : ""}: ` }), h("b", { text: filterValue(dim, value) })),
+      h("button", { type: "button", "aria-label": `Remove the ${FILTER_NAMES[dim].toLowerCase()} filter`, onclick: () => setFilter(dim, null) }, icon("close", 14)))),
+    ...(active.length > 1 ? [h("button", { class: "btn plain", type: "button", text: "Clear all", onclick: () => { state.filters = { ...NO_FILTERS }; load(); } })] : []));
   };
+
+  function syncAddress() {
+    const q = new URLSearchParams();
+    if (state.range !== "d30") q.set("range", state.range);
+    if (state.range === "custom") {
+      q.set("from", state.from);
+      q.set("to", state.to);
+    }
+    for (const [f, v] of Object.entries(state.filters)) if (v) q.set(f, v);
+    history.replaceState({}, "", `/sites/${key}${q.size ? `?${q}` : ""}`);
+  }
 
   async function load() {
     drawTools();
+    syncAddress();
     try {
       const q = new URLSearchParams({ range: state.range });
-      if (state.source) q.set("source", state.source);
+      if (state.range === "custom") {
+        q.set("from", state.from);
+        q.set("to", state.to);
+      }
+      for (const [f, v] of Object.entries(state.filters)) if (v) q.set(f, v);
       data = await api(`/api/sites/${key}/stats?${q}`);
-      refreshed.textContent = `Last refreshed ${clock()}`;
+      refreshed.textContent = `Last refreshed ${clock().slice(0, 5)}`;
+      exportButton.disabled = false;
       draw();
     } catch (err) {
       if (!(err instanceof SignedOut)) body.replaceChildren(failure(err));
     }
   }
-  const pickSource = (name) => {
-    state.source = state.source === name ? null : name;
+  const setFilter = (dim, value) => {
+    state.filters = { ...state.filters, [dim]: state.filters[dim] === value ? null : value };
     window.scrollTo({ top: 0, behavior: "smooth" });
     load();
   };
+  const by = (dim) => ({ onPick: (r) => setFilter(dim, r.label), active: state.filters[dim], canPick: (r) => r.label !== "Unknown" && r.label !== "Not matched" });
 
   function draw() {
     const d = data;
@@ -700,7 +895,7 @@ async function analyticsPage(key) {
     tableHost.append(h("table", {}, h("thead", {}, h("tr", {}, h("th", { text: unit === "hour" ? "Hour" : unit === "month" ? "Month" : "Day" }), h("th", { text: m.label }), h("th", { text: "Previous period" }))),
       h("tbody", {}, points.map((p, i) => h("tr", {}, h("td", { text: p.label }), h("td", { text: m.fmt(p.v) }), h("td", { text: compare[i] ? m.fmt(compare[i].v) : "–" }))).reverse())));
     const chartCard = h("div", { class: "card" },
-      h("div", { class: "card-head" }, h("h2", { text: `${m.label} over time` }), h("span", { class: "sub", text: RANGES.find(([id]) => id === d.range.id)?.[2] }), h("div", { class: "end" }, toggle)),
+      h("div", { class: "card-head" }, h("h2", { text: `${m.label} over time` }), h("span", { class: "sub", text: unit === "hour" ? "by hour" : unit === "month" ? "by month" : "by day" }), h("div", { class: "end" }, toggle)),
       h("div", { class: "card-body" },
         h("div", { style: { display: "flex", alignItems: "baseline", gap: "10px", flexWrap: "wrap" } }, h("span", { style: { fontSize: "24px", fontWeight: 650, letterSpacing: "-0.02em" }, text: m.fmt(totals[m.id]) }), delta(m, totals[m.id], previous[m.id])),
         chartHost, tableHost));
@@ -718,16 +913,16 @@ async function analyticsPage(key) {
       kpis,
       h("div", { class: "grid g-side" }, chartCard, breakdown),
       h("div", { class: "grid g3" },
-        card("Top sources", bars(d.sources, { head: ["Source", "Visitors"], onPick: (r) => pickSource(r.label) }), { sub: "Click one to filter" }),
-        card("Top pages", bars(pageRows, { head: ["Page", state.pagesTab === "top" ? "Visitors" : "Visits"] }), {
+        card("Top sources", bars(d.sources, { head: ["Source", "Visitors"], ...by("source") }), { sub: "Click any row to filter" }),
+        card("Top pages", bars(pageRows, { head: ["Page", state.pagesTab === "top" ? "Visitors" : "Visits"], ...by("page") }), {
           end: tabs([["top", "Pages"], ["entry", "Entry"], ["exit", "Exit"]], state.pagesTab, (id) => { state.pagesTab = id; draw(); }),
         }),
-        card("Locations", bars(d.countries, { head: ["Country", "Visitors"], label: (r) => countryName(r.label), lead: (r) => h("span", { class: "flag", text: flag(r.label) }) }))),
+        card("Locations", bars(d.countries, { head: ["Country", "Visitors"], label: (r) => countryName(r.label), lead: (r) => h("span", { class: "flag", text: flag(r.label) }), ...by("country") }))),
       h("div", { class: "grid g3" },
-        card("Devices", bars(d.devices.device, { head: ["Device", "Visitors"] })),
-        card("Browsers", bars(d.devices.browser, { head: ["Browser", "Visitors"] })),
-        card("Operating systems", bars(d.devices.os, { head: ["System", "Visitors"] }))),
-      conversions(d, pickSource),
+        card("Devices", bars(d.devices.device, { head: ["Device", "Visitors"], ...by("device") })),
+        card("Browsers", bars(d.devices.browser, { head: ["Browser", "Visitors"], ...by("browser") })),
+        card("Operating systems", bars(d.devices.os, { head: ["System", "Visitors"], ...by("os") }))),
+      conversions(d, (name) => setFilter("source", name)),
       h("div", { class: "grid g2" },
         card("Events", d.events.length ? h("div", { class: "table-wrap" }, h("table", {},
           h("thead", {}, h("tr", {}, ["Event", "Count", "Visits", ...(d.app.has ? ["Installs"] : []), "Props"].map((x) => h("th", { text: x })))),
@@ -760,8 +955,8 @@ async function analyticsPage(key) {
   queueMicrotask(load);
 
   return h("div", { class: "page" },
-    pageHead([icon("chart", 20), h("h1", { text: "Analytics" }), h("span", { class: "muted", text: site?.domains[0] }), refreshed], [filter, rangeButton, liveButton]),
-    body);
+    pageHead([icon("chart", 20), h("h1", { text: "Analytics" }), h("span", { class: "muted", text: site?.domains[0] }), refreshed], [rangeButton, exportButton, liveButton]),
+    chips, body);
 }
 
 // Visits that went on to download, install, check out or buy, by source, beside the steps overall.
@@ -784,7 +979,7 @@ function conversions(d, pickSource) {
     card("Conversions by source", h("div", { class: "table-wrap" }, h("table", {},
       h("thead", {}, h("tr", {}, cols.map(([x]) => h("th", { text: x })))),
       h("tbody", {}, d.journeyBySource.map((r) => h("tr", {
-        class: `pick${r.label === state.source ? " on" : ""}`, tabindex: "0", onclick: () => pickSource(r.label),
+        class: `pick${r.label === d.filters.source ? " on" : ""}`, tabindex: "0", onclick: () => pickSource(r.label),
         onkeydown: (e) => { if (e.key === "Enter") pickSource(r.label); },
       }, cols.map(([, value]) => h("td", { text: value(r) }))))))), { sub: "From the visit onward" }),
     card("Conversion", h("div", { class: "steps" }, steps.map((s) => h("div", { class: "step-row" },
@@ -818,10 +1013,7 @@ function appSection(d) {
       card("Versions in use", bars(app.versions, { head: ["Version", "Installs"] })),
       card("Licence", licence),
       card("Systems", bars(app.systems, { head: ["System", "Installs"] }))));
-  const draw = () => {
-    const fresh = appSection(d);
-    node.replaceWith(fresh);
-  };
+  const draw = () => node.replaceWith(appSection(d));
   queueMicrotask(() => lineChart(host, d.series.map((s) => ({ label: bucketLabel(s.t, unit, true), short: bucketLabel(s.t, unit), v: s[m.id] })),
     d.previousSeries.map((s) => ({ label: bucketLabel(s.t, unit, true), v: s[m.id] })), m, { current: spanName(d.range.from, d.range.to), previous: spanName(d.range.prevFrom, d.range.prevTo) }));
   return node;
@@ -839,7 +1031,8 @@ function describe(e) {
 
 async function livePage(key) {
   const site = state.sites.find((s) => s.key === key);
-  const updated = h("span", { class: "muted", text: "Connecting…" });
+  const connection = h("span", { class: "badge wait" }, h("i", { class: "dot idle" }), "Connecting");
+  const updated = h("span", { class: "muted" });
   const kpis = h("div", { class: "grid g4" });
   const canvas = h("canvas", { role: "img", "aria-label": "A globe of the visitors on your site right now" });
   const tip = h("div", { class: "globe-tip", hidden: true });
@@ -863,28 +1056,73 @@ async function livePage(key) {
 
   async function load() {
     try {
-      const d = await api(`/api/sites/${key}/live`);
-      latest = d;
+      latest = await api(`/api/sites/${key}/live`);
       draw();
-      updated.textContent = `Updated ${clock(new Date(d.at))}`;
+      updated.textContent = `Updated ${clock(new Date(latest.at))}`;
     } catch (err) {
       if (!(err instanceof SignedOut)) updated.textContent = "Couldn't update. Trying again…";
     }
+  }
+
+  // Pushed from the server: each event the moment it's collected, and a nudge when someone arrives or leaves.
+  // Who's here is read again at once; today's totals a moment later, once the event is saved.
+  let soon = 0, later = 0;
+  const refresh = () => {
+    clearTimeout(soon);
+    clearTimeout(later);
+    soon = setTimeout(load, 250);
+    later = setTimeout(load, 1600);
+  };
+  const stream = new EventSource(`/api/sites/${key}/stream`);
+  stream.addEventListener("open", () => {
+    connection.className = "badge ok";
+    connection.replaceChildren(h("i", { class: "dot pulse" }), "Live");
+  });
+  stream.addEventListener("error", () => {
+    connection.className = "badge wait";
+    connection.replaceChildren(h("i", { class: "dot idle" }), "Reconnecting");
+  });
+  stream.onmessage = (m) => {
+    const message = JSON.parse(m.data);
+    if (message.t === "event" && latest) {
+      latest.recent.unshift(message.e);
+      latest.recent.length = Math.min(latest.recent.length, 25);
+      drawFeed();
+    }
+    refresh();
+  };
+  onLeave(() => {
+    stream.close();
+    clearTimeout(soon);
+    clearTimeout(later);
+  });
+
+  function drawFeed() {
+    feed.replaceChildren(...(latest.recent.length ? latest.recent.map((e) => h("div", { class: "feed-row" },
+      h("span", { class: "muted" }, icon(e.app ? "app" : EVENT_ICONS[e.name] ?? "spark", 18)),
+      h("div", { class: "what" }, h("span", { text: describe(e) }),
+        h("small", { text: [e.country ? `${flag(e.country)} ${countryName(e.country)}` : null, e.source, e.app ? e.os : e.browser].filter(Boolean).join(" · ") })),
+      h("time", { datetime: e.ts, text: ago(e.ts) }))) : [h("p", { class: "empty-note", text: "Nothing in the last 30 minutes." })]));
   }
 
   function draw() {
     const d = latest;
     const s = state.sites.find((x) => x.key === key);
     if (s) s.live = d.visitors;
+    const navCount = $("nav-live");
+    if (navCount) {
+      navCount.hidden = !d.visitors;
+      navCount.lastChild.textContent = String(d.visitors);
+    }
     kpis.replaceChildren(
       h("div", { class: "card kpi hero" }, h("span", { class: "label", text: "Visitors right now" }), h("span", { class: "value num" }, h("i", { class: `dot${d.visitors ? " pulse" : " idle"}`, style: { width: "12px", height: "12px" } }), int(d.visitors)),
-        h("span", { class: "delta", text: "In the last 5 minutes" })),
+        h("span", { class: "delta", text: "On the site this minute" })),
       ...[["Visits today", d.today.visits], ["Visitors today", d.today.visitors], ["Page views today", d.today.pageviews]].map(([label, v]) =>
         h("div", { class: "card kpi" }, h("span", { class: "label", text: label }), h("span", { class: "value num", text: int(v) }), h("span", { class: "delta", text: "Since midnight" }))));
     globe.update(d.countries);
     overCount.textContent = d.visitors ? `${d.visitors} in ${d.countries.length} ${d.countries.length === 1 ? "country" : "countries"}` : "";
     canvas.setAttribute("aria-label", d.visitors ? `Visitors right now: ${d.countries.map((c) => `${c.v} in ${countryName(c.label)}`).join(", ")}` : "No visitors right now");
-    caption.textContent = d.visitors ? "Each dot is a country with visitors right now. Drag to turn the globe." : "No one's on the site right now. This updates every 5 seconds.";
+    caption.textContent = d.visitors ? "Each dot is a country with visitors right now. Drag to turn the globe." : "No one's on the site right now. New visitors appear the moment they arrive.";
     locations.replaceChildren(bars(d.countries, {
       head: ["Country", "Visitors"], label: (r) => countryName(r.label), lead: (r) => h("span", { class: "flag", text: flag(r.label) }),
       onPick: (r) => globe.focus(r.label), canPick: (r) => r.label !== "Unknown",
@@ -892,18 +1130,15 @@ async function livePage(key) {
     pages.replaceChildren(bars(d.pages, { head: ["Page", "Visitors"] }));
     sources.replaceChildren(bars(d.sources, { head: ["Source", "Visitors"] }));
     minuteBars(perMinute, d.perMinute, (v) => `${v} ${v === 1 ? "page view" : "page views"}`);
-    feed.replaceChildren(...(d.recent.length ? d.recent.map((e) => h("div", { class: "feed-row" },
-      h("span", { class: "muted" }, icon(e.app ? "app" : EVENT_ICONS[e.name] ?? "spark", 18)),
-      h("div", { class: "what" }, h("span", { text: describe(e) }),
-        h("small", { text: [e.country ? `${flag(e.country)} ${countryName(e.country)}` : null, e.source, e.app ? e.os : e.browser].filter(Boolean).join(" · ") })),
-      h("time", { datetime: e.ts, text: ago(e.ts) }))) : [h("p", { class: "empty-note", text: "Nothing in the last 30 minutes." })]));
+    drawFeed();
   }
 
-  every(5000, load);
+  // A safety net for anything the stream can't say, such as a laptop closed without a goodbye.
+  every(10_000, load);
   queueMicrotask(load);
 
   return h("div", { class: "page" },
-    pageHead([icon("live", 20), h("h1", { text: "Live view" }), h("span", { class: "badge ok" }, h("i", { class: "dot pulse" }), "Live"), h("span", { class: "muted", text: site?.domains[0] }), updated],
+    pageHead([icon("live", 20), h("h1", { text: "Live view" }), connection, h("span", { class: "muted", text: site?.domains[0] }), updated],
       h("a", { class: "btn", href: `/sites/${key}` }, icon("chart", 16), "Analytics")),
     kpis,
     h("div", { class: "grid g-globe" }, globeCard,
@@ -914,14 +1149,14 @@ async function livePage(key) {
       card("Recent activity", feed, { sub: "Last 30 minutes" })));
 }
 
-// ---------- Settings ----------
-async function settingsPage(key) {
+// ---------- A site's settings ----------
+async function siteSettingsPage(key) {
   const { site, snippet } = await api(`/api/sites/${key}`);
+  const owner = site.role === "owner";
   const saveSite = async (body, button, message) => {
     button.disabled = true;
     try {
-      const { site: fresh } = await api(`/api/sites/${key}`, { method: "PATCH", body });
-      Object.assign(site, fresh);
+      await api(`/api/sites/${key}`, { method: "PATCH", body });
       state.sites = null;
       toast(message);
       render();
@@ -931,46 +1166,36 @@ async function settingsPage(key) {
     }
   };
 
-  const name = h("input", { class: "input", id: "s-name", value: site.name });
-  let zones;
-  try {
-    zones = Intl.supportedValuesOf("timeZone");
-  } catch {
-    zones = [site.timezone];
-  }
-  if (!zones.includes(site.timezone)) zones = [site.timezone, ...zones];
-  const zone = h("select", { class: "input", id: "s-zone" }, zones.map((z) => h("option", { value: z, text: z.replaceAll("_", " "), selected: z === site.timezone })));
-  const saveGeneral = h("button", { class: "btn primary", type: "submit", text: "Save" });
+  const name = h("input", { class: "input", id: "s-name", value: site.name, disabled: !owner });
+  const zone = zoneSelect("s-zone", site.timezone);
+  zone.disabled = !owner;
+  const saveGeneral = h("button", { class: "btn primary", type: "submit", text: "Save", hidden: !owner });
 
   let domains = [...site.domains];
   const domainList = h("div", { style: { display: "grid", gap: "6px" } });
   const newDomain = h("input", { class: "input", placeholder: "shop.example.com", "aria-label": "Another domain" });
   const saveDomains = h("button", { class: "btn primary", type: "button", text: "Save domains", onclick: () => saveSite({ domains }, saveDomains, "Domains saved") });
   const drawDomains = () => domainList.replaceChildren(...domains.map((d, i) => h("div", { class: "bar-row", style: { background: "var(--surface-2)" } },
-    h("span", { class: "l", text: d }), domains.length > 1 ? h("button", { class: "btn plain", type: "button", text: "Remove", onclick: () => { domains.splice(i, 1); drawDomains(); } }) : h("span", { class: "faint", text: "Main" }))));
+    h("span", { class: "l", text: d }), owner && domains.length > 1 ? h("button", { class: "btn plain", type: "button", text: "Remove", onclick: () => { domains.splice(i, 1); drawDomains(); } }) : h("span", { class: "faint", text: i === 0 ? "Main" : "" }))));
   drawDomains();
 
-  const confirmInput = h("input", { class: "input", placeholder: site.domains[0], "aria-label": `Type ${site.domains[0]} to confirm` });
-  const deleteButton = h("button", {
-    class: "btn critical", type: "button", text: "Delete this site",
-    onclick: async () => {
-      deleteButton.disabled = true;
-      try {
-        await api(`/api/sites/${key}`, { method: "DELETE", body: { confirm: confirmInput.value } });
-        state.sites = null;
-        toast(`${site.domains[0]} deleted`);
-        go("/");
-      } catch (err) {
-        if (!(err instanceof SignedOut)) toast(err.message);
-        deleteButton.disabled = false;
-      }
-    },
-  });
+  const remove = async () => {
+    if (!(await confirmDialog({ title: `Delete ${site.domains[0]}?`, body: "This deletes the site and every visit and event it collected. It can't be undone.", confirm: "Delete site", danger: true, typed: site.domains[0] }))) return;
+    try {
+      await api(`/api/sites/${key}`, { method: "DELETE", body: { confirm: site.domains[0] } });
+      state.sites = null;
+      toast(`${site.domains[0]} deleted`);
+      go("/");
+    } catch (err) {
+      if (!(err instanceof SignedOut)) toast(err.message);
+    }
+  };
   const copyButton = h("button", { class: "btn copy", type: "button", onclick: () => copy(snippet, copyButton) }, icon("copy", 14), "Copy");
 
   return h("div", { class: "page narrow" },
-    pageHead([icon("settings", 20), h("h1", { text: "Settings" }), h("span", { class: "muted", text: site.domains[0] })]),
+    pageHead([icon("settings", 20), h("h1", { text: "Site settings" }), h("span", { class: "muted", text: site.domains[0] })]),
     h("div", { class: "stack" },
+      owner ? null : h("div", { class: "notice", text: "Only the site's owner can change these settings." }),
       card("Site", h("form", { class: "form", onsubmit: (e) => { e.preventDefault(); saveSite({ name: name.value, timezone: zone.value }, saveGeneral, "Saved"); } },
         h("div", { class: "field" }, h("label", { for: "s-name", text: "Name" }), name),
         h("div", { class: "field" }, h("label", { for: "s-zone", text: "Time zone" }), zone, h("span", { class: "help", text: "Days in your reports start at midnight here." })),
@@ -978,27 +1203,197 @@ async function settingsPage(key) {
       card("Domains", h("div", { class: "form" },
         h("p", { class: "muted", text: "Pages on these addresses and their subdomains are counted. Visits from anywhere else are turned away, so no one can send made-up visits from their own site." }),
         domainList,
-        h("form", { class: "input-row", onsubmit: (e) => { e.preventDefault(); const d = newDomain.value.trim(); if (d && !domains.includes(d)) { domains.push(d); newDomain.value = ""; drawDomains(); } } },
-          newDomain, h("button", { class: "btn", type: "submit", text: "Add" })),
-        h("div", {}, saveDomains))),
+        owner ? h("form", { class: "input-row", onsubmit: (e) => { e.preventDefault(); const d = newDomain.value.trim(); if (d && !domains.includes(d)) { domains.push(d); newDomain.value = ""; drawDomains(); } } },
+          newDomain, h("button", { class: "btn", type: "submit", text: "Add" })) : null,
+        owner ? h("div", {}, saveDomains) : null)),
       card("Tracking code", h("div", { style: { display: "grid", gap: "10px" } }, h("div", { class: "code-block" }, snippet, copyButton),
         h("a", { href: `/sites/${key}/setup`, text: "Steps for WordPress, Shopify, Wix and more" }))),
-      h("div", { class: "card", style: { borderColor: "#fbd5d0" } }, h("div", { class: "card-head" }, h("h2", { text: "Delete site" })),
+      owner ? h("div", { class: "card", style: { borderColor: "#fbd5d0" } }, h("div", { class: "card-head" }, h("h2", { text: "Delete site" })),
         h("div", { class: "card-body form" },
           h("p", { class: "muted", text: "This deletes the site and every visit and event it collected. It can't be undone." }),
-          h("div", { class: "field" }, h("label", { text: `Type ${site.domains[0]} to confirm` }), confirmInput),
-          h("div", {}, deleteButton)))));
+          h("div", {}, h("button", { class: "btn critical", type: "button", text: "Delete this site", onclick: remove })))) : null));
+}
+
+// ---------- Account settings ----------
+async function accountPage() {
+  const sites = await loadSites(true);
+  const user = state.user;
+  const status = (form, message, ok = true) => {
+    const note = form.querySelector(".form-status") ?? form.appendChild(h("div", { class: "form-status" }));
+    note.replaceChildren(h("div", { class: `notice ${ok ? "ok" : "warn"}`, role: "status" }, icon(ok ? "check" : "wait"), h("span", { text: message })));
+  };
+
+  // Profile: the photo is cropped square and shrunk to 256 pixels here, before it's sent.
+  const fileInput = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp", hidden: true });
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files?.[0];
+    fileInput.value = "";
+    if (!file) return;
+    const bitmap = await createImageBitmap(file).catch(() => null);
+    if (!bitmap) return toast("That file isn't a photo Statiku can read.");
+    const canvas = h("canvas", { width: 256, height: 256 });
+    const side = Math.min(bitmap.width, bitmap.height);
+    canvas.getContext("2d").drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, 256, 256);
+    try {
+      state.user = (await api("/api/me/photo", { method: "POST", body: { image: canvas.toDataURL("image/jpeg", 0.88) } })).user;
+      toast("Photo saved");
+      render();
+    } catch (err) {
+      if (!(err instanceof SignedOut)) toast(err.message);
+    }
+  });
+  const removePhoto = async () => {
+    state.user = (await api("/api/me/photo", { method: "DELETE" })).user;
+    toast("Photo removed");
+    render();
+  };
+  const nameInput = h("input", { class: "input", id: "a-name", value: user.name, autocomplete: "name" });
+  const emailInput = h("input", { class: "input", id: "a-email", type: "email", value: user.email, autocomplete: "email" });
+  const profile = h("form", {
+    class: "form",
+    onsubmit: async (e) => {
+      e.preventDefault();
+      try {
+        state.user = (await api("/api/me", { method: "PATCH", body: { name: nameInput.value, email: emailInput.value } })).user;
+        toast("Saved");
+        render();
+      } catch (err) {
+        if (!(err instanceof SignedOut)) status(profile, err.message, false);
+      }
+    },
+  },
+  h("div", { class: "photo-edit" }, photo(user, 64), fileInput,
+    h("button", { class: "btn", type: "button", onclick: () => fileInput.click() }, user.photo ? "Change photo" : "Upload photo"),
+    user.photo ? h("button", { class: "btn plain", type: "button", text: "Remove", onclick: removePhoto }) : null),
+  h("div", { class: "field" }, h("label", { for: "a-name", text: "Name" }), nameInput),
+  h("div", { class: "field" }, h("label", { for: "a-email", text: "Email" }), emailInput),
+  h("div", {}, h("button", { class: "btn primary", type: "submit", text: "Save" })));
+
+  // Websites: every site, to edit or remove.
+  const removeSite = async (s) => {
+    if (!(await confirmDialog({ title: `Delete ${s.domains[0]}?`, body: "This deletes the site and every visit and event it collected. It can't be undone.", confirm: "Delete site", danger: true, typed: s.domains[0] }))) return;
+    try {
+      await api(`/api/sites/${s.key}`, { method: "DELETE", body: { confirm: s.domains[0] } });
+      state.sites = null;
+      toast(`${s.domains[0]} deleted`);
+      render();
+    } catch (err) {
+      if (!(err instanceof SignedOut)) toast(err.message);
+    }
+  };
+  const websites = sites.length
+    ? h("div", {}, sites.map((s) => h("div", { class: "person-row" }, siteIcon(s, 32),
+      h("div", { class: "who" }, h("b", { text: s.name }), h("span", { text: `${s.domains.join(", ")}${s.role === "owner" ? "" : " · shared with you"}` })),
+      h("div", { class: "end" }, h("a", { class: "btn", href: `/sites/${s.key}/settings` }, "Edit"),
+        s.role === "owner" ? h("button", { class: "btn", type: "button", "aria-label": `Delete ${s.domains[0]}`, title: "Delete", onclick: () => removeSite(s) }, icon("trash", 16)) : null))),
+    h("div", { style: { paddingTop: "12px" } }, h("a", { class: "btn", href: "/sites/new" }, icon("plus", 16), "Add website")))
+    : h("p", { class: "empty-note" }, "No websites yet. ", h("a", { href: "/sites/new", text: "Add one" }));
+
+  // Team: who can see your websites, and links that invite more.
+  const team = h("div", {}, h("p", { class: "muted", text: "Loading…" }));
+  const drawTeam = async (link) => {
+    let t;
+    try {
+      t = await api("/api/team");
+    } catch (err) {
+      if (!(err instanceof SignedOut)) team.replaceChildren(failure(err));
+      return;
+    }
+    const linkInput = link ? h("input", { class: "input", value: link, readonly: true, "aria-label": "Invitation link", onfocus: (e) => e.target.select() }) : null;
+    const copyLink = link ? h("button", { class: "btn", type: "button", onclick: () => copy(link, copyLink) }, icon("copy", 14), "Copy") : null;
+    team.replaceChildren(
+      h("p", { class: "muted", text: `People in your team see ${t.workspace.sites === 1 ? "your website and its numbers" : `all ${t.workspace.sites} of your websites and their numbers`}. Only you can add, change or delete websites.` }),
+      h("div", { style: { marginTop: "8px" } }, t.members.map((m) => h("div", { class: "person-row" }, photo(m.you ? state.user : null, 32),
+        h("div", { class: "who" }, h("b", { text: m.you ? `${m.name} (you)` : m.name }), h("span", { text: m.email })),
+        h("div", { class: "end" }, h("span", { class: "badge", text: m.role === "owner" ? "Owner" : "Member" }),
+          !m.you && m.role !== "owner" ? h("button", {
+            class: "btn plain", type: "button", text: "Remove",
+            onclick: async () => {
+              if (!(await confirmDialog({ title: `Remove ${m.name}?`, body: `${m.name} won't see your websites any more.`, confirm: "Remove", danger: true }))) return;
+              await api(`/api/team/members/${m.id}`, { method: "DELETE" });
+              drawTeam();
+            },
+          }) : null)))),
+      t.invites.length ? h("div", { style: { marginTop: "12px" } }, h("b", { text: "Open invitations" }), t.invites.map((i) => h("div", { class: "person-row" }, photo(null, 32),
+        h("div", { class: "who" }, h("b", { text: "Invitation link" }), h("span", { text: `Made by ${i.by ?? "you"} ${ago(i.created_at)} · works until ${day(i.expires_at)}` })),
+        h("div", { class: "end" }, h("button", { class: "btn plain", type: "button", text: "Cancel", onclick: async () => { await api(`/api/team/invites/${i.id}`, { method: "DELETE" }); drawTeam(); } }))))) : null,
+      link ? h("div", { class: "notice", style: { marginTop: "12px", display: "grid", gap: "8px" } },
+        h("span", { text: "Send this link to the person you're inviting. It works once, for 7 days, and is shown only now." }),
+        h("div", { class: "link-box" }, linkInput, copyLink)) : null,
+      h("div", { style: { marginTop: "12px" } }, h("button", {
+        class: "btn primary", type: "button",
+        onclick: async () => {
+          const created = await api("/api/team/invites", { method: "POST" });
+          await drawTeam(created.link);
+          team.querySelector(".link-box input")?.select();
+        },
+      }, icon("plus", 16), "Create an invitation link")));
+  };
+  drawTeam();
+
+  // Password: a new one signs out every other browser.
+  const current = h("input", { class: "input", id: "p-current", type: "password", autocomplete: "current-password" });
+  const next = h("input", { class: "input", id: "p-next", type: "password", autocomplete: "new-password", minlength: "8" });
+  const password = h("form", {
+    class: "form",
+    onsubmit: async (e) => {
+      e.preventDefault();
+      try {
+        await api("/api/me/password", { method: "POST", body: { current: current.value, password: next.value } });
+        current.value = next.value = "";
+        status(password, "Password changed. Other browsers signed in to this account were signed out.");
+      } catch (err) {
+        if (!(err instanceof SignedOut)) status(password, err.message, false);
+      }
+    },
+  },
+  h("div", { class: "field" }, h("label", { for: "p-current", text: "Current password" }), current),
+  h("div", { class: "field" }, h("label", { for: "p-next", text: "New password" }), next, h("span", { class: "help", text: "At least 8 characters." })),
+  h("div", {}, h("button", { class: "btn primary", type: "submit", text: "Change password" })));
+
+  // Closing the account.
+  const closePassword = h("input", { class: "input", id: "d-password", type: "password", autocomplete: "current-password" });
+  const close = h("form", {
+    class: "form",
+    onsubmit: async (e) => {
+      e.preventDefault();
+      if (!(await confirmDialog({ title: "Delete your account?", body: "Your account goes, and so do the websites only you can see, with everything they collected. Websites you share with others stay with them. This can't be undone.", confirm: "Delete my account", danger: true, typed: state.user.email }))) return;
+      try {
+        await api("/api/me", { method: "DELETE", body: { password: closePassword.value } });
+        state.user = null;
+        state.sites = null;
+        go("/signup", true);
+      } catch (err) {
+        if (!(err instanceof SignedOut)) status(close, err.message, false);
+      }
+    },
+  },
+  h("p", { class: "muted", text: "This deletes your account and the websites only you can see, with every visit and event they collected." }),
+  h("div", { class: "field" }, h("label", { for: "d-password", text: "Your password" }), closePassword),
+  h("div", {}, h("button", { class: "btn critical", type: "submit", text: "Delete account" })));
+
+  if (location.hash) setTimeout(() => $(location.hash.slice(1))?.scrollIntoView({ block: "start" }));
+  return h("div", { class: "page narrow" },
+    pageHead([icon("settings", 20), h("h1", { text: "Settings" })]),
+    h("div", { class: "stack" },
+      card("Profile", profile),
+      card("Websites", websites, { sub: `${sites.length} ${sites.length === 1 ? "site" : "sites"}`, id: "websites" }),
+      card("Team", team, { id: "team" }),
+      card("Password", password),
+      h("div", { class: "card", style: { borderColor: "#fbd5d0" } }, h("div", { class: "card-head" }, h("h2", { text: "Delete account" })), h("div", { class: "card-body" }, close))));
 }
 
 // ---------- Rendering ----------
 const ROUTES = [
   [/^\/$/, () => ["home", null, homePage()]],
+  [/^\/settings$/, () => ["account", null, accountPage()]],
   [/^\/sites\/new$/, () => ["add", null, addSitePage()]],
   [/^\/sites\/(p_[a-z0-9]+)$/, (k) => ["analytics", k, analyticsPage(k)]],
   [/^\/sites\/(p_[a-z0-9]+)\/live$/, (k) => ["live", k, livePage(k)]],
   [/^\/sites\/(p_[a-z0-9]+)\/setup$/, (k) => ["setup", k, setupPage(k)]],
-  [/^\/sites\/(p_[a-z0-9]+)\/settings$/, (k) => ["settings", k, settingsPage(k)]],
+  [/^\/sites\/(p_[a-z0-9]+)\/settings$/, (k) => ["settings", k, siteSettingsPage(k)]],
 ];
+const TITLES = { home: "Websites", account: "Settings", add: "Add a website", analytics: "Analytics", live: "Live view", setup: "Setup", settings: "Site settings" };
 
 let rendering = 0;
 async function render() {
@@ -1008,12 +1403,19 @@ async function render() {
   const root = $("app");
   const path = location.pathname;
   const auth = path === "/login" || path === "/signup";
+  const join = path.match(/^\/join\/([\w-]{20,80})$/);
   try {
     if (state.user === undefined) {
       const res = await fetch("/api/me", { credentials: "same-origin" });
       state.user = res.ok ? (await res.json()).user : null;
     }
     if (run !== rendering) return;
+    if (join) {
+      document.title = "Join a team · Statiku";
+      const content = await joinPage(join[1]);
+      if (run === rendering) root.replaceChildren(content);
+      return;
+    }
     if (!state.user && !auth) return go(`/login${path === "/" ? "" : `?next=${encodeURIComponent(path)}`}`, true);
     if (state.user && auth) return go("/", true);
     if (auth) {
@@ -1031,8 +1433,8 @@ async function render() {
     const content = await pending;
     if (run !== rendering) return;
     $("main").replaceChildren(content);
-    document.title = `${{ home: "Websites", add: "Add a website", analytics: "Analytics", live: "Live view", setup: "Setup", settings: "Settings" }[active]}${site ? ` · ${site.name}` : ""} · Statiku`;
-    window.scrollTo(0, 0);
+    document.title = `${TITLES[active]}${site ? ` · ${site.name}` : ""} · Statiku`;
+    if (!location.hash) window.scrollTo(0, 0);
   } catch (err) {
     if (err instanceof SignedOut || run !== rendering) return;
     const main = $("main") ?? root;

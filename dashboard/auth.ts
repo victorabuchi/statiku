@@ -9,7 +9,7 @@ export const COOKIE = "stk_session";
 const LOGIN_DAYS = 30;
 const SCRYPT = { N: 16384, r: 8, p: 1 };
 
-export type User = { id: string; email: string; name: string };
+export type User = { id: string; email: string; name: string; avatarAt: Date | null };
 
 const derive = (password: string, salt: Buffer, length: number) =>
   new Promise<Buffer>((resolve, reject) => scrypt(password, salt, length, SCRYPT, (e, key) => (e ? reject(e) : resolve(key))));
@@ -39,7 +39,8 @@ export async function createUser(pool: pg.Pool, name: string, email: string, pas
   try {
     await client.query("begin");
     const { rows: [user] } = await client.query(
-      "insert into users (email, name, password_hash) values ($1, $2, $3) on conflict (email) do nothing returning id, email, name",
+      `insert into users (email, name, password_hash) values ($1, $2, $3) on conflict (email) do nothing
+       returning id, email, name, avatar_at as "avatarAt"`,
       [email, name, await hashPassword(password)],
     );
     if (!user) {
@@ -60,9 +61,9 @@ export async function createUser(pool: pg.Pool, name: string, email: string, pas
 }
 
 export async function findByPassword(pool: pg.Pool, email: string, password: string): Promise<User | null> {
-  const { rows: [row] } = await pool.query("select id, email, name, password_hash from users where email = $1", [email]);
+  const { rows: [row] } = await pool.query(`select id, email, name, avatar_at as "avatarAt", password_hash from users where email = $1`, [email]);
   const ok = await checkPassword(password, row?.password_hash ?? (await NOBODY));
-  return row && ok ? { id: row.id, email: row.email, name: row.name } : null;
+  return row && ok ? { id: row.id, email: row.email, name: row.name, avatarAt: row.avatarAt } : null;
 }
 
 export async function startLogin(pool: pg.Pool, userId: string): Promise<string> {
@@ -89,7 +90,8 @@ export async function userOf(pool: pg.Pool, req: IncomingMessage): Promise<User 
   const token = cookies(req)[COOKIE];
   if (!token) return null;
   const { rows: [user] } = await pool.query(
-    "select u.id, u.email, u.name from logins l join users u on u.id = l.user_id where l.token_hash = $1 and l.expires_at > now()",
+    `select u.id, u.email, u.name, u.avatar_at as "avatarAt" from logins l join users u on u.id = l.user_id
+      where l.token_hash = $1 and l.expires_at > now()`,
     [tokenHash(token)],
   );
   return user ?? null;
@@ -98,6 +100,28 @@ export async function userOf(pool: pg.Pool, req: IncomingMessage): Promise<User 
 export async function endLogin(pool: pg.Pool, req: IncomingMessage) {
   const token = cookies(req)[COOKIE];
   if (token) await pool.query("delete from logins where token_hash = $1", [tokenHash(token)]);
+}
+
+// A new password, which also signs out every other browser.
+export async function changePassword(pool: pg.Pool, req: IncomingMessage, userId: string, password: string) {
+  await pool.query("update users set password_hash = $2 where id = $1", [userId, await hashPassword(password)]);
+  const token = cookies(req)[COOKIE];
+  await pool.query("delete from logins where user_id = $1 and token_hash <> $2", [userId, token ? tokenHash(token) : Buffer.alloc(0)]);
+}
+
+// Closing an account: the workspaces only this person was in go with it, with their sites and everything they
+// collected; workspaces shared with others stay.
+export async function deleteAccount(pool: pg.Pool, userId: string, deleteSite: (site: { id: string; key: string }) => Promise<void>) {
+  const { rows: alone } = await pool.query(
+    `select m.workspace_id from memberships m
+      where m.user_id = $1 and not exists (select 1 from memberships o where o.workspace_id = m.workspace_id and o.user_id <> $1)`,
+    [userId],
+  );
+  const ids = alone.map((r) => r.workspace_id);
+  const { rows: sites } = await pool.query("select id, key from projects where workspace_id = any($1)", [ids]);
+  for (const site of sites) await deleteSite(site);
+  await pool.query("delete from workspaces where id = any($1)", [ids]);
+  await pool.query("delete from users where id = $1", [userId]);
 }
 
 // Secure only over HTTPS, so signing in works on http://localhost too.

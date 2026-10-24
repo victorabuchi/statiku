@@ -3,6 +3,7 @@
 import { agentOf, isBot } from "./agent.ts";
 import type { Geo } from "./geo.ts";
 import type { Installs } from "./installs.ts";
+import type { Hub } from "./live.ts";
 import { hostAllowed, type Projects } from "./projects.ts";
 import { hash63, networkOf, type Salts } from "./salts.ts";
 import type { Sessions } from "./sessions.ts";
@@ -21,7 +22,11 @@ export type Hit = {
   revenue: { minor: number; currency: string } | null;
 };
 
-export type Deps = { projects: Projects; salts: Salts; sessions: Sessions; installs: Installs; writer: Writer; geo: Geo };
+export type Deps = { projects: Projects; salts: Salts; sessions: Sessions; installs: Installs; writer: Writer; geo: Geo; hub: Hub };
+
+// The script's check-in from an open page and its goodbye when the page closes: they keep the live view and a
+// visit's length right, and are never stored as events.
+const BEAT = "_p", GONE = "_l";
 
 export type Outcome = { status: number; message: string };
 
@@ -91,6 +96,10 @@ export async function collect(deps: Deps, body: string, ua: string, ip: string, 
 
   const salt = await deps.salts.forDay(now);
   const visitor = hash63(salt, project.id, ip, ua);
+  if (hit.name === BEAT || hit.name === GONE) {
+    if (await deps.sessions.beat(project.id, visitor, now, hit.name === GONE)) deps.hub.publish(project.id, { t: "presence" });
+    return { status: 202, message: "ok" };
+  }
   const country = deps.geo.country(ip);
   const agent = agentOf(ua, hit.width);
   const path = (hit.url.pathname + hit.url.hash).slice(0, 512);
@@ -124,6 +133,10 @@ export async function collect(deps: Deps, body: string, ua: string, ip: string, 
     installId: null,
     appVersion: null,
     osVersion: null,
+  });
+  deps.hub.publish(project.id, {
+    t: "event",
+    e: { ts: now, name: hit.name, path, country, source: session.source, device: agent.device, browser: agent.browser, os: agent.os, app: false },
   });
   if (hit.name === "download") {
     deps.writer.addMark({

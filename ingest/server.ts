@@ -14,6 +14,7 @@ import { collectApp, MAX_APP_BODY } from "./app.ts";
 import { collect, MAX_BODY, type Deps } from "./collect.ts";
 import { Geo } from "./geo.ts";
 import { Installs } from "./installs.ts";
+import { Hub } from "./live.ts";
 import { Projects } from "./projects.ts";
 import { Salts } from "./salts.ts";
 import { Sessions } from "./sessions.ts";
@@ -64,11 +65,16 @@ export async function createApp(options: Options) {
   const sessions = new Sessions(pool);
   const writer = new Writer(pool, sessions);
   const salts = new Salts(pool);
-  const deps: Deps = { projects: new Projects(pool), salts, sessions, installs: new Installs(pool, salts), writer, geo: new Geo(options.geoPath) };
+  const deps: Deps = { projects: new Projects(pool), salts, sessions, installs: new Installs(pool, salts), writer, geo: new Geo(options.geoPath), hub: new Hub() };
 
   const script = await buildTracker();
   // The dashboard tells the ingest side when a site's domains change, so the cached copy goes at once.
-  const dashboard = options.dashboard === false ? null : await createDashboard({ pool, onSiteChanged: (key) => deps.projects.cache.delete(key) });
+  const dashboard = options.dashboard === false ? null : await createDashboard({
+    pool,
+    onSiteChanged: (key) => deps.projects.cache.delete(key),
+    presence: (projectId) => sessions.present(projectId),
+    hub: deps.hub,
+  });
   const etag = `"${createHash("sha256").update(script).digest("base64url").slice(0, 16)}"`;
 
   const ensurePartitions = () =>

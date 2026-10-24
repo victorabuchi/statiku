@@ -77,6 +77,10 @@ export async function collectApp(deps: Deps, body: string, ip: string, now = new
   // The install's source (the visit its download came from), copied onto its events as a visit's is onto its own.
   const source = await deps.installs.seen(project.id, batch, ip, country, now);
   for (const e of batch.events) {
+    deps.hub.publish(project.id, {
+      t: "event",
+      e: { ts: e.at, name: e.name, path: null, country, source: source?.source ?? null, device: null, browser: null, os: batch.platform, app: true },
+    });
     deps.writer.add({
       projectId: project.id,
       ts: e.at,

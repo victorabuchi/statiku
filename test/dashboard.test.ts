@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import pg from "pg";
-import { isPublicAddress, checkInstall } from "../dashboard/check.ts";
+import { checkInstall, fetchIcon, imageType, isPublicAddress } from "../dashboard/check.ts";
+import { collect } from "../ingest/collect.ts";
 import { domainOf } from "../dashboard/server.ts";
 import { migrate } from "../db/migrate.ts";
 import { createApp } from "../ingest/server.ts";
@@ -41,7 +42,7 @@ let browsers = 0;
 function browser() {
   const ip = `81.17.${++browsers}.1`;
   let cookie = "";
-  return async (path: string, { method = "GET", body, headers = {} }: { method?: string; body?: unknown; headers?: Record<string, string> } = {}) => {
+  const as = async (path: string, { method = "GET", body, headers = {} }: { method?: string; body?: unknown; headers?: Record<string, string> } = {}) => {
     const res = await fetch(base + path, {
       method,
       headers: { "x-forwarded-for": ip, ...(cookie ? { cookie } : {}), ...(body ? { "content-type": "application/json" } : {}), ...headers },
@@ -56,11 +57,20 @@ function browser() {
     } catch {}
     return { status: res.status, data, headers: res.headers };
   };
+  return Object.assign(as, { cookie: () => cookie });
 }
 
-async function signUp(email: string) {
+const PASSWORD = "correct horse battery";
+const visit = (key: string, page: string, ip: string, name = "pageview", ua = SAFARI) =>
+  fetch(`${base}/e`, {
+    method: "POST",
+    headers: { "user-agent": ua, "x-forwarded-for": ip },
+    body: JSON.stringify({ k: key, n: name, u: page, r: "https://news.ycombinator.com/", w: 1440 }),
+  }).then((r) => r.status);
+
+async function signUp(email: string, name = "Victor Abuchi") {
   const as = browser();
-  const res = await as("/api/signup", { method: "POST", body: { name: "Victor Abuchi", email, password: "correct horse battery" } });
+  const res = await as("/api/signup", { method: "POST", body: { name, email, password: PASSWORD } });
   assert.equal(res.status, 201, JSON.stringify(res.data));
   return as;
 }
@@ -213,4 +223,170 @@ test("the installation check reaches only public addresses", async () => {
   const local = await checkInstall("localhost", "p_whatever");
   assert.equal(local.found, false);
   assert.match(local.message, /public/);
+});
+
+test("check-ins keep a visitor live and time the visit; closing the page removes them; neither is an event", { skip }, async () => {
+  const owner = await signUp("presence@example.com");
+  const { key } = (await owner("/api/sites", { method: "POST", body: { address: "presence.example", timezone: "UTC" } })).data.site;
+  const live = async () => (await owner(`/api/sites/${key}/live`)).data;
+  // A check-in never starts a visit.
+  assert.equal(await visit(key, "https://presence.example/", "193.166.3.9", "_p"), 202);
+  assert.equal((await live()).visitors, 0);
+  // Arrivals show at once, before anything is written.
+  await visit(key, "https://presence.example/", "193.166.3.9");
+  await visit(key, "https://presence.example/pricing", "141.30.1.9");
+  assert.equal((await live()).visitors, 2);
+  assert.deepEqual((await live()).pages.map((p: any) => p.label).sort(), ["/", "/pricing"]);
+  // Closing the page: gone at once.
+  await visit(key, "https://presence.example/pricing", "141.30.1.9", "_l");
+  assert.deepEqual((await live()).countries, [{ label: "FI", v: 1 }]);
+  // Two minutes of check-ins later, the visit is two minutes long and still one page view, one event.
+  await collect(app.deps, JSON.stringify({ k: key, n: "_p", u: "https://presence.example/" }), SAFARI, "193.166.3.9", new Date(Date.now() + 120_000));
+  await app.writer.flush();
+  const { rows: [fi] } = await pool.query(
+    `select events, pageviews, extract(epoch from last_seen - started_at)::int as seconds from sessions s join projects p on p.id = s.project_id
+      where p.key = $1 and s.country = 'FI'`, [key]);
+  assert.equal(fi.events, 1);
+  assert.equal(fi.pageviews, 1);
+  assert.ok(fi.seconds >= 119 && fi.seconds <= 121, String(fi.seconds));
+  const { rows: names } = await pool.query("select e.name from events e join projects p on p.id = e.project_id where p.key = $1", [key]);
+  assert.deepEqual(names.map((n) => n.name), ["pageview", "pageview"]);
+  const { rows: [usage] } = await pool.query("select sum(events)::int as n from usage_daily u join projects p on p.id = u.project_id where p.key = $1", [key]);
+  assert.equal(usage.n, 2);
+});
+
+test("the live stream pushes each event the moment it's collected", { skip }, async () => {
+  const owner = await signUp("stream@example.com");
+  const { key } = (await owner("/api/sites", { method: "POST", body: { address: "stream.example" } })).data.site;
+  const res = await fetch(`${base}/api/sites/${key}/stream`, { headers: { cookie: owner.cookie() } });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type")!, /text\/event-stream/);
+  const reader = res.body!.getReader();
+  let received = "";
+  const arrived = (async () => {
+    while (!received.includes('"t":"event"')) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      received += new TextDecoder().decode(value);
+    }
+  })();
+  await visit(key, "https://stream.example/hello", "193.166.3.10");
+  await Promise.race([arrived, new Promise((_, reject) => setTimeout(() => reject(new Error("no event in 2 s")), 2000))]);
+  await reader.cancel();
+  const message = JSON.parse(received.split("\n").find((l) => l.startsWith("data: {"))!.slice(6));
+  assert.equal(message.e.name, "pageview");
+  assert.equal(message.e.path, "/hello");
+  assert.equal(message.e.country, "FI");
+  assert.equal((await fetch(`${base}/api/sites/${key}/stream`)).status, 401);
+});
+
+test("filters and custom periods", { skip }, async () => {
+  const owner = await signUp("filters@example.com");
+  const { key } = (await owner("/api/sites", { method: "POST", body: { address: "filters.example", timezone: "UTC" } })).data.site;
+  const FIREFOX = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15.7; rv:144.0) Gecko/20100101 Firefox/144.0";
+  await visit(key, "https://filters.example/", "193.166.3.11");
+  await visit(key, "https://filters.example/pricing", "193.166.3.11");
+  await visit(key, "https://filters.example/", "141.30.1.11", "pageview", FIREFOX);
+  await app.writer.flush();
+  const stats = async (q: string) => (await owner(`/api/sites/${key}/stats?${q}`)).data;
+  assert.equal((await stats("range=today")).totals.visitors, 2);
+  const finland = await stats("range=today&country=FI");
+  assert.equal(finland.totals.visitors, 1);
+  assert.equal(finland.totals.pageviews, 2);
+  assert.deepEqual(finland.countries, [{ label: "FI", v: 1 }]);
+  assert.equal((await stats("range=today&browser=Firefox")).totals.visitors, 1);
+  assert.equal((await stats("range=today&device=Mobile")).totals.visitors, 0);
+  // A page: the visits that viewed it, with all their pages.
+  const pricing = await stats("range=today&page=/pricing");
+  assert.equal(pricing.totals.visits, 1);
+  assert.equal(pricing.totals.pageviews, 2);
+  assert.equal((await stats("range=today&country=FI&browser=Firefox")).totals.visitors, 0);
+  const today = new Date().toISOString().slice(0, 10);
+  const custom = await stats(`range=custom&from=${today}&to=${today}`);
+  assert.equal(custom.range.id, "custom");
+  assert.equal(custom.range.unit, "hour");
+  assert.equal(custom.totals.visitors, 2);
+  assert.equal((await stats("range=custom&from=2026-01-01&to=2026-03-31")).range.unit, "day");
+  assert.equal((await stats("range=custom&from=nope&to=2026-03-31")).range.id, "d30");
+});
+
+const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+test("your account: name, email, password, photo, and closing it", { skip }, async () => {
+  const me = await signUp("me@example.com");
+  const renamed = await me("/api/me", { method: "PATCH", body: { name: "Victor A", email: " Me2@Example.com " } });
+  assert.equal(renamed.status, 200);
+  assert.deepEqual([renamed.data.user.name, renamed.data.user.email], ["Victor A", "me2@example.com"]);
+  assert.equal((await me("/api/me", { method: "PATCH", body: { email: "owner@example.com" } })).status, 409);
+
+  // A new password signs out every other browser, not this one.
+  const laptop = browser();
+  assert.equal((await laptop("/api/login", { method: "POST", body: { email: "me2@example.com", password: PASSWORD } })).status, 200);
+  assert.equal((await me("/api/me/password", { method: "POST", body: { current: "wrong password", password: "a new password" } })).status, 401);
+  assert.equal((await me("/api/me")).status, 200);
+  assert.equal((await me("/api/me/password", { method: "POST", body: { current: PASSWORD, password: "a new password" } })).status, 200);
+  assert.equal((await laptop("/api/me")).status, 401);
+  assert.equal((await me("/api/me")).status, 200);
+
+  // A photo is checked by its bytes; anything that isn't a PNG, JPEG or WebP is refused.
+  const saved = await me("/api/me/photo", { method: "POST", body: { image: `data:image/png;base64,${PNG}` } });
+  assert.equal(saved.status, 200);
+  assert.equal(typeof saved.data.user.photo, "number");
+  const served = await fetch(`${base}/api/me/photo`, { headers: { cookie: me.cookie() } });
+  assert.equal(served.headers.get("content-type"), "image/png");
+  assert.match(served.headers.get("content-security-policy")!, /sandbox/);
+  const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>').toString("base64");
+  assert.equal((await me("/api/me/photo", { method: "POST", body: { image: `data:image/png;base64,${svg}` } })).status, 400);
+  assert.equal((await me("/api/me/photo", { method: "DELETE" })).data.user.photo, null);
+
+  // Closing the account takes its own sites with it.
+  const { key } = (await me("/api/sites", { method: "POST", body: { address: "closing.example" } })).data.site;
+  assert.equal((await me("/api/me", { method: "DELETE", body: { password: PASSWORD } })).status, 401);
+  assert.equal((await me("/api/me", { method: "DELETE", body: { password: "a new password" } })).status, 200);
+  assert.equal((await me("/api/me")).status, 401);
+  assert.equal((await pool.query("select count(*)::int as n from projects where key = $1", [key])).rows[0].n, 0);
+  assert.equal((await pool.query("select count(*)::int as n from users where email = 'me2@example.com'")).rows[0].n, 0);
+});
+
+test("team invitations: a link that works once; members see sites but can't change them", { skip }, async () => {
+  const owner = await signUp("teamowner@example.com", "Olivia Owner");
+  const { key } = (await owner("/api/sites", { method: "POST", body: { address: "team-site.example" } })).data.site;
+  const { link } = (await owner("/api/team/invites", { method: "POST" })).data;
+  const token = link.split("/join/")[1];
+  assert.match(link, /^http:\/\/127\.0\.0\.1:\d+\/join\/[\w-]{30,}$/);
+  const preview = await browser()(`/api/invites/${token}`);
+  assert.deepEqual([preview.data.workspace, preview.data.invitedBy, preview.data.valid], ["Olivia Owner", "Olivia Owner", true]);
+
+  const mia = browser();
+  const joined = await mia("/api/signup", { method: "POST", body: { name: "Mia", email: "mia@example.com", password: PASSWORD, invite: token } });
+  assert.equal(joined.data.joined, "Olivia Owner");
+  const shared = (await mia("/api/sites")).data.sites.find((s: any) => s.key === key);
+  assert.equal(shared.role, "member");
+  assert.equal((await mia(`/api/sites/${key}/stats?range=today`)).status, 200);
+  assert.equal((await mia(`/api/sites/${key}`, { method: "PATCH", body: { name: "Mine" } })).status, 403);
+  assert.equal((await mia(`/api/sites/${key}`, { method: "DELETE", body: { confirm: "team-site.example" } })).status, 403);
+
+  // Used once, it's done.
+  assert.equal((await browser()(`/api/invites/${token}`)).data.valid, false);
+  const late = browser();
+  await late("/api/signup", { method: "POST", body: { name: "Late", email: "late@example.com", password: PASSWORD, invite: token } });
+  assert.ok(!(await late("/api/sites")).data.sites.some((s: any) => s.key === key));
+
+  const team = (await owner("/api/team")).data;
+  assert.deepEqual(team.members.map((m: any) => [m.name, m.role]), [["Olivia Owner", "owner"], ["Mia", "member"]]);
+  const miaId = team.members.find((m: any) => m.name === "Mia").id;
+  assert.equal((await owner(`/api/team/members/${team.members.find((m: any) => m.you).id}`, { method: "DELETE" })).status, 400);
+  assert.equal((await owner(`/api/team/members/${miaId}`, { method: "DELETE" })).status, 200);
+  assert.ok(!(await mia("/api/sites")).data.sites.some((s: any) => s.key === key));
+});
+
+test("images are known by their bytes, not by what a server says", async () => {
+  assert.equal(imageType(Buffer.from(PNG, "base64")), "image/png");
+  assert.equal(imageType(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0])), "image/jpeg");
+  assert.equal(imageType(Buffer.from("GIF89a....")), "image/gif");
+  assert.equal(imageType(Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WEBPVP8 ")])), "image/webp");
+  assert.equal(imageType(Buffer.from([0, 0, 1, 0, 1, 0])), "image/x-icon");
+  assert.equal(imageType(Buffer.from('<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"></svg>')), "image/svg+xml");
+  assert.equal(imageType(Buffer.from("<!doctype html><html>")), null);
+  assert.equal(await fetchIcon("localhost"), null);
 });

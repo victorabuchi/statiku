@@ -5,6 +5,8 @@ import type pg from "pg";
 import type { Source } from "./source.ts";
 
 export const SESSION_GAP = 30 * 60_000;
+// On the site right now: seen in the last 90 seconds (an open page checks in every 30) and not gone.
+export const PRESENT_MS = 90_000;
 
 export type Session = Source & {
   projectId: string;
@@ -21,6 +23,8 @@ export type Session = Source & {
   browser: string;
   os: string;
   dirty: boolean;
+  // The page was closed (kept in memory only; the next event or check-in brings the visitor back).
+  left?: boolean;
 };
 
 // What a new session starts with: the first event's source, page and visitor details.
@@ -41,20 +45,25 @@ export class Sessions {
     this.pool = pool;
   }
 
+  // The visitor's latest session, from memory or, after a restart, the database.
+  async latest(projectId: string, visitor: string, now: Date): Promise<Session | undefined> {
+    const key = `${projectId}:${visitor}`;
+    const session = this.live.get(key);
+    if (session) return session;
+    let lookup = this.lookups.get(key);
+    if (!lookup) {
+      lookup = this.find(projectId, visitor, now).finally(() => this.lookups.delete(key));
+      this.lookups.set(key, lookup);
+    }
+    const found = await lookup;
+    // Another event from the same visitor may have started a session while this one waited.
+    return this.live.get(key) ?? found ?? undefined;
+  }
+
   // The visitor's open session, counting this event, or a new one when there is none.
   async touch(projectId: string, visitor: string, now: Date, path: string, pageview: boolean, start: () => SessionStart): Promise<Session> {
     const key = `${projectId}:${visitor}`;
-    let session = this.live.get(key);
-    if (!session) {
-      let lookup = this.lookups.get(key);
-      if (!lookup) {
-        lookup = this.find(projectId, visitor, now).finally(() => this.lookups.delete(key));
-        this.lookups.set(key, lookup);
-      }
-      const found = await lookup;
-      // Another event from the same visitor may have started a session while this one waited.
-      session = this.live.get(key) ?? found ?? undefined;
-    }
+    let session = await this.latest(projectId, visitor, now);
     if (!session || now.getTime() - session.lastSeen.getTime() > SESSION_GAP) {
       if (session?.dirty) this.ended.push(session);
       const s = start();
@@ -62,6 +71,7 @@ export class Sessions {
     }
     this.live.set(key, session);
     session.lastSeen = now;
+    session.left = false;
     session.events += 1;
     if (pageview) {
       session.pageviews += 1;
@@ -69,6 +79,27 @@ export class Sessions {
     }
     session.dirty = true;
     return session;
+  }
+
+  // A check-in from an open page, or its closing: the visit goes on (its length grows) without counting as an event.
+  // Only a visit that's still open continues; a check-in never starts one.
+  async beat(projectId: string, visitor: string, now: Date, gone: boolean): Promise<Session | null> {
+    const session = await this.latest(projectId, visitor, now);
+    if (!session || now.getTime() - session.lastSeen.getTime() > SESSION_GAP) return null;
+    this.live.set(`${projectId}:${visitor}`, session);
+    if (now > session.lastSeen) session.lastSeen = now;
+    session.left = gone;
+    session.dirty = true;
+    return session;
+  }
+
+  // The site's visitors right now.
+  present(projectId: string, now = new Date()): Session[] {
+    const here: Session[] = [];
+    for (const s of this.live.values()) {
+      if (s.projectId === projectId && !s.left && now.getTime() - s.lastSeen.getTime() < PRESENT_MS) here.push(s);
+    }
+    return here;
   }
 
   // The visitor hash changes every UTC day, so an open session can only have started today.
