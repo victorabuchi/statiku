@@ -1,218 +1,264 @@
-// The dashboard: one page and a JSON API over the same Postgres the ingest service writes.
-//   GET /                         the dashboard
-//   GET /api/projects             projects, with when each last heard from its site
-//   GET /api/stats?project=&range=today|d7|d30|d90&source=
-// There are no accounts yet, so it listens on 127.0.0.1 only. Don't deploy it until sign-in exists.
+// The dashboard, served by the same service as the script: accounts, the sites a person tracks, and their numbers.
+// The pages are one app (client/), bundled when the service starts; everything it shows comes from /api.
+//   GET    /  /login  /signup  /sites/…        the app
+//   POST   /api/signup  /api/login  /api/logout
+//   GET    /api/me
+//   GET    /api/sites                          every site with today's numbers
+//   POST   /api/sites                          add a site: { address, name?, timezone? }
+//   GET    /api/sites/:key                     PATCH { name?, domains?, timezone? }   DELETE { confirm: domain }
+//   POST   /api/sites/:key/check               is the tracking code on the site?
+//   GET    /api/sites/:key/stats?range=&source=
+//   GET    /api/sites/:key/live
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { createServer, type ServerResponse } from "node:http";
-import pg from "pg";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { gzipSync } from "node:zlib";
+import { build } from "esbuild";
+import type pg from "pg";
+import { cleanDomain } from "../ingest/projects.ts";
+import { createProject, deleteProject } from "../scripts/project.ts";
+import { Attempts, clearedCookie, cleanEmail, createUser, emailLooksRight, endLogin, findByPassword, loginCookie, startLogin, userOf, type User } from "./auth.ts";
+import { checkInstall } from "./check.ts";
+import { live, overview, RANGE_IDS, siteFor, stats } from "./stats.ts";
 
-const RANGES: Record<string, { days: number; unit: "hour" | "day" }> = {
-  today: { days: 1, unit: "hour" },
-  d7: { days: 7, unit: "day" },
-  d30: { days: 30, unit: "day" },
-  d90: { days: 90, unit: "day" },
+export type Request = { req: IncomingMessage; res: ServerResponse; path: string; ip: string; secure: boolean };
+
+const MAX_SITES = 50;
+const HEADERS = {
+  "content-security-policy":
+    "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "same-origin",
 };
 
-// Every query takes the same parameters: project, from, to, source (or null for all), time zone.
-const WHERE_EVENTS = "project_id = $1 and ts >= $2 and ts < $3 and ($4::text is null or source = $4)";
-const WHERE_SESSIONS = "project_id = $1 and started_at >= $2 and started_at < $3 and ($4::text is null or source = $4)";
+const text = (value: unknown, max: number) => (typeof value === "string" ? value.replace(/\u0000/g, "").trim().slice(0, max) : "");
 
-const TOTALS = `
-  select
-    (select count(*) from (select distinct visitor, (ts at time zone 'utc')::date from events
-       where ${WHERE_EVENTS} and visitor is not null) v)::int as visitors,
-    (select count(*) from events where ${WHERE_EVENTS} and name = 'pageview')::int as pageviews,
-    (select count(distinct session_id) from events where ${WHERE_EVENTS} and name = 'download')::int as downloads,
-    (select count(distinct session_id) from events where ${WHERE_EVENTS} and name = 'checkout')::int as checkouts,
-    s.visits, s.bounce, s.duration
-  from (select count(*)::int as visits,
-               round(100.0 * count(*) filter (where events = 1) / nullif(count(*), 0))::int as bounce,
-               coalesce(round(extract(epoch from avg(last_seen - started_at))), 0)::int as duration
-          from sessions where ${WHERE_SESSIONS}) s`;
-
-// The app in the same period: new installs (and how many matched no visit), installs used, trials started, licences.
-const WHERE_INSTALLS = "project_id = $1 and ($4::text is null or source = $4)";
-const APP_TOTALS = `
-  select
-    (select count(*) from installs where ${WHERE_INSTALLS} and first_seen >= $2 and first_seen < $3)::int as installs,
-    (select count(*) from installs where ${WHERE_INSTALLS} and first_seen >= $2 and first_seen < $3 and source is null)::int as unmatched,
-    (select count(distinct install_id) from events where ${WHERE_EVENTS} and install_id is not null)::int as active,
-    (select count(*) from installs where ${WHERE_INSTALLS} and trial_at >= $2 and trial_at < $3)::int as trials,
-    (select count(*) from installs where ${WHERE_INSTALLS} and licensed_at >= $2 and licensed_at < $3)::int as licensed`;
-
-// The SDK's own events, shown in the App section rather than among custom events.
-const APP_LIFECYCLE = "('install', 'active', 'update', 'state')";
-
-export async function stats(pool: pg.Pool, key: string, rangeId: string, source: string | null) {
-  const project = (await pool.query("select id, key, name, domains, timezone from projects where key = $1", [key])).rows[0];
-  if (!project) return null;
-  const range = RANGES[rangeId] ?? RANGES.d30;
-  const tz = project.timezone;
-
-  // Day boundaries in the project's time zone: "7 days" is today and the 6 days before it.
-  const { rows: [b] } = await pool.query(
-    `select (date_trunc('day', now() at time zone $1) - make_interval(days => $2 - 1)) at time zone $1 as start, now() as now`,
-    [tz, range.days],
-  );
-  const from: Date = b.start, to: Date = b.now;
-  const prevFrom = new Date(from.getTime() - (to.getTime() - from.getTime()));
-  const p = [project.id, from, to, source];
-  const q = async (sql: string, params: unknown[] = p) => (await pool.query(sql, params)).rows;
-
-  const [totals] = await q(TOTALS);
-  const [previous] = await q(TOTALS, [project.id, prevFrom, from, source]);
-  const [appTotals] = await q(APP_TOTALS);
-  const [appPrevious] = await q(APP_TOTALS, [project.id, prevFrom, from, source]);
-
-  const series = await q(
-    `with buckets as (
-       select generate_series(date_trunc($6, $2 at time zone $5), date_trunc($6, $3 at time zone $5), ('1 ' || $6)::interval) as t),
-     e as (
-       select date_trunc($6, ts at time zone $5) as t, count(distinct visitor)::int as visitors,
-              (count(*) filter (where name = 'pageview'))::int as pageviews,
-              (count(distinct session_id) filter (where name = 'download'))::int as downloads,
-              (count(distinct session_id) filter (where name = 'checkout'))::int as checkouts
-         from events where ${WHERE_EVENTS} group by 1),
-     s as (
-       select date_trunc($6, started_at at time zone $5) as t, count(*)::int as visits,
-              round(100.0 * count(*) filter (where events = 1) / nullif(count(*), 0))::int as bounce,
-              round(extract(epoch from avg(last_seen - started_at)))::int as duration
-         from sessions where ${WHERE_SESSIONS} group by 1),
-     a as (
-       select date_trunc($6, ts at time zone $5) as t, count(distinct install_id)::int as active
-         from events where ${WHERE_EVENTS} and install_id is not null group by 1),
-     i as (
-       select date_trunc($6, at at time zone $5) as t, count(*) filter (where kind = 'install')::int as installs,
-              count(*) filter (where kind = 'trial')::int as trials, count(*) filter (where kind = 'licensed')::int as licensed
-         from installs cross join lateral (values ('install', first_seen), ('trial', trial_at), ('licensed', licensed_at)) k(kind, at)
-        where ${WHERE_INSTALLS} and at >= $2 and at < $3 group by 1)
-     select to_char(buckets.t, 'YYYY-MM-DD"T"HH24:MI') as t, coalesce(e.visitors, 0) as visitors, coalesce(e.pageviews, 0) as pageviews,
-            coalesce(e.downloads, 0) as downloads, coalesce(e.checkouts, 0) as checkouts, coalesce(s.visits, 0) as visits,
-            s.bounce, s.duration, coalesce(i.installs, 0) as installs, coalesce(a.active, 0) as active,
-            coalesce(i.trials, 0) as trials, coalesce(i.licensed, 0) as licensed
-       from buckets left join e using (t) left join s using (t) left join a using (t) left join i using (t)
-      order by buckets.t`,
-    [...p, tz, range.unit],
-  );
-
-  // Visitors in breakdowns count a visitor once per day, like the total.
-  const visitorsBy = (column: string, extra = "") =>
-    q(`select coalesce(${column}, 'Unknown') as label, count(distinct (visitor, (started_at at time zone 'utc')::date))::int as v
-         from sessions where ${WHERE_SESSIONS} ${extra} group by 1 order by 2 desc, 1 limit 12`);
-
-  // Installs active in the period, by what they last reported.
-  const installsBy = (column: string) =>
-    q(`select coalesce(${column}, 'Unknown') as label, count(*)::int as v from installs
-        where ${WHERE_INSTALLS} and last_seen >= $2 and first_seen < $3 group by 1 order by 2 desc, 1 limit 12`);
-
-  const [sources, journeyBySource, [journeyApp], topPages, entryPages, countries, devices, browsers, systems, events, versions, states, appSystems, installSources, [appSeen], [live], [last]] = await Promise.all([
-    visitorsBy("source"),
-    // The steps each visit took. An install counts for the visit whose download it was matched to, so it can't
-    // start before that visit did.
-    q(`with steps as (
-         select session_id, bool_or(name = 'download') as download, bool_or(name = 'checkout') as checkout
-           from events where ${WHERE_EVENTS} group by 1),
-       inst as (
-         select session_id, count(*) as installs, count(trial_at) as trials, count(licensed_at) as licensed
-           from installs where project_id = $1 and session_id is not null and first_seen >= $2 group by 1)
-       select s.source as label, count(distinct (s.visitor, (s.started_at at time zone 'utc')::date))::int as visitors,
-              count(*)::int as visits, (count(*) filter (where steps.download))::int as downloads,
-              (count(*) filter (where steps.checkout))::int as checkouts, coalesce(sum(inst.installs), 0)::int as installs,
-              coalesce(sum(inst.trials), 0)::int as trials, coalesce(sum(inst.licensed), 0)::int as licensed
-         from sessions s left join steps on steps.session_id = s.id left join inst on inst.session_id = s.id
-        where s.project_id = $1 and s.started_at >= $2 and s.started_at < $3 and ($4::text is null or s.source = $4)
-        group by 1 order by 2 desc, 1 limit 20`),
-    q(`select count(*)::int as installs, count(i.trial_at)::int as trials, count(i.licensed_at)::int as licensed
-         from installs i join sessions s on s.project_id = i.project_id and s.id = i.session_id
-        where s.project_id = $1 and s.started_at >= $2 and s.started_at < $3 and ($4::text is null or s.source = $4)`),
-    q(`select path as label, count(distinct visitor)::int as v, count(*)::int as pageviews from events
-        where ${WHERE_EVENTS} and name = 'pageview' group by 1 order by 2 desc, 1 limit 12`),
-    q(`select entry_path as label, count(*)::int as v from sessions where ${WHERE_SESSIONS} group by 1 order by 2 desc, 1 limit 12`),
-    visitorsBy("country"),
-    visitorsBy("device"),
-    visitorsBy("browser"),
-    visitorsBy("os"),
-    q(`select e.name, count(*)::int as count, count(distinct e.session_id)::int as visits,
-              count(distinct e.install_id)::int as installs,
-              (select string_agg(distinct k, ', ') from events e2 cross join lateral jsonb_object_keys(coalesce(e2.props, '{}')) k
-                where e2.project_id = $1 and e2.ts >= $2 and e2.ts < $3 and ($4::text is null or e2.source = $4) and e2.name = e.name) as props
-         from events e
-        where e.project_id = $1 and e.ts >= $2 and e.ts < $3 and ($4::text is null or e.source = $4) and e.name <> 'pageview'
-          and not (e.install_id is not null and e.name in ${APP_LIFECYCLE})
-        group by 1 order by 2 desc limit 20`),
-    installsBy("app_version"),
-    installsBy("state"),
-    installsBy("platform || ' ' || split_part(os_version, '.', 1)"),
-    q(`select coalesce(source, 'Not matched') as label, count(*)::int as v from installs
-        where ${WHERE_INSTALLS} and first_seen >= $2 and first_seen < $3 group by 1 order by 2 desc, 1 limit 12`),
-    q(`select max(last_seen) as at from installs where project_id = $1`, [project.id]),
-    q(`select count(distinct visitor)::int as n from events where project_id = $1 and ts > now() - interval '5 minutes'`, [project.id]),
-    q(`select max(ts) as at from events where project_id = $1`, [project.id]),
-  ]);
-
-  return {
-    project: { key: project.key, name: project.name, domains: project.domains, timezone: tz },
-    range: { id: rangeId in RANGES ? rangeId : "d30", unit: range.unit, from, to },
-    source,
-    totals,
-    previous,
-    series,
-    sources,
-    journeyBySource,
-    pages: { top: topPages, entry: entryPages },
-    countries,
-    devices: { device: devices, browser: browsers, os: systems },
-    events,
-    app: {
-      has: appSeen.at !== null,
-      lastSeen: appSeen.at,
-      totals: appTotals,
-      previous: appPrevious,
-      journey: journeyApp,
-      versions,
-      states,
-      systems: appSystems,
-      sources: installSources,
-    },
-    live: live.n,
-    lastEventAt: last.at,
-  };
+// A website address as a person types it ("https://www.Example.com/shop") to the hostname tracked ("example.com").
+export function domainOf(address: unknown): string | null {
+  const raw = text(address, 300);
+  if (!raw) return null;
+  try {
+    const host = new URL(/^[a-z]+:\/\//i.test(raw) ? raw : `https://${raw}`).hostname;
+    const domain = cleanDomain(host);
+    return /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$/.test(domain) ? domain : null;
+  } catch {
+    return null;
+  }
 }
 
-function json(res: ServerResponse, status: number, body: unknown) {
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+const zoneOf = (zone: unknown) => {
+  const name = text(zone, 64);
+  try {
+    if (name) return new Intl.DateTimeFormat("en", { timeZone: name }).resolvedOptions().timeZone;
+  } catch {}
+  return "UTC";
+};
+
+class HttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
+  res.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...HEADERS, ...headers });
   res.end(JSON.stringify(body));
 }
 
-if (import.meta.main) {
-  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
-  const page = () => readFileSync(new URL("index.html", import.meta.url));
-  const ingestUrl = process.env.PUBLIC_URL ?? "http://localhost:8787";
-  const server = createServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", "http://localhost");
-    try {
-      if (url.pathname === "/") {
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-        return res.end(page());
+function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+  if (!/^application\/json\b/.test(req.headers["content-type"] ?? "")) return Promise.reject(new HttpError(415, "Send JSON."));
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > 16_384) reject(new HttpError(413, "That's too much."));
+      else chunks.push(chunk);
+    });
+    req.on("end", () => {
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+        resolve(body && typeof body === "object" ? body : {});
+      } catch {
+        reject(new HttpError(400, "That isn't JSON."));
       }
-      if (url.pathname === "/api/projects") {
-        const { rows } = await pool.query(
-          `select p.key, p.name, p.domains, p.timezone, (select max(ts) from events e where e.project_id = p.id) as last_event_at
-             from projects p order by p.created_at`,
-        );
-        return json(res, 200, { projects: rows, ingestUrl });
-      }
-      if (url.pathname === "/api/stats") {
-        const data = await stats(pool, url.searchParams.get("project") ?? "", url.searchParams.get("range") ?? "d30", url.searchParams.get("source") || null);
-        return data ? json(res, 200, data) : json(res, 404, { error: "No such project" });
-      }
-      json(res, 404, { error: "Not found" });
-    } catch (e) {
-      console.error(e);
-      json(res, 500, { error: (e as Error).message });
-    }
+    });
+    req.on("error", reject);
   });
-  const port = Number(process.env.DASHBOARD_PORT ?? 8788);
-  server.listen(port, "127.0.0.1", () => console.log(`Statiku dashboard on http://localhost:${port}`));
+}
+
+// The app's script and styles, built once: content-hashed names so browsers keep them until the next deploy.
+async function bundle() {
+  const dir = new URL("client/", import.meta.url);
+  const { outputFiles } = await build({
+    entryPoints: [new URL("main.js", dir).pathname],
+    bundle: true,
+    minify: true,
+    format: "iife",
+    target: "es2020",
+    write: false,
+    legalComments: "none",
+  });
+  const asset = (body: string | Uint8Array, type: string) => {
+    const data = Buffer.from(body);
+    return { data, gzip: gzipSync(data), type, hash: createHash("sha256").update(data).digest("base64url").slice(0, 12) };
+  };
+  const js = asset(outputFiles[0].contents, "text/javascript; charset=utf-8");
+  const css = asset(readFileSync(new URL("app.css", dir)), "text/css; charset=utf-8");
+  const icon = asset(readFileSync(new URL("icon.svg", dir)), "image/svg+xml");
+  const html = asset(
+    readFileSync(new URL("index.html", dir), "utf8").replace("/app.js", `/app.js?v=${js.hash}`).replace("/app.css", `/app.css?v=${css.hash}`),
+    "text/html; charset=utf-8",
+  );
+  return { js, css, icon, html };
+}
+
+export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (key: string) => void }) {
+  const { pool, onSiteChanged } = options;
+  const assets = await bundle();
+  const signIns = new Attempts(10, 10 * 60_000);
+  const checks = new Attempts(12, 60_000);
+
+  function sendAsset(r: Request, asset: Awaited<ReturnType<typeof bundle>>["js"], cache: string) {
+    const gzip = /\bgzip\b/.test(r.req.headers["accept-encoding"] ?? "");
+    r.res.writeHead(200, {
+      "content-type": asset.type, "cache-control": cache, vary: "accept-encoding", ...HEADERS,
+      ...(gzip ? { "content-encoding": "gzip" } : {}),
+    });
+    r.res.end(r.req.method === "HEAD" ? undefined : gzip ? asset.gzip : asset.data);
+  }
+
+  async function signedIn(r: Request): Promise<User> {
+    const user = await userOf(pool, r.req);
+    if (!user) throw new HttpError(401, "Sign in to continue.");
+    return user;
+  }
+
+  async function mySite(r: Request, user: User, key: string) {
+    const site = await siteFor(pool, user.id, key);
+    if (!site) throw new HttpError(404, "There's no such site in your account.");
+    return site;
+  }
+
+  // The script's address, as this service is reached: the snippet points at wherever the dashboard is.
+  const origin = (r: Request) => process.env.PUBLIC_URL ?? `${r.secure ? "https" : "http"}://${r.req.headers.host ?? "localhost"}`;
+  const snippet = (r: Request, key: string) => `<script defer data-project="${key}" src="${origin(r)}/s.js"></script>`;
+
+  async function api(r: Request) {
+    const { req, res, path } = r;
+    const method = req.method ?? "GET";
+    // Changes come only from this app's own pages.
+    const from = req.headers.origin;
+    if (method !== "GET" && from && URL.parse(from)?.host !== req.headers.host) throw new HttpError(403, "Not from this site.");
+
+    if (path === "/api/signup" && method === "POST") {
+      if (!signIns.allow(r.ip)) throw new HttpError(429, "Too many tries. Wait a few minutes and try again.");
+      const body = await readJson(req);
+      const name = text(body.name, 80), email = cleanEmail(body.email), password = typeof body.password === "string" ? body.password : "";
+      if (!name) throw new HttpError(400, "Enter your name.");
+      if (!emailLooksRight(email)) throw new HttpError(400, "Enter a valid email address.");
+      if (password.length < 8 || password.length > 200) throw new HttpError(400, "Use a password of at least 8 characters.");
+      const user = await createUser(pool, name, email, password);
+      if (!user) throw new HttpError(409, "There's already an account with this email. Sign in instead.");
+      return json(res, 201, { user }, { "set-cookie": loginCookie(await startLogin(pool, user.id), r.secure) });
+    }
+    if (path === "/api/login" && method === "POST") {
+      if (!signIns.allow(r.ip)) throw new HttpError(429, "Too many tries. Wait a few minutes and try again.");
+      const body = await readJson(req);
+      const user = await findByPassword(pool, cleanEmail(body.email), typeof body.password === "string" ? body.password : "");
+      if (!user) throw new HttpError(401, "That email and password don't match an account.");
+      return json(res, 200, { user }, { "set-cookie": loginCookie(await startLogin(pool, user.id), r.secure) });
+    }
+    if (path === "/api/logout" && method === "POST") {
+      await endLogin(pool, req);
+      return json(res, 200, { ok: true }, { "set-cookie": clearedCookie(r.secure) });
+    }
+
+    const user = await signedIn(r);
+    if (path === "/api/me" && method === "GET") return json(res, 200, { user });
+
+    if (path === "/api/sites" && method === "GET") return json(res, 200, { sites: await overview(pool, user.id) });
+    if (path === "/api/sites" && method === "POST") {
+      const body = await readJson(req);
+      const domain = domainOf(body.address);
+      if (!domain) throw new HttpError(400, "Enter your website's address, such as example.com.");
+      const { rows: [own] } = await pool.query(
+        `select m.workspace_id, (select count(*) from projects p where p.workspace_id = m.workspace_id)::int as sites
+           from memberships m where m.user_id = $1 and m.role = 'owner' order by m.created_at limit 1`,
+        [user.id],
+      );
+      if (own.sites >= MAX_SITES) throw new HttpError(400, `An account can have up to ${MAX_SITES} sites for now.`);
+      const site = await createProject(pool, text(body.name, 80) || domain, [domain], zoneOf(body.timezone), own.workspace_id);
+      return json(res, 201, { site: { key: site.key, name: site.name, domains: site.domains, timezone: site.timezone } });
+    }
+
+    const match = path.match(/^\/api\/sites\/(p_[a-z0-9]{6,20})(\/[a-z]+)?$/);
+    if (!match) throw new HttpError(404, "Not found.");
+    const site = await mySite(r, user, match[1]);
+    const action = match[2] ?? "";
+
+    if (action === "" && method === "GET") {
+      const { rows: [info] } = await pool.query(
+        `select created_at, (select ts from events where project_id = $1 order by ts desc limit 1) as last_event_at from projects where id = $1`,
+        [site.id],
+      );
+      return json(res, 200, {
+        site: { key: site.key, name: site.name, domains: site.domains, timezone: site.timezone, createdAt: info.created_at, lastEventAt: info.last_event_at },
+        snippet: snippet(r, site.key),
+        scriptUrl: `${origin(r)}/s.js`,
+      });
+    }
+    if (action === "" && method === "PATCH") {
+      const body = await readJson(req);
+      const name = body.name === undefined ? site.name : text(body.name, 80);
+      if (!name) throw new HttpError(400, "Give the site a name.");
+      let domains = site.domains;
+      if (body.domains !== undefined) {
+        if (!Array.isArray(body.domains)) throw new HttpError(400, "Domains must be a list.");
+        domains = [...new Set(body.domains.map(domainOf))].filter((d): d is string => !!d).slice(0, 20);
+        if (!domains.length) throw new HttpError(400, "Keep at least one domain.");
+      }
+      const timezone = body.timezone === undefined ? site.timezone : zoneOf(body.timezone);
+      await pool.query("update projects set name = $2, domains = $3, timezone = $4 where id = $1", [site.id, name, domains, timezone]);
+      onSiteChanged(site.key);
+      return json(res, 200, { site: { key: site.key, name, domains, timezone } });
+    }
+    if (action === "" && method === "DELETE") {
+      const body = await readJson(req);
+      if (text(body.confirm, 253).toLowerCase() !== site.domains[0]) throw new HttpError(400, `Type ${site.domains[0]} to confirm.`);
+      await deleteProject(pool, site.id);
+      onSiteChanged(site.key);
+      return json(res, 200, { ok: true });
+    }
+    if (action === "/check" && method === "POST") {
+      if (!checks.allow(user.id)) throw new HttpError(429, "Wait a minute before checking again.");
+      return json(res, 200, await checkInstall(site.domains[0], site.key));
+    }
+    if (action === "/stats" && method === "GET") {
+      const url = new URL(req.url ?? "/", "http://x");
+      const range = url.searchParams.get("range") ?? "d30";
+      return json(res, 200, await stats(pool, site, RANGE_IDS.includes(range) ? range : "d30", text(url.searchParams.get("source"), 100) || null));
+    }
+    if (action === "/live" && method === "GET") return json(res, 200, await live(pool, site));
+    throw new HttpError(404, "Not found.");
+  }
+
+  return async function handle(r: Request) {
+    const { req, res, path } = r;
+    try {
+      if (path.startsWith("/api/")) return await api(r);
+      if (req.method !== "GET" && req.method !== "HEAD") throw new HttpError(405, "Not allowed.");
+      if (path === "/app.js") return sendAsset(r, assets.js, "public, max-age=31536000, immutable");
+      if (path === "/app.css") return sendAsset(r, assets.css, "public, max-age=31536000, immutable");
+      if (path === "/favicon.svg") return sendAsset(r, assets.icon, "public, max-age=86400");
+      // Every other address is a page of the app, which works out what to show.
+      return sendAsset(r, assets.html, "no-cache");
+    } catch (e) {
+      if (e instanceof HttpError) return json(res, e.status, { error: e.message });
+      console.error("Dashboard:", (e as Error).message);
+      if (!res.headersSent) json(res, 500, { error: "Something went wrong on our side. Try again." });
+    }
+  };
 }

@@ -1,4 +1,5 @@
-// The ingest service: serves the website script and takes its events and the app SDKs' batches.
+// The Statiku service: serves the website script, takes its events and the app SDKs' batches, and serves the
+// dashboard (dashboard/server.ts) at every other address.
 //   GET  /s.js      the script
 //   POST /e         one event (a plain-text JSON body, so browsers send it without a preflight)
 //   POST /v1/app    a batch of events from an app (see app.ts)
@@ -7,6 +8,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
 import pg from "pg";
+import { createDashboard } from "../dashboard/server.ts";
 import { buildTracker } from "../tracker/build.ts";
 import { collectApp, MAX_APP_BODY } from "./app.ts";
 import { collect, MAX_BODY, type Deps } from "./collect.ts";
@@ -17,7 +19,7 @@ import { Salts } from "./salts.ts";
 import { Sessions } from "./sessions.ts";
 import { Writer } from "./writer.ts";
 
-export type Options = { databaseUrl: string; trustProxy: boolean; geoPath: string | URL; flushMs?: number };
+export type Options = { databaseUrl: string; trustProxy: boolean; geoPath: string | URL; flushMs?: number; dashboard?: boolean };
 
 const CORS = {
   "access-control-allow-origin": "*",
@@ -65,6 +67,8 @@ export async function createApp(options: Options) {
   const deps: Deps = { projects: new Projects(pool), salts, sessions, installs: new Installs(pool, salts), writer, geo: new Geo(options.geoPath) };
 
   const script = await buildTracker();
+  // The dashboard tells the ingest side when a site's domains change, so the cached copy goes at once.
+  const dashboard = options.dashboard === false ? null : await createDashboard({ pool, onSiteChanged: (key) => deps.projects.cache.delete(key) });
   const etag = `"${createHash("sha256").update(script).digest("base64url").slice(0, 16)}"`;
 
   const ensurePartitions = () =>
@@ -98,8 +102,10 @@ export async function createApp(options: Options) {
         return send(res, outcome.status, outcome.message);
       }
       if (path === "/healthz") return send(res, 200, `ok, ${writer.queue.length} queued`);
-      if (path === "/") return send(res, 200, "Statiku ingest");
-      return send(res, 404, "not found");
+      if (!dashboard) return send(res, 404, "not found");
+      // Behind Render's proxy the connection to this process is plain HTTP; the proxy says what the browser used.
+      const secure = options.trustProxy ? req.headers["x-forwarded-proto"] === "https" : "encrypted" in req.socket;
+      return await dashboard({ req, res, path, ip: clientIp(req, options.trustProxy), secure });
     } catch (e) {
       console.error("Request failed:", (e as Error).message);
       if (!res.headersSent) send(res, 500, "error");
