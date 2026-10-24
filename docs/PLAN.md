@@ -58,7 +58,14 @@ Notchlight (notchlight.com) is the first customer.
   moves to a shared store.
 - **Location:** the country is looked up from the IP in memory and stored with the visit. For the live globe only,
   the approximate city (its centre, from DB-IP's city database) is looked up too and held in memory with the open
-  visit; it is never written to the database. No region, street or coordinates of the visitor themselves.
+  visit; it is never written to the database.
+- **Exact location, by consent:** off unless a site's owner turns it on (`projects.ask_location`). Then the script
+  asks with a card a few seconds in; only "Share" brings up the browser's geolocation prompt, and a visitor who has
+  allowed it before shares without being asked again. "Not now" is remembered on the server for the visit
+  (`/v1/site` tells the script whether to ask), so nothing is kept in the browser. The point is rounded to about
+  100 metres, held only with the visit in memory, and its street looked up from OpenStreetMap's Nominatim at most once
+  a second; the live globe zooms to street level over OpenStreetMap's tiles. Without that consent there is no way to
+  know a visitor's street: an IP address gives the city at best.
 - **Bots:** dropped by user agent; automated browsers are skipped by the script.
 - **Opting out:** site owners set `localStorage.statiku_ignore = "1"` in their own browser; the app SDK has an opt-out
   switch, which also forgets the install ID.
