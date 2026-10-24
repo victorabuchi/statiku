@@ -1,7 +1,8 @@
 # Statiku
 
-Privacy-first analytics for websites and the apps you sell yourself. Statiku shows which sources bring the visits,
-the downloads, the installs and the sales, with no cookies, no stored IP addresses, and data kept in the EU.
+Live analytics for websites, SaaS and apps. Statiku shows who is on your site right now, where they came from, and
+which sources bring the visits, the sign-ups, the downloads, the installs and the sales. It sets no cookies, so it
+needs no cookie banner, and the data is kept in the EU. Exact location only for visitors who opt in.
 
 ```
 visit  →  download  →  install  →  trial  →  purchase

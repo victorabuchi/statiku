@@ -1,6 +1,6 @@
 # Statiku: stack, data model and plan
 
-Statiku is privacy-first analytics for websites and apps (Mac, iOS, desktop) that follows each
+Statiku is live analytics for websites, SaaS and apps (Mac, iOS, desktop) that follows each
 traffic source from the first visit to the purchase:
 
 ```

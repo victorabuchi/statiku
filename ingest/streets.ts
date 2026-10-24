@@ -30,7 +30,7 @@ export function addressOf(s: Street | null | undefined, acc: number | null) {
 export const nominatim: Geocoder = async (lat, lon) => {
   const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&accept-language=en&lat=${lat}&lon=${lon}`;
   const res = await fetch(url, {
-    headers: { "user-agent": `Statiku/1.0 (privacy-first analytics; ${process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? "self-hosted"})` },
+    headers: { "user-agent": `Statiku/1.0 (web analytics; ${process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? "self-hosted"})` },
     signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) return null;
