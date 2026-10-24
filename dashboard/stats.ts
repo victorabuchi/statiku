@@ -280,7 +280,7 @@ export async function live(pool: pg.Pool, site: Site, present: Session[]) {
          from events where project_id = $1 and ts > now() - interval '30 minutes' order by ts desc limit 25`),
   ]);
   // Cities for the zoomed-in globe: each with its centre and how many visitors are there now.
-  const cities = new Map<string, { country: string | null; city: string; lat: number; lon: number; visitors: Set<string> }>();
+  const cities = new Map<string, { country: string | null; city: string; region: string | null; lat: number; lon: number; visitors: Set<string> }>();
   for (const s of present) {
     if (!s.place) continue;
     const key = `${s.country}|${s.place.city}`;

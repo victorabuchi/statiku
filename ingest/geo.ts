@@ -4,7 +4,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { Reader, type CityResponse, type CountryResponse } from "mmdb-lib";
 
-export type Place = { city: string; lat: number; lon: number };
+export type Place = { city: string; region: string | null; lat: number; lon: number };
 
 export class Geo {
   reader: Reader<CountryResponse | CityResponse> | null = null;
@@ -40,7 +40,10 @@ export class Geo {
     const found = this.lookup(ip) as CityResponse | null;
     const city = found?.city?.names?.en, lat = found?.location?.latitude, lon = found?.location?.longitude;
     if (!city || lat == null || lon == null) return null;
-    // The city, not the district: "Dresden (Südvorstadt-West)" is Dresden.
-    return { city: city.replace(/\s*\(.*\)$/, ""), lat: Math.round(lat * 100) / 100, lon: Math.round(lon * 100) / 100 };
+    // The city, not the district: "Dresden (Südvorstadt-West)" is Dresden. The region is the state or province.
+    return {
+      city: city.replace(/\s*\(.*\)$/, ""), region: found?.subdivisions?.[0]?.names?.en ?? null,
+      lat: Math.round(lat * 100) / 100, lon: Math.round(lon * 100) / 100,
+    };
   }
 }

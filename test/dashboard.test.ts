@@ -427,6 +427,7 @@ test("a visitor's city, from the city database", { skip: !CITIES && "run npm run
   const espoo = geo.place("193.166.3.2");
   assert.equal(geo.country("193.166.3.2"), "FI");
   assert.ok(espoo && espoo.city && Math.abs(espoo.lat - 60.2) < 1 && Math.abs(espoo.lon - 24.7) < 1, JSON.stringify(espoo));
+  assert.equal(espoo.region, "Uusimaa");
   assert.ok(!/\(/.test(geo.place("141.30.1.1")?.city ?? ""), "districts are left off");
   assert.equal(new Geo(new URL("../data/country.mmdb", import.meta.url)).place("193.166.3.2"), null);
 });

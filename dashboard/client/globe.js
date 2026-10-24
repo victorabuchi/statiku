@@ -41,7 +41,7 @@ export function createGlobe(canvas, { onHover, onView } = {}) {
   let rotation = [-15, -32, 0], zoom = 1;
   let countries = [], cities = [], lit = new Set();
   let dots = [];
-  let focus = { country: null, city: null };
+  let focus = { country: null, region: null, city: null };
   let size = { w: 0, h: 0, dpr: 1 };
   let dragging = null, hovered = null, flying = null, idleUntil = 0, frame = 0, alive = true, layerKey = "";
   const pointers = new Map();
@@ -129,7 +129,7 @@ export function createGlobe(canvas, { onHover, onView } = {}) {
     if (zoom < CITY_ZOOM) {
       list = countries.filter((r) => places.points[r.label]).map((r) => ({ id: r.label, code: r.label, v: r.v, lonlat: places.points[r.label] }));
     } else {
-      list = cities.map((c) => ({ id: `${c.country}|${c.city}`, code: c.country, city: c.city, v: c.v, lonlat: [c.lon, c.lat] }));
+      list = cities.map((c) => ({ id: `${c.country}|${c.city}`, code: c.country, city: c.city, region: c.region, v: c.v, lonlat: [c.lon, c.lat] }));
       for (const r of countries) {
         const placed = cities.filter((c) => c.country === r.label).reduce((sum, c) => sum + c.v, 0);
         if (r.v > placed && places.points[r.label]) list.push({ id: r.label, code: r.label, v: r.v - placed, lonlat: places.points[r.label], unplaced: true });
@@ -224,7 +224,7 @@ export function createGlobe(canvas, { onHover, onView } = {}) {
     if (zoom >= CITY_ZOOM - 0.6) loadDetail();
     if (before !== zoom >= CITY_ZOOM) placeDots();
     // Zoomed back out to the whole world: the country or city in focus is let go.
-    if (!flight && zoom < 1.5 && focus.country) setFocus({ country: null, city: null });
+    if (!flight && zoom < 1.5 && focus.country) setFocus({ country: null, region: null, city: null });
   }
   function setFocus(next) {
     focus = next;
@@ -250,11 +250,11 @@ export function createGlobe(canvas, { onHover, onView } = {}) {
       const [[x0, y0], [x1, y1]] = geoBounds(land);
       span = Math.max(((x1 - x0 + 360) % 360) * Math.cos((center[1] * Math.PI) / 180), y1 - y0, 1.5);
     }
-    setFocus({ country: code, city: null });
+    setFocus({ country: code, region: null, city: null });
     flyTo(center, 1 / Math.sin((Math.min(80, span * 0.75) * Math.PI) / 180));
   }
   function focusCity(city) {
-    setFocus({ country: city.country, city: city.city });
+    setFocus({ country: city.country, region: city.region, city: city.city });
     flyTo([city.lon, city.lat], Math.max(zoom * 2, 40));
   }
 
@@ -355,7 +355,7 @@ export function createGlobe(canvas, { onHover, onView } = {}) {
       flyTo([-rotation[0], -rotation[1]], zoom * factor);
     },
     world() {
-      setFocus({ country: null, city: null });
+      setFocus({ country: null, region: null, city: null });
       flyTo([-rotation[0], 25], 1);
     },
     destroy() {

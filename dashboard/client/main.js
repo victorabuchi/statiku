@@ -2,6 +2,7 @@
 // and for each one its analytics, a live view with a globe, the steps to add it to the site, and its settings, plus
 // the account's own settings and team. Everything shown comes from /api, and everything from the server goes into
 // the page as text.
+import { siFramer, siGoogletagmanager, siShopify, siSquarespace, siWebflow, siWix, siWordpress } from "simple-icons";
 import { lineChart, minuteBars, sparkline } from "./charts.js";
 import { createGlobe } from "./globe.js";
 
@@ -542,6 +543,13 @@ function addSitePage() {
 }
 
 // ---------- Setup ----------
+// A website builder's own logo in its own colour (from Simple Icons, CC0), to find yours at a glance.
+function brand(logo, size = 18) {
+  const t = document.createElement("template");
+  t.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="#${logo.hex}" aria-hidden="true"><path d="${logo.path}"/></svg>`;
+  return t.content.firstChild;
+}
+const LOGOS = { WordPress: siWordpress, Shopify: siShopify, Wix: siWix, Squarespace: siSquarespace, Webflow: siWebflow, Framer: siFramer, "Google Tag Manager": siGoogletagmanager };
 const PLATFORMS = [
   ["Any website", "If you can edit your site's HTML", [
     "Copy the tracking code above.",
@@ -627,7 +635,8 @@ async function setupPage(key) {
   const steps = h("div", { style: { display: "grid", gap: "12px" } });
   const drawPlatform = () => {
     pills.replaceChildren(...PLATFORMS.map(([name], i) =>
-      h("button", { type: "button", "aria-pressed": String(i === platform), text: name, onclick: () => { platform = i; drawPlatform(); } })));
+      h("button", { type: "button", "aria-pressed": String(i === platform), onclick: () => { platform = i; drawPlatform(); } },
+        LOGOS[name] ? brand(LOGOS[name]) : icon("globe", 18), name)));
     const [name, note, list] = PLATFORMS[platform];
     steps.replaceChildren(h("p", { class: "muted", text: `${name}: ${note}.` }), h("ol", { class: "how" }, list.map((s) => h("li", {}, h("span", {}, rich(s))))));
   };
@@ -1060,12 +1069,12 @@ async function livePage(key) {
   const locationsSub = h("span", { class: "sub", text: "Click one to fly there" });
   const locations = h("div"), pages = h("div"), perMinute = h("div", { class: "chart" }), sources = h("div"), feed = h("div", { class: "feed" });
   let latest = null;
-  let view = { country: null, city: null };
+  let view = { country: null, region: null, city: null };
 
   const globe = createGlobe(canvas, {
     onHover: (dot, x, y) => {
       if (!dot) return void (tip.hidden = true);
-      const where = dot.city ? `${dot.city}, ${countryName(dot.code)}` : dot.unplaced ? `${countryName(dot.code)}, city unknown` : countryName(dot.code);
+      const where = dot.city ? [dot.city, dot.region, countryName(dot.code)].filter(Boolean).join(", ") : dot.unplaced ? `${countryName(dot.code)}, city unknown` : countryName(dot.code);
       tip.replaceChildren(h("b", {}, `${flag(dot.code)} ${where}`), h("span", { class: "muted", text: `${dot.v} ${dot.v === 1 ? "visitor" : "visitors"} now` }));
       tip.style.left = `${x}px`;
       tip.style.top = `${y}px`;
@@ -1090,6 +1099,7 @@ async function livePage(key) {
     const parts = [h("button", { type: "button", text: "World", onclick: () => globe.world() })];
     if (view.country) {
       parts.push(h("span", { text: "›" }), h("button", { type: "button", text: countryName(view.country), onclick: () => globe.focusCountry(view.country) }));
+      if (view.region && view.region !== view.city) parts.push(h("span", { text: "›" }), h("span", { class: "region", text: view.region }));
       if (view.city) parts.push(h("span", { text: "›" }), h("b", { text: view.city }));
     }
     crumbs.replaceChildren(...parts);
@@ -1109,11 +1119,11 @@ async function livePage(key) {
     const here = d.cities.filter((c) => c.country === view.country);
     const total = d.countries.find((c) => c.label === view.country)?.v ?? 0;
     const unplaced = total - here.reduce((sum, c) => sum + c.v, 0);
-    const rows = [...here.map((c) => ({ label: c.city, v: c.v, city: c })), ...(unplaced > 0 ? [{ label: "City unknown", v: unplaced }] : [])];
+    const rows = [...here.map((c) => ({ label: c.city, region: c.region, v: c.v, city: c })), ...(unplaced > 0 ? [{ label: "City unknown", v: unplaced }] : [])];
     locationsTitle.textContent = `${flag(view.country)} ${countryName(view.country)}`;
     locationsSub.textContent = "Cities, approximately";
     locations.replaceChildren(
-      rows.length ? bars(rows, { head: ["City", "Visitors"], onPick: (r) => globe.focusCity(r.city), canPick: (r) => !!r.city, active: view.city })
+      rows.length ? bars(rows, { head: ["City", "Visitors"], label: (r) => (r.region && r.region !== r.label ? `${r.label} · ${r.region}` : r.label), onPick: (r) => globe.focusCity(r.city), canPick: (r) => !!r.city, active: view.city })
         : h("p", { class: "empty-note", text: "No one here right now." }),
       h("button", { class: "btn plain", type: "button", style: { marginTop: "8px" }, onclick: () => globe.world() }, icon("back", 14), " All countries"));
   }

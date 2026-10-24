@@ -89,7 +89,7 @@ button, input, select { font: inherit; letter-spacing: inherit; color: inherit; 
 .nav-label span { overflow: hidden; text-overflow: ellipsis; }
 .main { margin: var(--topbar) 0 0 var(--sidebar-w); min-height: calc(100vh - var(--topbar)); background: var(--page); border-top-right-radius: 12px; min-width: 0; }
 .page { max-width: 1320px; margin: 0 auto; padding: 20px 24px 48px; }
-.page.narrow { max-width: 860px; }
+.page.narrow > * { max-width: 860px; }
 .overlay { display: none; }
 
 /* ---------- Page header ---------- */
@@ -288,9 +288,11 @@ code { font: 12px var(--mono); background: var(--surface-2); border: 1px solid v
 .code-block { position: relative; background: #1a1a1a; color: #f0f0f0; border-radius: 10px; padding: 14px 92px 14px 16px; font: 12.5px/1.6 var(--mono); white-space: pre-wrap; word-break: break-all; }
 .code-block .copy { position: absolute; top: 10px; right: 10px; }
 .platforms { display: flex; flex-wrap: wrap; gap: 6px; }
-.platforms button { height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-weight: 550; }
+.platforms button { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-weight: 550; }
 .platforms button:hover { background: var(--surface-2); }
-.platforms button[aria-pressed="true"] { background: var(--text); border-color: var(--text); color: #fff; }
+.platforms button svg { flex: none; }
+/* The chosen one keeps its logo's colours, so it's marked with a ring rather than a fill. */
+.platforms button[aria-pressed="true"] { border-color: var(--text); box-shadow: inset 0 0 0 1px var(--text); font-weight: 650; }
 ol.how { margin: 0; padding: 0; list-style: none; counter-reset: how; display: grid; gap: 10px; }
 ol.how li { counter-increment: how; display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; align-items: start; }
 ol.how li::before { content: counter(how); width: 24px; height: 24px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border); display: grid; place-items: center; font-size: 12px; font-weight: 650; }
@@ -320,6 +322,7 @@ details.more .card-body { padding-top: 0; display: grid; gap: 12px; }
 .crumbs button { border: 0; background: none; padding: 1px 4px; margin: 0 -4px; border-radius: 5px; color: rgba(255, 255, 255, 0.75); cursor: pointer; font: inherit; }
 .crumbs button:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
 .crumbs b { color: #fff; font-weight: 650; }
+.crumbs .region { color: rgba(255, 255, 255, 0.75); }
 .globe-controls { position: absolute; right: 14px; bottom: 44px; display: grid; gap: 1px; border-radius: 9px; overflow: hidden; background: rgba(255, 255, 255, 0.14); }
 .globe-controls button { width: 34px; height: 34px; display: grid; place-items: center; border: 0; background: rgba(30, 34, 38, 0.92); color: #fff; cursor: pointer; }
 .globe-controls button:hover { background: rgba(60, 66, 72, 0.95); }
