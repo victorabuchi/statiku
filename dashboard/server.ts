@@ -36,6 +36,7 @@ import {
 } from "./auth.ts";
 import type { Billing } from "./billing.ts";
 import { letter, smtpMailer, type Mailer } from "./mail.ts";
+import { createMonitor, type Probe } from "./monitor.ts";
 import { access, applySubscription, BILLING_COLUMNS, checkoutUrl, planOf, PLANS, polarFromEnv, portalUrl, usage, verifyWebhook, type Polar } from "./billing.ts";
 import { checkInstall, fetchIcon, imageType, openRequest, publicRequest, type Outbound } from "./check.ts";
 import {
@@ -182,6 +183,8 @@ export async function createDashboard(options: {
   pool: pg.Pool; onSiteChanged: (key: string) => void; presence: Presence; hub: Hub; streets: Streets; mailer?: Mailer; imports?: ImportApis;
   // Polar, for Statiku's own plans; tests use a stand-in.
   polar?: Polar & { request?: Outbound };
+  // How the site watcher looks at a site; tests use a stand-in.
+  probe?: Probe;
 }) {
   const { pool, onSiteChanged, presence, hub, streets } = options;
   const mailer = options.mailer ?? smtpMailer();
@@ -328,6 +331,10 @@ export async function createDashboard(options: {
     }
   }
   setInterval(() => void refreshDownloads(), 6 * 3600_000).unref();
+
+  // Emails to site owners when a site goes quiet or gets a rush (monitor.ts).
+  const monitor = createMonitor({ pool, mailer, probe: options.probe, origin: () => process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? "http://localhost:8787" });
+  setInterval(() => void monitor.watch().catch((e) => console.error("Site watch:", (e as Error).message)), 5 * 60_000).unref();
 
   // A form with files, up to 100 MB, read by the platform's own parser.
   async function filesOf(req: IncomingMessage) {
@@ -726,6 +733,7 @@ export async function createDashboard(options: {
       return json(res, 200, {
         site: {
           key: site.key, name: site.name, domains: site.domains, timezone: site.timezone, role: site.role, askLocation: site.askLocation,
+          alertQuiet: site.alertQuiet, alertSurge: site.alertSurge,
           createdAt: info.created_at, lastEventAt: info.last_event_at,
         },
         snippet: snippet(r, site.key),
@@ -745,10 +753,15 @@ export async function createDashboard(options: {
       }
       const timezone = body.timezone === undefined ? site.timezone : zoneOf(body.timezone);
       const askLocation = typeof body.askLocation === "boolean" ? body.askLocation : site.askLocation;
-      await pool.query("update projects set name = $2, domains = $3, timezone = $4, ask_location = $5 where id = $1", [site.id, name, domains, timezone, askLocation]);
+      const alertQuiet = typeof body.alertQuiet === "boolean" ? body.alertQuiet : site.alertQuiet;
+      const alertSurge = typeof body.alertSurge === "boolean" ? body.alertSurge : site.alertSurge;
+      await pool.query(
+        "update projects set name = $2, domains = $3, timezone = $4, ask_location = $5, alert_quiet = $6, alert_surge = $7 where id = $1",
+        [site.id, name, domains, timezone, askLocation, alertQuiet, alertSurge],
+      );
       onSiteChanged(site.key);
       if (domains[0] !== site.domains[0]) void refreshIcon({ id: site.id, domains });
-      return json(res, 200, { site: { key: site.key, name, domains, timezone, askLocation } });
+      return json(res, 200, { site: { key: site.key, name, domains, timezone, askLocation, alertQuiet, alertSurge } });
     }
     if (action === "" && method === "DELETE") {
       ownerOnly(site);
@@ -823,5 +836,5 @@ export async function createDashboard(options: {
       console.error("Dashboard:", (e as Error).message);
       if (!res.headersSent) json(res, 500, { error: "Something went wrong on our side. Try again." });
     }
-  }, { jobs: { refreshDownloads } });
+  }, { jobs: { refreshDownloads, watchSites: monitor.watch } });
 }

@@ -1575,6 +1575,19 @@ async function siteSettingsPage(key) {
     }
   };
 
+  // Emails to the owners when the site goes quiet or down, and when a rush of visitors arrives.
+  const alertsCard = () => {
+    const quiet = h("input", { type: "checkbox", id: "s-quiet", checked: site.alertQuiet, disabled: !owner });
+    const surge = h("input", { type: "checkbox", id: "s-surge", checked: site.alertSurge, disabled: !owner });
+    const save = h("button", { class: "btn primary", type: "button", text: "Save", hidden: !owner, onclick: () => saveSite({ alertQuiet: quiet.checked, alertSurge: surge.checked }, save, "Alerts saved") });
+    return card("Alerts", h("div", { class: "form" },
+      h("label", { class: "check", for: "s-quiet" }, quiet, h("span", {}, h("b", { text: "When the site goes quiet. " }),
+        h("span", { class: "muted", text: "An hour without visits at a time it usually has them: Statiku looks at the site and says whether it's down, lost its tracking code, or is just quiet. Then again when visits come back." }))),
+      h("label", { class: "check", for: "s-surge" }, surge, h("span", {}, h("b", { text: "When a rush arrives. " }),
+        h("span", { class: "muted", text: "Many times the usual visitors in a quarter of an hour, and where they're coming from, while it's happening. At most one every six hours." }))),
+      h("p", { class: "help", text: "Emails go to the site's owners." }), owner ? h("div", {}, save) : null), { id: "alerts" });
+  };
+
   const name = h("input", { class: "input", id: "s-name", value: site.name, disabled: !owner });
   const zone = zoneSelect("s-zone", site.timezone);
   zone.disabled = !owner;
@@ -1635,6 +1648,7 @@ async function siteSettingsPage(key) {
         owner ? h("div", {}, saveDomains) : null)),
       card("Tracking code", h("div", { style: { display: "grid", gap: "10px" } }, h("div", { class: "code-block" }, snippet, copyButton),
         h("a", { href: `/sites/${key}/setup`, text: "Steps for WordPress, Shopify, Wix and more" }))),
+      alertsCard(),
       locationCard,
       owner ? h("div", { class: "card", style: { borderColor: "#fbd5d0" } }, h("div", { class: "card-head" }, h("h2", { text: "Delete site" })),
         h("div", { class: "card-body form" },

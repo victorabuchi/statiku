@@ -17,6 +17,7 @@
     "stats": "node --env-file-if-exists=.env scripts/stats.ts",
     "billing": "node --env-file-if-exists=.env scripts/billing.ts",
     "demo": "node scripts/demo.ts",
+    "restore-check": "node --env-file-if-exists=.env scripts/restore-check.ts",
     "test": "node --test --test-concurrency=1 --env-file-if-exists=.env test/",
     "e2e": "node --env-file-if-exists=.env scripts/e2e-notchlight.ts",
     "typecheck": "tsc --noEmit"

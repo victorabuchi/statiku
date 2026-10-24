@@ -27,6 +27,8 @@ let elsewhereUrl: string;
 const github = { releases: [] as any[] };
 // Polar's stand-in keeps the checkouts asked for and knows which customers exist.
 const polar = { checkouts: [] as any[], customers: new Set<string>() };
+// How the site watcher finds each site when it looks.
+const probes: Record<string, { status: number; html: string } | { error: string }> = {};
 const POLAR_SECRET = `whsec_${randomBytes(24).toString("base64")}`;
 let pool: pg.Pool;
 let base: string;
@@ -58,6 +60,7 @@ before(async () => {
       request: openRequest, github: elsewhereUrl,
       google: { auth: `${elsewhereUrl}/auth`, token: `${elsewhereUrl}/token`, data: elsewhereUrl, admin: elsewhereUrl, clientId: "id", clientSecret: "secret" },
     },
+    probe: async (domain) => probes[domain] ?? { error: "ENOTFOUND" },
     polar: {
       api: elsewhereUrl, token: "polar-token", secret: POLAR_SECRET, request: openRequest,
       products: { "starter:month": "prod-starter-month", "growth:month": "prod-growth-month", "growth:year": "prod-growth-year" },
@@ -882,4 +885,62 @@ test("plans: a trial, a checkout with Polar, its webhook, and reports that close
   await pool.query("insert into usage_daily (project_id, day, events) values ($1, (now() at time zone 'utc')::date, 12000) on conflict (project_id, day) do update set events = 12000", [siteId]);
   billing = (await owner("/api/billing")).data;
   assert.deepEqual([billing.usage, billing.limit, billing.over, billing.access], [12000, 10_000, true, "paid"]);
+});
+
+// ---------- Alerts ----------
+
+test("alerts: a site gone quiet (down, its code gone, or just quiet), visits coming back, and a rush", { skip }, async () => {
+  const owner = await signUp("watching@example.com");
+  const site = async (domain: string) => {
+    const { key } = (await owner("/api/sites", { method: "POST", body: { address: domain, timezone: "UTC" } })).data.site;
+    const { rows: [{ id }] } = await pool.query("select id from projects where key = $1", [key]);
+    return { key, id };
+  };
+  const now = new Date();
+  // Twenty page views in this hour of each of the last four weeks, and nothing in the last hour.
+  const usual = async (id: string, extra: Date[] = []) => {
+    const at = [...[1, 2, 3, 4].flatMap((w) => Array.from({ length: 20 }, (_, i) => new Date(now.getTime() - w * 7 * 86400_000 - (i + 1) * 120_000))), ...extra];
+    await pool.query("select ensure_month_partitions('events', 1, 0)");
+    await pool.query(
+      `insert into events (project_id, ts, name, path, source) select $1, t, 'pageview', '/', s from unnest($2::timestamptz[], $3::text[]) as x(t, s)`,
+      [id, at, at.map((_, i) => (i >= 80 ? "Hacker News" : "Google"))],
+    );
+  };
+  const down = await site("down.example"), gone = await site("gone.example"), quiet = await site("quiet.example"), off = await site("off.example");
+  for (const s of [down, gone, quiet, off]) await usual(s.id);
+  probes["down.example"] = { status: 503, html: "" };
+  probes["gone.example"] = { status: 200, html: "<html>a new theme</html>" };
+  probes["quiet.example"] = { status: 200, html: `<script defer data-project="${quiet.key}" src="/s.js"></script>` };
+  assert.equal((await owner(`/api/sites/${off.key}`, { method: "PATCH", body: { alertQuiet: false } })).data.site.alertQuiet, false);
+
+  mailbox.length = 0;
+  await app.jobs!.watchSites(now);
+  const sent = mailbox.filter((m) => m.to === "watching@example.com").map((m) => m.subject).sort();
+  assert.deepEqual(sent, ["Statiku's code is missing from gone.example", "down.example looks down", "quiet.example has gone quiet"]);
+  assert.match(mailbox.find((m) => m.subject.includes("down.example"))!.text, /answers with an error \(503\)[\s\S]*about 20 page views an hour/);
+  // One email an incident, however long it lasts.
+  await app.jobs!.watchSites(now);
+  assert.equal(mailbox.length, 3);
+
+  // A visit again: one more email, and the alert is closed.
+  await pool.query("insert into events (project_id, ts, name, path, source) values ($1, $2, 'pageview', '/', 'Direct')", [down.id, new Date(now.getTime() + 60_000)]);
+  await app.jobs!.watchSites(new Date(now.getTime() + 120_000));
+  assert.equal(mailbox.at(-1)!.subject, "Visits are back on down.example");
+  assert.equal((await pool.query("select alert_kind from projects where id = $1", [down.id])).rows[0].alert_kind, null);
+
+  // A rush: forty page views in ten minutes, most from Hacker News; one email, not one every five minutes.
+  const rush = await site("rush.example");
+  await usual(rush.id, Array.from({ length: 40 }, (_, i) => new Date(now.getTime() - i * 15_000)));
+  mailbox.length = 0;
+  await app.jobs!.watchSites(new Date(now.getTime() + 120_000));
+  assert.deepEqual(mailbox.map((m) => m.subject), ["rush.example is getting a rush from Hacker News"]);
+  assert.match(mailbox[0].text, /40 page views in the last 15 minutes, 100% of them from Hacker News/);
+  await app.jobs!.watchSites(new Date(now.getTime() + 420_000));
+  assert.equal(mailbox.length, 1);
+});
+
+test("the deep health check asks the database", { skip }, async () => {
+  const res = await fetch(`${base}/healthz?deep=1`);
+  assert.equal(res.status, 200);
+  assert.match(await res.text(), /database answering/);
 });

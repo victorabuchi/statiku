@@ -28,6 +28,21 @@ services:
         sync: false
       - key: MAIL_FROM
         sync: false
+      # Seals tokens people give Statiku (a GitHub token for a private repository). Made once by Render.
+      - key: SECRET_KEY
+        generateValue: true
+      # Importing from Google Analytics: an OAuth client from Google Cloud (see docs/OPERATIONS.md).
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      # Statiku's own plans, sold through Polar (see dashboard/billing.ts and docs/OPERATIONS.md).
+      - key: POLAR_ACCESS_TOKEN
+        sync: false
+      - key: POLAR_WEBHOOK_SECRET
+        sync: false
+      - key: POLAR_PRODUCTS
+        sync: false
 
 databases:
   - name: statiku-db

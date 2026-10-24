@@ -4,7 +4,7 @@
 //   POST /e         one event (a plain-text JSON body, so browsers send it without a preflight)
 //   POST /v1/app    a batch of events from an app (see app.ts)
 //   GET  /v1/site   what the script needs to know about its site (whether to ask for a visitor's location)
-//   GET  /healthz   for Render
+//   GET  /healthz   for Render; /healthz?deep=1 also asks the database, for an outside monitor
 // Nothing here logs or stores an IP.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
@@ -12,6 +12,7 @@ import pg from "pg";
 import type { Mailer } from "../dashboard/mail.ts";
 import type { Polar } from "../dashboard/billing.ts";
 import type { Outbound } from "../dashboard/check.ts";
+import type { Probe } from "../dashboard/monitor.ts";
 import { createDashboard, type ImportApis } from "../dashboard/server.ts";
 import { buildTracker } from "../tracker/build.ts";
 import { collectApp, MAX_APP_BODY } from "./app.ts";
@@ -34,6 +35,7 @@ export type Options = {
   // Where imports reach Google, GitHub and Plausible, and where billing reaches Polar; tests use stand-ins.
   imports?: ImportApis;
   polar?: Polar & { request?: Outbound };
+  probe?: Probe;
 };
 
 const CORS = {
@@ -92,6 +94,7 @@ export async function createApp(options: Options) {
     mailer: options.mailer,
     imports: options.imports,
     polar: options.polar,
+    probe: options.probe,
   });
   const etag = `"${createHash("sha256").update(script).digest("base64url").slice(0, 16)}"`;
 
@@ -131,7 +134,11 @@ export async function createApp(options: Options) {
         const outcome = await collectApp(deps, body, clientIp(req, options.trustProxy));
         return send(res, outcome.status, outcome.message);
       }
-      if (path === "/healthz") return send(res, 200, `ok, ${writer.queue.length} queued`);
+      if (path === "/healthz") {
+        if (!/[?&]deep=1\b/.test(req.url ?? "")) return send(res, 200, `ok, ${writer.queue.length} queued`);
+        const answered = await Promise.race([pool.query("select 1").then(() => true, () => false), new Promise<boolean>((r) => setTimeout(() => r(false), 5000))]);
+        return send(res, answered ? 200 : 503, answered ? `ok, database answering, ${writer.queue.length} queued` : "the database isn't answering");
+      }
       if (!dashboard) return send(res, 404, "not found");
       // Behind Render's proxy the connection to this process is plain HTTP; the proxy says what the browser used.
       const secure = options.trustProxy ? req.headers["x-forwarded-proto"] === "https" : "encrypted" in req.socket;
