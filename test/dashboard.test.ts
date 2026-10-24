@@ -204,6 +204,8 @@ test("the app's pages and files", { skip }, async () => {
   const js = await fetch(base + script, { headers: { "accept-encoding": "gzip" } });
   assert.equal(js.status, 200);
   assert.match(js.headers.get("cache-control")!, /immutable/);
+  // Another build's name (two versions answer during a deploy): served, but never kept.
+  assert.equal((await fetch(`${base}/app.js?v=someotherbuild`)).headers.get("cache-control"), "no-store");
   assert.equal((await fetch(`${base}/api/nothing`)).status, 401);
   // The script and the event endpoint are still the ingest service's.
   assert.equal((await fetch(`${base}/s.js`)).status, 200);

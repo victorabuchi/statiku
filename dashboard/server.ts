@@ -108,7 +108,8 @@ function readJson(req: IncomingMessage, limit = 16_384): Promise<Record<string, 
   });
 }
 
-// The app's script and styles, built once: content-hashed names so browsers keep them until the next deploy.
+// The app's script and styles, built once: names hashed from their content and the deploy's commit, so browsers keep
+// them until the next deploy and every deploy gives them new names.
 async function bundle() {
   const dir = new URL("client/", import.meta.url);
   const { outputFiles } = await build({
@@ -122,7 +123,8 @@ async function bundle() {
   });
   const asset = (body: string | Uint8Array, type: string) => {
     const data = Buffer.from(body);
-    return { data, gzip: gzipSync(data), type, hash: createHash("sha256").update(data).digest("base64url").slice(0, 12) };
+    const hash = createHash("sha256").update(data).update(process.env.RENDER_GIT_COMMIT ?? "").digest("base64url").slice(0, 12);
+    return { data, gzip: gzipSync(data), type, hash };
   };
   const js = asset(outputFiles[0].contents, "text/javascript; charset=utf-8");
   const css = asset(readFileSync(new URL("app.css", dir)), "text/css; charset=utf-8");
@@ -145,8 +147,11 @@ export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (
 
   function sendAsset(r: Request, asset: Awaited<ReturnType<typeof bundle>>["js"], cache: string) {
     const gzip = /\bgzip\b/.test(r.req.headers["accept-encoding"] ?? "");
+    // Asked for by another build's name: during a deploy the old and new versions both answer for a moment, and a
+    // browser must not keep this build's file under the other's name for a year. It gets this one, uncached.
+    const wanted = new URL(r.req.url ?? "/", "http://x").searchParams.get("v");
     r.res.writeHead(200, {
-      "content-type": asset.type, "cache-control": cache, vary: "accept-encoding", ...HEADERS,
+      "content-type": asset.type, "cache-control": wanted && wanted !== asset.hash ? "no-store" : cache, vary: "accept-encoding", ...HEADERS,
       ...(gzip ? { "content-encoding": "gzip" } : {}),
     });
     r.res.end(r.req.method === "HEAD" ? undefined : gzip ? asset.gzip : asset.data);
