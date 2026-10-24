@@ -62,10 +62,13 @@ Notchlight (notchlight.com) is the first customer.
 - **Exact location, by consent:** off unless a site's owner turns it on (`projects.ask_location`). Then the script
   asks with a card a few seconds in; only "Share" brings up the browser's geolocation prompt, and a visitor who has
   allowed it before shares without being asked again. "Not now" is remembered on the server for the visit
-  (`/v1/site` tells the script whether to ask), so nothing is kept in the browser. The point is rounded to about
-  100 metres, held only with the visit in memory, and its street looked up from OpenStreetMap's Nominatim at most once
-  a second; the live globe zooms to street level over OpenStreetMap's tiles. Without that consent there is no way to
-  know a visitor's street: an IP address gives the city at best.
+  (`/v1/site` tells the script whether to ask), so nothing is kept in the browser. The script sends the first fix and
+  then sharper ones as GPS or Wi-Fi settles. The point, to about 10 metres, is held only with the visit in memory, and
+  its address looked up from OpenStreetMap's Nominatim at most once a second. It is said only as exactly as the
+  device was sure: the house number within 25 metres (and only if that building is as close), the street within
+  100, otherwise the neighbourhood, because a wrong house number is worse than none. The live globe zooms to street
+  level over OpenStreetMap's tiles. Without that consent there is no way to know a visitor's street: an IP address
+  gives the city at best.
 - **Bots:** dropped by user agent; automated browsers are skipped by the script.
 - **Opting out:** site owners set `localStorage.statiku_ignore = "1"` in their own browser; the app SDK has an opt-out
   switch, which also forgets the install ID.

@@ -41,9 +41,9 @@ The full plan, the stack and the data model are in [docs/PLAN.md](docs/PLAN.md).
 - **Cities only while live:** the live globe places visitors in their approximate city while they're on the site.
   The city is held in memory and never stored; the reports keep only the country.
 - **Exact location only by choice:** a site can turn on a setting (off by default) that asks its visitors, with a
-  card and then the browser's own prompt, to share their location. Those who agree show on their street in the live
-  view while they're on the site; the point, rounded to about 100 metres, is never stored, and its street name comes
-  from OpenStreetMap.
+  card and then the browser's own prompt, to share their location. Those who agree show at their address in the
+  live view while they're on the site, with the house number only when their device is sure of it to within 25
+  metres. The point, to about 10 metres, is never stored, and its address comes from OpenStreetMap.
 - **Visitors can't be traced:** a visitor is a hash of the project, IP and browser, mixed with a secret that changes
   every day and is deleted after two days.
 - **Apps send no personal data:** an install is a random ID kept in the app's preferences, with no account, name or

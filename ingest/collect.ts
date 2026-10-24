@@ -30,7 +30,7 @@ export type Deps = { projects: Projects; salts: Salts; sessions: Sessions; insta
 const BEAT = "_p", GONE = "_l";
 // On sites that ask, the point a visitor chose to share, or their "not now". Never stored as events either.
 const SHARED = "_loc", DECLINED = "_noloc";
-const round3 = (n: number) => Math.round(n * 1000) / 1000;
+const round4 = (n: number) => Math.round(n * 10_000) / 10_000;
 
 // What the script needs to know about its site: whether it asks visitors for their location, and whether to ask this
 // visitor now (not if they've been asked already this visit). An answer of "no" is the same for everyone, so it can be
@@ -115,9 +115,9 @@ export async function collect(deps: Deps, body: string, ua: string, ip: string, 
     const session = project.askLocation ? await deps.sessions.beat(project.id, visitor, now, false) : null;
     if (session) {
       session.asked = true;
-      const lat = Number(hit.props?.lat), lon = Number(hit.props?.lon);
+      const lat = Number(hit.props?.lat), lon = Number(hit.props?.lon), acc = Number(hit.props?.acc);
       if (hit.name === SHARED && Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
-        session.exact = { lat: round3(lat), lon: round3(lon) };
+        session.exact = { lat: round4(lat), lon: round4(lon), acc: Number.isFinite(acc) && acc >= 0 ? Math.round(acc) : null };
         deps.streets.at(session.exact.lat, session.exact.lon);
       }
       deps.hub.publish(project.id, { t: "presence" });

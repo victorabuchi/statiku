@@ -98,20 +98,26 @@
   // Exact location, on sites that ask for it. Someone who already allowed it shares it without being asked again;
   // someone the browser has been told to refuse is never asked; anyone else sees a card a few seconds in, and only
   // "Share" brings up the browser's prompt. "Not now" lasts the visit, kept by Statiku's server, not in the browser.
+  // The first fix at once, then sharper ones as GPS or Wi-Fi settles, each sent only when it's at least twice as sure,
+  // for half a minute at most or until it's sure to within 20 metres.
   function locate() {
-    nav.geolocation.getCurrentPosition(function (p) {
-      send("_loc", { props: { lat: p.coords.latitude, lon: p.coords.longitude, acc: Math.round(p.coords.accuracy) } });
-    }, function () { send("_noloc"); }, { maximumAge: 6e5, timeout: 2e4 });
+    var best = 1 / 0, id, timer, stop = function () { nav.geolocation.clearWatch(id); clearTimeout(timer); };
+    id = nav.geolocation.watchPosition(function (p) {
+      var c = p.coords;
+      if (c.accuracy * 2 <= best) { best = c.accuracy; send("_loc", { props: { lat: c.latitude, lon: c.longitude, acc: Math.round(c.accuracy) } }); }
+      if (best <= 20) stop();
+    }, function () { if (best == 1 / 0) send("_noloc"); stop(); }, { enableHighAccuracy: true, maximumAge: 0, timeout: 2e4 });
+    timer = setTimeout(stop, 3e4);
   }
 
   var CARD = ".box{position:fixed;left:16px;bottom:16px;z-index:2147483647;max-width:320px;padding:16px;border-radius:14px;" +
     "background:#fff;color:#1d1d1f;box-shadow:0 10px 40px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.06);" +
     "font:14px/1.45 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;text-align:left;animation:in .25s ease}" +
-    "b{display:block;font-size:15px;margin-bottom:4px}p{margin:0 0 12px;color:#56565c}" +
+    "p{margin:0 0 14px;font-size:15px;font-weight:500}" +
     ".row{display:flex;gap:8px;justify-content:flex-end}" +
     "button{font:inherit;font-weight:600;border:0;border-radius:9px;padding:7px 14px;cursor:pointer;background:#ececf0;color:inherit}" +
     ".yes{background:#0071e3;color:#fff}@keyframes in{from{opacity:0;transform:translateY(8px)}}" +
-    "@media (prefers-color-scheme:dark){.box{background:#1d1d1f;color:#f5f5f7;box-shadow:0 10px 40px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.08)}p{color:#a1a1a6}button{background:#2c2c2e}}" +
+    "@media (prefers-color-scheme:dark){.box{background:#1d1d1f;color:#f5f5f7;box-shadow:0 10px 40px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.08)}button{background:#2c2c2e}}" +
     "@media (max-width:480px){.box{left:12px;right:12px;bottom:12px;max-width:none}}@media (prefers-reduced-motion:reduce){.box{animation:none}}";
 
   function ask(site) {
@@ -119,11 +125,11 @@
     var el = function (tag, text, cls) { var n = d.createElement(tag); if (text) n.textContent = text; if (cls) n.className = cls; return n; };
     var box = el("div", "", "box"), row = el("div", "", "row"), no = el("button", "Not now"), yes = el("button", "Share", "yes");
     box.setAttribute("role", "dialog");
-    box.setAttribute("aria-label", "Share your location?");
+    box.setAttribute("aria-label", site + " would like to access your location");
     no.onclick = function () { host.remove(); send("_noloc"); };
     yes.onclick = function () { host.remove(); locate(); };
     row.append(no, yes);
-    box.append(el("b", "Share your location?"), el("p", site + " would like to show where its visitors are on a live map. Your location is seen only while you're on the site, and is never stored."), row);
+    box.append(el("p", site + " would like to access your location"), row);
     root.append(el("style", CARD), box);
     d.body.append(host);
   }

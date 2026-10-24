@@ -1078,7 +1078,7 @@ async function livePage(key) {
       const where = dot.exact ? [dot.street ?? dot.point.area ?? "Shared location", dot.city].filter(Boolean).join(", ")
         : dot.city ? [dot.city, dot.region, countryName(dot.code)].filter(Boolean).join(", ") : dot.unplaced ? `${countryName(dot.code)}, city unknown` : countryName(dot.code);
       tip.replaceChildren(h("b", {}, `${flag(dot.code)} ${where}`),
-        h("span", { class: "muted", text: `${dot.v} ${dot.v === 1 ? "visitor" : "visitors"} now${dot.exact ? ", shared by them" : dot.city ? ", approximately" : ""}` }));
+        h("span", { class: "muted", text: `${dot.v} ${dot.v === 1 ? "visitor" : "visitors"} now${dot.exact ? `, shared by them${dot.point.acc != null ? `, to within ${int(dot.point.acc)} m` : ""}` : dot.city ? ", approximately" : ""}` }));
       tip.style.left = `${x}px`;
       tip.style.top = `${y}px`;
       tip.hidden = false;
@@ -1284,18 +1284,17 @@ async function siteSettingsPage(key) {
 
   // Exact location: off unless the owner turns it on, and then each visitor decides for themselves.
   const asking = h("input", { type: "checkbox", id: "s-location", checked: !!site.askLocation, disabled: !owner });
-  const policy = "If you choose to share your location when our site asks, we see roughly which street you're on, on a live map of the people on the site right now. We see it only while you're on the site, and it isn't stored. The street name is looked up from OpenStreetMap, which receives that point rounded to about 100 metres.";
+  const policy = "If you choose to share your location when our site asks, we see your address, as closely as your device can tell, on a live map of the people on the site right now. We see it only while you're on the site, and it isn't stored. The address is looked up from OpenStreetMap, which receives your location to about 10 metres.";
   const copyPolicy = h("button", { class: "btn copy", type: "button", onclick: () => copy(policy, copyPolicy) }, icon("copy", 14), "Copy");
   const saveLocation = h("button", {
     class: "btn primary", type: "button", text: "Save", hidden: !owner,
     onclick: () => saveSite({ askLocation: asking.checked }, saveLocation, asking.checked ? "Visitors will be asked to share their location" : "Visitors won't be asked any more"),
   });
   const locationCard = card("Exact location in the live view", h("div", { class: "form" },
-    h("p", { class: "muted", text: "The live view places visitors in their approximate city, from their IP address. To see the street someone is on, they have to share it themselves. With this on, visitors see this a few seconds after they arrive:" }),
-    h("div", { class: "ask-preview", "aria-hidden": "true" }, h("b", { text: "Share your location?" }),
-      h("p", { text: `${site.domains[0]} would like to show where its visitors are on a live map. Your location is seen only while you're on the site, and is never stored.` }),
+    h("p", { class: "muted", text: "The live view places visitors in their approximate city, from their IP address. To see someone's street and house number, they have to share their location themselves. With this on, visitors see this a few seconds after they arrive:" }),
+    h("div", { class: "ask-preview", "aria-hidden": "true" }, h("p", { text: `${site.domains[0]} would like to access your location` }),
       h("div", {}, h("span", { text: "Not now" }), h("span", { class: "yes", text: "Share" }))),
-    h("p", { class: "muted", text: "Only if they tap Share does their browser ask them, and only if they allow it there do they appear on their street in your live view, while they're on the site. Their location is never stored, and they aren't asked again during their visit. Expect most visitors to say no." }),
+    h("p", { class: "muted", text: "Only if they tap Share does their browser ask them, and only if they allow it there do they appear in your live view at their address, while they're on the site. The house number shows when their device is sure of it to within 25 metres, as phones usually are; otherwise the street. Their location is never stored, and they aren't asked again during their visit. Expect most visitors to say no." }),
     h("label", { class: "check", for: "s-location" }, asking, "Ask my visitors to share their location"),
     h("div", { class: "field" }, h("span", { style: { fontWeight: 550 }, text: "Add this to your privacy policy before you turn it on:" }), h("div", { class: "code-block", style: { fontFamily: "var(--font)", wordBreak: "normal" } }, policy, copyPolicy)),
     h("div", {}, saveLocation)), { id: "location" });

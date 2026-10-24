@@ -3,7 +3,7 @@
 // comes from the visits it holds in memory, so arrivals and departures show at once.
 import type pg from "pg";
 import type { Session } from "../ingest/sessions.ts";
-import type { Streets } from "../ingest/streets.ts";
+import { addressOf, type Street, type Streets } from "../ingest/streets.ts";
 
 export type Site = { id: string; key: string; name: string; domains: string[]; timezone: string; role: string; askLocation: boolean };
 export type Presence = (projectId: string) => Session[];
@@ -292,8 +292,8 @@ export async function live(pool: pg.Pool, site: Site, present: Session[], street
   };
   // Cities for the zoomed-in globe: each with a point and how many visitors are there now.
   const cities = new Map<string, { country: string | null; city: string; region: string | null; lat: number; lon: number; visitors: Set<string>; sharing: Set<string> }>();
-  // Shared points, for the globe at street level, with their street names once OpenStreetMap has answered.
-  const exact = new Map<string, { lat: number; lon: number; street: string | null; area: string | null; city: string | null; country: string | null; visitors: Set<string> }>();
+  // Shared points, for the globe at street level, with their addresses once OpenStreetMap has answered.
+  const exact = new Map<string, { lat: number; lon: number; acc: number | null; found: Street | null | undefined; city: string | null; country: string | null; visitors: Set<string> }>();
   for (const s of present) {
     const place = placeOf(s);
     if (place) {
@@ -304,18 +304,18 @@ export async function live(pool: pg.Pool, site: Site, present: Session[], street
     }
     if (s.exact) {
       const key = `${s.exact.lat},${s.exact.lon}`;
-      const street = streets.at(s.exact.lat, s.exact.lon);
-      if (!exact.has(key)) {
-        exact.set(key, { ...s.exact, street: street?.street ?? null, area: street?.area ?? null, city: street?.city ?? s.place?.city ?? null, country: countryOf(s), visitors: new Set() });
-      }
-      exact.get(key)!.visitors.add(s.visitor);
+      const { lat, lon, acc } = s.exact, found = streets.at(lat, lon);
+      if (!exact.has(key)) exact.set(key, { lat, lon, acc, found, city: found?.city ?? s.place?.city ?? null, country: countryOf(s), visitors: new Set() });
+      const point = exact.get(key)!;
+      if (acc != null && (point.acc == null || acc < point.acc)) point.acc = acc;
+      point.visitors.add(s.visitor);
     }
   }
   return {
     visitors: new Set(present.map((s) => s.visitor)).size,
     countries: countBy(present, countryOf),
     cities: [...cities.values()].map(({ visitors, sharing, ...c }) => ({ ...c, v: visitors.size, exact: sharing.size })).sort((a, b) => b.v - a.v || a.city.localeCompare(b.city)),
-    exact: [...exact.values()].map(({ visitors, ...p }) => ({ ...p, v: visitors.size })),
+    exact: [...exact.values()].map(({ visitors, found, ...p }) => ({ ...p, street: addressOf(found, p.acc), area: found?.area ?? null, v: visitors.size })),
     asksLocation: site.askLocation,
     pages: countBy(present, (s) => s.exitPath),
     sources: countBy(present, (s) => s.source),

@@ -31,8 +31,8 @@ before(async () => {
   // With the city database (npm run geo), live visitors get a city too; the tests check it's never stored.
   app = await createApp({
     databaseUrl: url!, trustProxy: true, geoPath: new URL("../data/country.mmdb", import.meta.url), cityPath: CITIES, flushMs: 60_000,
-    // Instead of OpenStreetMap: every shared point is on the same street in Kuopio.
-    geocode: async () => ({ street: "Särkiniementie", area: "Saaristokaupunki", city: "Kuopio", region: "North Savo", country: "FI" }),
+    // Instead of OpenStreetMap: every shared point is 8 metres from the same house in Kuopio.
+    geocode: async () => ({ street: "Särkiniementie", number: "30", numberMetres: 8, area: "Saaristokaupunki", city: "Kuopio", region: "North Savo", country: "FI" }),
   });
   await new Promise<void>((resolve) => app.server.listen(0, resolve));
   base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
@@ -465,16 +465,26 @@ test("exact location: only on sites that ask, only from visitors who share it, n
   await share("91.152.40.32", "_noloc");
   assert.equal((await (await config("91.152.40.32")).json()).prompt, false);
 
-  // Shared: the visitor is on their street, in that street's city, whatever the IP address suggested.
+  // Shared: the visitor is at their address, in that street's city, whatever the IP address suggested.
   await visit(key, "https://where.example/", "91.152.40.33");
   await share("91.152.40.33", "_loc", { lat: 62.89237, lon: 27.67821, acc: 12 });
   for (let i = 0; i < 20 && !(await live()).exact[0]?.street; i++) await new Promise((r) => setTimeout(r, 50));
   const now = await live();
-  assert.deepEqual(now.exact, [{ lat: 62.892, lon: 27.678, street: "Särkiniementie", area: "Saaristokaupunki", city: "Kuopio", country: "FI", v: 1 }]);
+  assert.deepEqual(now.exact, [{ lat: 62.8924, lon: 27.6782, acc: 12, city: "Kuopio", country: "FI", street: "Särkiniementie 30", area: "Saaristokaupunki", v: 1 }]);
   const kuopio = now.cities.find((c: any) => c.city === "Kuopio");
   assert.equal(kuopio.exact, 1);
   assert.equal(kuopio.region, "North Savo");
   assert.equal((await (await config("91.152.40.33")).json()).prompt, false);
+
+  // Only as exact as the device was sure: the street with no number at 60 metres, only the neighbourhood at 400.
+  await visit(key, "https://where.example/", "91.152.40.34");
+  await share("91.152.40.34", "_loc", { lat: 62.8931, lon: 27.6802, acc: 60 });
+  await visit(key, "https://where.example/", "91.152.40.35");
+  await share("91.152.40.35", "_loc", { lat: 62.8951, lon: 27.6702, acc: 400 });
+  const found = (exact: any[]) => exact.length === 3 && exact.every((p) => p.area);
+  for (let i = 0; i < 80 && !found((await live()).exact); i++) await new Promise((r) => setTimeout(r, 50));
+  const said = Object.fromEntries((await live()).exact.map((p: any) => [p.acc, p.street]));
+  assert.deepEqual(said, { 12: "Särkiniementie 30", 60: "Särkiniementie", 400: null });
 
   // Nothing of it is stored: not the point, not the street, not as an event.
   await app.writer.flush();
