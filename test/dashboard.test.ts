@@ -951,9 +951,9 @@ test("Statiku's own pages: the landing page for anyone not signed in, the app fo
   const landing = await fetch(`${base}/`);
   const html = await landing.text();
   assert.match(html, /See who's on your site <em>right now<\/em>/);
-  // The prices come from the plans billing sells, and every file the page names is served.
-  assert.match(html, /data-month="€19" data-year="€190"/);
+  // Every file the page names is served. Prices have a page of their own, from the plans billing sells.
   for (const path of html.match(/\/site\/[\w./-]+\?v=[\w-]+/g)!) assert.equal((await fetch(base + path)).status, 200, path);
+  assert.match(await (await fetch(`${base}/pricing`)).text(), /data-month="€19" data-year="€190"/);
   const film = await (await fetch(`${base}/site/film/film.json`)).json();
   assert.equal((await fetch(`${base}/site/film/${film.desktop.frames["live-world"]}`)).headers.get("content-type"), "image/webp");
   for (const page of ["/terms", "/privacy", "/dpa"]) assert.equal((await fetch(base + page)).status, 200, page);

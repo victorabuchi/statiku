@@ -2,7 +2,7 @@
 // numbers. The pages are one app (client/), bundled when the service starts; everything it shows comes from /api.
 // Statiku's own pages (site/) are served here too: the landing page at / for anyone not signed in, and the legal pages.
 //   GET    /  /login  /signup  /join/…  /settings  /sites/…    the app
-//   GET    /  /terms  /privacy  /dpa  /site/…                  Statiku's own pages, when not signed in
+//   GET    /  /pricing  /terms  /privacy  /dpa  /site/…        Statiku's own pages (/ only when not signed in)
 //   POST   /api/signup  /api/login  /api/logout
 //   POST   /api/password/forgot { email }    GET /api/password/reset/:token   POST { password }
 //   GET    /api/me              PATCH { name?, email? }   DELETE { password }
@@ -213,11 +213,12 @@ function siteBundle(asset: (body: string | Uint8Array, type: string) => Asset, f
     <span class="events">Up to ${p.events.toLocaleString("en-US")} events a month</span>
     <a class="btn ${i === 1 ? "btn-primary" : "btn-light"}" href="/signup">Start free</a></article>`).join("");
   const fill = (html: string) => html
+    .replace("{{NAV}}", read("_nav.html")).replace("{{FOOTER}}", read("_footer.html"))
     .replaceAll("{{V_CSS}}", files["/site/site.css"].hash).replaceAll("{{V_JS}}", files["/site/site.js"].hash)
     .replaceAll("{{V_FILM}}", files["/site/film.js"].hash).replaceAll("{{V_SCENES}}", files["/site/film-scenes.js"].hash)
     .replaceAll("{{V_FILMDATA}}", filmData.hash).replaceAll("{{FONT}}", `/fonts/latin.woff2?v=${fonts["/fonts/latin.woff2"].hash}`)
     .replace("{{BUILDERS}}", builders).replace("{{SOURCES}}", sources).replace("{{PLANS}}", plans).replace("{{YEAR}}", String(new Date().getFullYear()));
-  const pages = Object.fromEntries((["index", "terms", "privacy", "dpa"] as const).map((name) => [name, asset(fill(read(`${name}.html`)), "text/html; charset=utf-8")]));
+  const pages = Object.fromEntries((["index", "pricing", "terms", "privacy", "dpa"] as const).map((name) => [name, asset(fill(read(`${name}.html`)), "text/html; charset=utf-8")]));
   return { files, pages };
 }
 
@@ -877,8 +878,8 @@ export async function createDashboard(options: {
       if (path === "/geo/countries-50m.json") return sendAsset(r, assets.map, "public, max-age=604800");
       if (Object.hasOwn(assets.fonts, path)) return sendAsset(r, assets.fonts[path as keyof typeof assets.fonts], "public, max-age=31536000, immutable");
       if (Object.hasOwn(assets.site.files, path)) return sendAsset(r, assets.site.files[path], "public, max-age=31536000, immutable");
-      const legal = path.match(/^\/(terms|privacy|dpa)$/);
-      if (legal) return sendAsset(r, assets.site.pages[legal[1]], "no-cache");
+      const own = path.match(/^\/(pricing|terms|privacy|dpa)$/);
+      if (own) return sendAsset(r, assets.site.pages[own[1]], "no-cache");
       // The landing page for anyone not signed in; the app for everyone who is.
       if (path === "/" && !(await userOf(pool, req))) return sendAsset(r, assets.site.pages.index, "no-cache");
       // Every other address is a page of the app, which works out what to show.

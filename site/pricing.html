@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pricing · Statiku</title>
+<meta name="description" content="Statiku's plans: every feature on each, priced by events a month, from €9. Thirty days free, no card needed.">
+<meta property="og:title" content="Statiku pricing">
+<meta property="og:description" content="Every feature on every plan, priced by events a month. Thirty days free.">
+<meta name="theme-color" content="#08110f">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="{{FONT}}" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site/site.css?v={{V_CSS}}">
+</head>
+<body>
+{{NAV}}
+
+<section class="page-hero"><div class="aurora" aria-hidden="true"></div><div class="wrap">
+  <p class="eyebrow">Pricing</p>
+  <h1>Every feature on every plan.</h1>
+  <p class="lede">Choose by how many events your sites and apps send in a month. Start with 30 days free, no card needed, and change or cancel whenever you like.</p>
+  <div class="period" role="tablist" aria-label="Billing period"><button type="button" role="tab" aria-selected="true" data-period="month">Monthly</button><button type="button" role="tab" aria-selected="false" data-period="year">Yearly <small>2 months free</small></button></div>
+</div></section>
+
+<section class="section plans-section"><div class="wrap">
+  <div class="plans">{{PLANS}}</div>
+  <p class="more">More than 10 million events a month? <a href="mailto:contact@victorabuchi.com?subject=Statiku%20for%20a%20bigger%20site">Tell us about your site</a> and we'll make a plan for it.</p>
+</div></section>
+
+<section class="section alt"><div class="wrap">
+  <div class="center"><span class="kicker">On every plan</span><h2>Nothing held back for a bigger plan.</h2></div>
+  <ul class="includes">
+    <li><b>The live globe</b><span>Every visitor as they arrive, down to their city, or their street when they choose to share it.</span></li>
+    <li><b>Every report</b><span>Sources, pages, countries, devices, campaigns and events, by any period, filtered by anything, exported.</span></li>
+    <li><b>From the visit to the sale</b><span>Downloads, sign-ups, installs, trials and licences, by the source that brought them.</span></li>
+    <li><b>Your history</b><span>Imports from Google Analytics, Plausible, GitHub releases and files from other tools.</span></li>
+    <li><b>Alerts</b><span>An email when a site goes quiet or down, and when a rush of visitors arrives.</span></li>
+    <li><b>Apps</b><span>The Swift SDK for the Mac and iOS apps you sell yourself.</span></li>
+    <li><b>Up to 50 websites</b><span>And your whole team, invited with a link.</span></li>
+    <li><b>No cookie banner</b><span>No cookies, no stored IP addresses, data kept in the EU.</span></li>
+  </ul>
+</div></section>
+
+<section class="section" id="faq"><div class="wrap narrow">
+  <div class="center"><span class="kicker">Questions</span><h2>About paying.</h2></div>
+  <details><summary>What counts as an event?</summary><p>A page view, or anything else your sites and apps send: a download, a sign-up, an app's daily check-in. The check-ins that keep the live view current don't count.</p></details>
+  <details><summary>What if I send more events than my plan has?</summary><p>Statiku keeps counting, and asks you to move to the next plan. Nothing stops, and nothing is lost.</p></details>
+  <details><summary>What happens when the trial ends?</summary><p>Choose a plan to keep seeing your reports. If you don't, Statiku still counts your visitors, and everything is there when you do.</p></details>
+  <details><summary>Can I change plans or cancel?</summary><p>Yes, whenever you like, from the Plan page in Statiku. A cancelled plan stays active until the end of the period you paid for.</p></details>
+  <details><summary>Who handles the payment?</summary><p>Polar, as the merchant of record: it takes the card, adds VAT where it applies and sends the invoices. Statiku never sees your card.</p></details>
+  <details><summary>Is there a discount for paying yearly?</summary><p>Yes: a year costs ten months.</p></details>
+</div></section>
+
+<section class="final"><div class="aurora" aria-hidden="true"></div><div class="wrap">
+  <h2>Try everything for 30 days.</h2><p>Add your site, watch your visitors arrive, and choose a plan only if it's worth it to you.</p>
+  <div class="cta"><a class="btn btn-primary" href="/signup">Start your free trial</a><a class="btn btn-ghost" href="/#showcase">See it work</a></div>
+</div></section>
+
+{{FOOTER}}
+<script src="/site/site.js?v={{V_JS}}"></script>
+</body>
+</html>
