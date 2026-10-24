@@ -163,6 +163,10 @@ test("adding a website, and only its own account sees it", { skip }, async () =>
   assert.equal(name, "example-shop.com");
   assert.equal(timezone, "Europe/Helsinki");
   assert.equal((await owner("/api/sites", { method: "POST", body: { address: "not a website" } })).status, 400);
+  // The same address again would split its visits between two sites.
+  const twice = await owner("/api/sites", { method: "POST", body: { address: "example-shop.com" } });
+  assert.equal(twice.status, 409);
+  assert.match(twice.data.error, /already one of your websites/);
 
   const listed = await owner("/api/sites");
   assert.deepEqual(listed.data.sites.map((s: any) => s.key), [key]);

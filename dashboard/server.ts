@@ -763,6 +763,9 @@ export async function createDashboard(options: {
       if (!domain) throw new HttpError(400, "Enter your website's address, such as example.com.");
       const own = await ownWorkspace(user.id);
       if (own.sites >= MAX_SITES) throw new HttpError(400, `An account can have up to ${MAX_SITES} sites for now.`);
+      // The same address twice would split its visits between two sites.
+      const { rows: [twice] } = await pool.query("select name from projects where workspace_id = $1 and $2 = any(domains)", [own.id, domain]);
+      if (twice) throw new HttpError(409, `${domain} is already one of your websites (${twice.name}). Open it from Websites.`);
       const site = await createProject(pool, text(body.name, 80) || domain, [domain], zoneOf(body.timezone), own.id);
       void refreshIcon(site);
       return json(res, 201, { site: { key: site.key, name: site.name, domains: site.domains, timezone: site.timezone } });
