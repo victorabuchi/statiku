@@ -56,7 +56,9 @@ Notchlight (notchlight.com) is the first customer.
 - **Right now:** the visitors seen in the last 90 seconds who haven't closed the page, held in the ingest process's
   memory with the open visits and pushed to dashboards over server-sent events. With more than one instance this
   moves to a shared store.
-- **Country:** looked up from the IP in memory. No city, no region.
+- **Location:** the country is looked up from the IP in memory and stored with the visit. For the live globe only,
+  the approximate city (its centre, from DB-IP's city database) is looked up too and held in memory with the open
+  visit; it is never written to the database. No region, street or coordinates of the visitor themselves.
 - **Bots:** dropped by user agent; automated browsers are skipped by the script.
 - **Opting out:** site owners set `localStorage.statiku_ignore = "1"` in their own browser; the app SDK has an opt-out
   switch, which also forgets the install ID.

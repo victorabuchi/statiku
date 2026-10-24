@@ -24,8 +24,8 @@ Notchlight ([notchlight.com](https://notchlight.com)) is the first customer.
 - [x] Accounts and the dashboard, served by the same service: sign up, add a website by its address with steps for
       WordPress, Shopify, Wix, Squarespace, Webflow, Framer and Tag Manager, and an installation check; analytics
       against the previous period, filters on any breakdown, custom periods and CSV export; sources, pages, locations,
-      devices, conversions, events and campaigns; a live view with a globe that changes the moment someone arrives or
-      leaves; the app's installs, versions and licences; each site's own icon; account settings, a profile photo and
+      devices, conversions, events and campaigns, by hour, day, week, month or year, back to the first visit; a live
+      view with a globe that changes the moment someone arrives or leaves and zooms in to countries and cities; the app's installs, versions and licences; each site's own icon; account settings, a profile photo and
       team invitations by link
 - [ ] Revenue from Polar and Stripe webhooks, credited to the source of the visit
 - [ ] Email (verification, password reset, sending invitations) and plans
@@ -38,6 +38,8 @@ The full plan, the stack and the data model are in [docs/PLAN.md](docs/PLAN.md).
 - **Live, not tracked:** while a page is in view, the script checks in every 30 seconds (for up to half an hour) and
   says when the page closes. That keeps the live view and visit lengths right; check-ins are never stored as events.
 - **No stored IPs:** an IP is used in memory to look up the country and build the visitor hash, then dropped.
+- **Cities only while live:** the live globe places visitors in their approximate city while they're on the site.
+  The city is held in memory and never stored; the reports keep only the country.
 - **Visitors can't be traced:** a visitor is a hash of the project, IP and browser, mixed with a secret that changes
   every day and is deleted after two days.
 - **Apps send no personal data:** an install is a random ID kept in the app's preferences, with no account, name or
@@ -105,7 +107,7 @@ Needs Node 24 or later and Postgres.
 cp .env.example .env
 createdb statiku && createdb statiku_test
 npm install
-npm run geo          # DB-IP's country database, into data/
+npm run geo          # DB-IP's country and city databases, into data/ (the city one is 130 MB, for the live globe)
 npm run migrate
 npm run dev          # the service and the dashboard, http://localhost:8787
 ```
@@ -139,7 +141,7 @@ With the ingest service running, the Swift package's live test sends a real inst
 | `tracker/` | The website script and its build |
 | `sdk/swift/` | The Swift package for Mac, iPhone and iPad apps |
 | `db/` | Migrations and the migration runner |
-| `scripts/` | Projects, the text report, the country database, the globe's country points and the browser test |
+| `scripts/` | Projects, the text report, the location databases, the globe's country points and the browser test |
 | `test/` | Unit and integration tests |
 
 ## Deploy
@@ -148,4 +150,4 @@ With the ingest service running, the Swift package's live test sends a real inst
 deploy, and the dashboard is at the service's own address. A project made in the service's Shell before accounts
 existed goes into an account with `npm run project -- move <key> <email>`, after that person signs up.
 
-Country data: [IP Geolocation by DB-IP](https://db-ip.com), CC BY 4.0.
+Location data: [IP Geolocation by DB-IP](https://db-ip.com), CC BY 4.0.
