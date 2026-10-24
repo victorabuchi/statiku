@@ -2,6 +2,7 @@
 // After a restart, a visitor's open session is found again in the database.
 import { randomBytes } from "node:crypto";
 import type pg from "pg";
+import type { Place } from "./geo.ts";
 import type { Source } from "./source.ts";
 
 export const SESSION_GAP = 30 * 60_000;
@@ -25,6 +26,8 @@ export type Session = Source & {
   dirty: boolean;
   // The page was closed (kept in memory only; the next event or check-in brings the visitor back).
   left?: boolean;
+  // The approximate city, for the live globe. Memory only: it isn't one of the columns written.
+  place?: Place | null;
 };
 
 // What a new session starts with: the first event's source, page and visitor details.

@@ -1,6 +1,7 @@
 // The dashboard's API against a real Postgres: accounts, sites, who may see them, and their numbers. Needs
 // TEST_DATABASE_URL (createdb statiku_test); the test empties that database first.
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import pg from "pg";
@@ -13,6 +14,7 @@ import { createApp } from "../ingest/server.ts";
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? "set TEST_DATABASE_URL to run" : !/test/.test(url) ? "TEST_DATABASE_URL must name a test database" : false;
 const SAFARI = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15";
+const CITIES = existsSync(new URL("../data/city.mmdb", import.meta.url)) ? new URL("../data/city.mmdb", import.meta.url) : undefined;
 
 let app: Awaited<ReturnType<typeof createApp>>;
 let pool: pg.Pool;
@@ -26,7 +28,8 @@ before(async () => {
   await admin.end();
   await migrate(url!, () => {});
   pool = new pg.Pool({ connectionString: url });
-  app = await createApp({ databaseUrl: url!, trustProxy: true, geoPath: new URL("../data/country.mmdb", import.meta.url), flushMs: 60_000 });
+  // With the city database (npm run geo), live visitors get a city too; the tests check it's never stored.
+  app = await createApp({ databaseUrl: url!, trustProxy: true, geoPath: new URL("../data/country.mmdb", import.meta.url), cityPath: CITIES, flushMs: 60_000 });
   await new Promise<void>((resolve) => app.server.listen(0, resolve));
   base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
 });
@@ -237,6 +240,8 @@ test("check-ins keep a visitor live and time the visit; closing the page removes
   await visit(key, "https://presence.example/pricing", "141.30.1.9");
   assert.equal((await live()).visitors, 2);
   assert.deepEqual((await live()).pages.map((p: any) => p.label).sort(), ["/", "/pricing"]);
+  // Each with its city, for the globe, when the city database is there.
+  if (CITIES) assert.deepEqual((await live()).cities.map((c: any) => c.country).sort(), ["DE", "FI"]);
   // Closing the page: gone at once.
   await visit(key, "https://presence.example/pricing", "141.30.1.9", "_l");
   assert.deepEqual((await live()).countries, [{ label: "FI", v: 1 }]);
@@ -253,6 +258,12 @@ test("check-ins keep a visitor live and time the visit; closing the page removes
   assert.deepEqual(names.map((n) => n.name), ["pageview", "pageview"]);
   const { rows: [usage] } = await pool.query("select sum(events)::int as n from usage_daily u join projects p on p.id = u.project_id where p.key = $1", [key]);
   assert.equal(usage.n, 2);
+  // The city lives only in memory: no table holds it.
+  if (CITIES) {
+    const city = (await live()).cities[0].city;
+    const { rows: tables } = await pool.query("select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE'");
+    for (const { table_name } of tables) assert.ok(!JSON.stringify((await pool.query(`select * from ${table_name}`)).rows).includes(city), `${city} in ${table_name}`);
+  }
 });
 
 test("the live stream pushes each event the moment it's collected", { skip }, async () => {
@@ -389,4 +400,33 @@ test("images are known by their bytes, not by what a server says", async () => {
   assert.equal(imageType(Buffer.from('<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"></svg>')), "image/svg+xml");
   assert.equal(imageType(Buffer.from("<!doctype html><html>")), null);
   assert.equal(await fetchIcon("localhost"), null);
+});
+
+test("all time, and a chart by hour, day, week, month or year", { skip }, async () => {
+  const owner = await signUp("alltime@example.com");
+  const { key } = (await owner("/api/sites", { method: "POST", body: { address: "alltime.example", timezone: "UTC" } })).data.site;
+  await visit(key, "https://alltime.example/", "193.166.3.21");
+  await app.writer.flush();
+  const stats = async (q: string) => (await owner(`/api/sites/${key}/stats?${q}`)).data;
+  const all = await stats("range=all");
+  assert.equal(all.range.id, "all");
+  assert.equal(new Date(all.range.from).toISOString().slice(0, 10), new Date().toISOString().slice(0, 10));
+  assert.equal(all.range.unit, "hour");
+  assert.equal(all.totals.visitors, 1);
+  assert.deepEqual(all.previousSeries, []);
+  assert.equal((await stats("range=d30&by=week")).range.unit, "week");
+  assert.equal((await stats("range=m12&by=year")).range.unit, "year");
+  // A year by the hour would be thousands of points: the period's own grouping instead.
+  assert.equal((await stats("range=m12&by=hour")).range.unit, "month");
+  assert.equal((await stats("range=d30&by=fortnight")).range.unit, "day");
+});
+
+test("a visitor's city, from the city database", { skip: !CITIES && "run npm run geo for the city database" }, async () => {
+  const { Geo } = await import("../ingest/geo.ts");
+  const geo = new Geo(new URL("../data/country.mmdb", import.meta.url), CITIES);
+  const espoo = geo.place("193.166.3.2");
+  assert.equal(geo.country("193.166.3.2"), "FI");
+  assert.ok(espoo && espoo.city && Math.abs(espoo.lat - 60.2) < 1 && Math.abs(espoo.lon - 24.7) < 1, JSON.stringify(espoo));
+  assert.ok(!/\(/.test(geo.place("141.30.1.1")?.city ?? ""), "districts are left off");
+  assert.equal(new Geo(new URL("../data/country.mmdb", import.meta.url)).place("193.166.3.2"), null);
 });

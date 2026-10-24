@@ -11,10 +11,11 @@
 //   GET    /api/sites/:key      PATCH { name?, domains?, timezone? }   DELETE { confirm: domain }
 //   GET    /api/sites/:key/icon    the site's own icon
 //   POST   /api/sites/:key/check   is the tracking code on the site?
-//   GET    /api/sites/:key/stats?range=&from=&to=&source=&country=&device=&browser=&os=&page=
+//   GET    /api/sites/:key/stats?range=&from=&to=&by=&source=&country=&device=&browser=&os=&page=
 //   GET    /api/sites/:key/live    who's on it right now        GET /api/sites/:key/stream   the same, pushed
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { gzipSync } from "node:zlib";
 import { build } from "esbuild";
@@ -126,11 +127,13 @@ async function bundle() {
   const js = asset(outputFiles[0].contents, "text/javascript; charset=utf-8");
   const css = asset(readFileSync(new URL("app.css", dir)), "text/css; charset=utf-8");
   const icon = asset(readFileSync(new URL("icon.svg", dir)), "image/svg+xml");
+  // The detailed map the globe switches to when zoomed in, loaded only then.
+  const map = asset(readFileSync(createRequire(import.meta.url).resolve("world-atlas/countries-50m.json")), "application/json");
   const html = asset(
     readFileSync(new URL("index.html", dir), "utf8").replace("/app.js", `/app.js?v=${js.hash}`).replace("/app.css", `/app.css?v=${css.hash}`),
     "text/html; charset=utf-8",
   );
-  return { js, css, icon, html };
+  return { js, css, icon, html, map };
 }
 
 export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (key: string) => void; presence: Presence; hub: Hub }) {
@@ -423,7 +426,7 @@ export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (
       const range = url.searchParams.get("range") ?? "d30";
       const filters = Object.fromEntries(FILTERS.map((f) => [f, text(url.searchParams.get(f), 300) || null])) as Filters;
       return json(res, 200, await stats(pool, site, RANGE_IDS.includes(range) ? range : "d30", filters, {
-        from: url.searchParams.get("from"), to: url.searchParams.get("to"),
+        from: url.searchParams.get("from"), to: url.searchParams.get("to"), by: url.searchParams.get("by"),
       }));
     }
     if (action === "/live" && method === "GET") return json(res, 200, await live(pool, site, presence(site.id)));
@@ -451,6 +454,7 @@ export async function createDashboard(options: { pool: pg.Pool; onSiteChanged: (
       if (path === "/app.js") return sendAsset(r, assets.js, "public, max-age=31536000, immutable");
       if (path === "/app.css") return sendAsset(r, assets.css, "public, max-age=31536000, immutable");
       if (path === "/favicon.svg") return sendAsset(r, assets.icon, "public, max-age=86400");
+      if (path === "/geo/countries-50m.json") return sendAsset(r, assets.map, "public, max-age=604800");
       // Every other address is a page of the app, which works out what to show.
       return sendAsset(r, assets.html, "no-cache");
     } catch (e) {

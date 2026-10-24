@@ -1,6 +1,7 @@
 // Writes dashboard/client/countries.json: for each country code, a point on its largest landmass where the live
-// globe puts that country's visitors, and the map's numeric country ids as codes. From world-atlas (Natural Earth,
-// public domain). Run after updating world-atlas: node scripts/countries.ts
+// globe puts that country's visitors, and the maps' numeric country ids as codes (the detailed map has every id the
+// coarse one has). From world-atlas (Natural Earth, public domain). Run after updating world-atlas:
+// node scripts/countries.ts
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { geoArea, geoCentroid } from "d3-geo";
@@ -16,21 +17,16 @@ const codeOf = (f: { id?: string; properties: { name: string } }) =>
   (f.id && countries.numericToAlpha2(f.id)) || UNNUMBERED[f.properties.name] || null;
 
 const points: Record<string, [number, number]> = {};
+const ids: Record<string, string> = {};
 const detailed = read("countries-50m.json");
 for (const f of (feature(detailed, detailed.objects.countries) as any).features) {
   const code = codeOf(f);
+  if (code) ids[f.id ?? f.properties.name] = code;
   if (!code || !f.geometry) continue;
   const parts = f.geometry.type === "MultiPolygon" ? f.geometry.coordinates.map((coordinates: unknown) => ({ type: "Polygon", coordinates })) : [f.geometry];
   const largest = parts.reduce((a: any, b: any) => (geoArea(b) > geoArea(a) ? b : a));
   const [lon, lat] = geoCentroid(largest);
   points[code] = [Math.round(lon * 100) / 100, Math.round(lat * 100) / 100];
-}
-
-const map = read("countries-110m.json");
-const ids: Record<string, string> = {};
-for (const f of (feature(map, map.objects.countries) as any).features) {
-  const code = codeOf(f);
-  if (code) ids[f.id ?? f.properties.name] = code;
 }
 
 const out = new URL("../dashboard/client/countries.json", import.meta.url);

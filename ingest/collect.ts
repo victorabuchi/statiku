@@ -97,7 +97,11 @@ export async function collect(deps: Deps, body: string, ua: string, ip: string, 
   const salt = await deps.salts.forDay(now);
   const visitor = hash63(salt, project.id, ip, ua);
   if (hit.name === BEAT || hit.name === GONE) {
-    if (await deps.sessions.beat(project.id, visitor, now, hit.name === GONE)) deps.hub.publish(project.id, { t: "presence" });
+    const beating = await deps.sessions.beat(project.id, visitor, now, hit.name === GONE);
+    if (beating) {
+      if (beating.place === undefined) beating.place = deps.geo.place(ip);
+      deps.hub.publish(project.id, { t: "presence" });
+    }
     return { status: 202, message: "ok" };
   }
   const country = deps.geo.country(ip);
@@ -110,6 +114,8 @@ export async function collect(deps: Deps, body: string, ua: string, ip: string, 
     country,
     ...agent,
   }));
+  // The city for the live globe, looked up once a visit (again after a restart, as it's never saved).
+  if (session.place === undefined) session.place = deps.geo.place(ip);
 
   deps.writer.add({
     projectId: project.id,

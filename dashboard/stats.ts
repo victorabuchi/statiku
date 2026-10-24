@@ -26,7 +26,11 @@ const RANGES: Record<string, { from: string; to: string; length: string; unit: "
   d90: { from: "date_trunc('day', now() at time zone $1) - interval '89 days'", to: "now()", length: "90 days", unit: "day" },
   m12: { from: "date_trunc('month', now() at time zone $1) - interval '11 months'", to: "now()", length: "12 months", unit: "month" },
 };
-export const RANGE_IDS = [...Object.keys(RANGES), "custom"];
+export const RANGE_IDS = [...Object.keys(RANGES), "custom", "all"];
+
+// The buckets a chart can be drawn in. A request for one that would make more than 1,500 points gets the period's own.
+export const UNITS = ["hour", "day", "week", "month", "year"] as const;
+const UNIT_MS: Record<string, number> = { hour: 3600e3, day: 86400e3, week: 7 * 86400e3, month: 30 * 86400e3, year: 365 * 86400e3 };
 
 // Every query takes the same parameters: site, from, to, then each filter or null: source ($4), country ($5),
 // device ($6), browser ($7), system ($8) and page ($9). Installs have only a source and a country to filter by.
@@ -103,8 +107,20 @@ export async function siteFor(pool: pg.Pool, userId: string, key: string): Promi
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 // A period's bounds and the previous period of the same length. A custom period runs from the start of its first
-// day to the end of its last (or now, if that's sooner), by hour for one day, by month past six months.
-async function bounds(pool: pg.Pool, tz: string, rangeId: string, custom: { from?: string | null; to?: string | null }) {
+// day to the end of its last (or now, if that's sooner), by hour for one day, by month past six months. All time runs
+// from the day of the site's first visit, and has nothing before it to compare with.
+async function bounds(pool: pg.Pool, siteId: string, tz: string, rangeId: string, custom: { from?: string | null; to?: string | null }) {
+  if (rangeId === "all") {
+    const { rows: [b] } = await pool.query(
+      `select f at time zone $1 as "from", now() as "to"
+         from (select date_trunc('day', coalesce((select min(ts) from events where project_id = $2),
+                                                 (select created_at from projects where id = $2)) at time zone $1) as f) x`,
+      [tz, siteId],
+    );
+    const days = (b.to - b.from) / 86400e3;
+    const unit = days <= 2 ? "hour" : days <= 180 ? "day" : days <= 730 ? "week" : "month";
+    return { id: "all", unit, from: b.from, to: b.to, prevFrom: b.from, prevTo: b.from };
+  }
   if (rangeId === "custom" && DAY.test(custom.from ?? "") && DAY.test(custom.to ?? "")) {
     const { rows: [b] } = await pool.query(
       `select f at time zone $1 as "from", least((t + interval '1 day') at time zone $1, now()) as "to", n,
@@ -129,9 +145,11 @@ async function bounds(pool: pg.Pool, tz: string, rangeId: string, custom: { from
   return { id, unit: range.unit, from: b.from, to: b.to, prevFrom: b.prev_from, prevTo: b.prev_to };
 }
 
-export async function stats(pool: pg.Pool, site: Site, rangeId: string, filters: Filters, custom: { from?: string | null; to?: string | null } = {}) {
+export async function stats(pool: pg.Pool, site: Site, rangeId: string, filters: Filters, custom: { from?: string | null; to?: string | null; by?: string | null } = {}) {
   const tz = site.timezone;
-  const b = await bounds(pool, tz, rangeId, custom);
+  const b = await bounds(pool, site.id, tz, rangeId, custom);
+  const asked = custom.by as (typeof UNITS)[number] | undefined;
+  if (asked && UNITS.includes(asked) && (b.to.getTime() - b.from.getTime()) / UNIT_MS[asked] <= 1500) b.unit = asked;
   const narrow = FILTERS.map((f) => filters[f]);
   const p = [site.id, b.from, b.to, ...narrow];
   const prev = [site.id, b.prevFrom, b.prevTo, ...narrow];
@@ -261,9 +279,18 @@ export async function live(pool: pg.Pool, site: Site, present: Session[]) {
     q(`select ts, name, path, country, source, device, browser, os, install_id is not null as app
          from events where project_id = $1 and ts > now() - interval '30 minutes' order by ts desc limit 25`),
   ]);
+  // Cities for the zoomed-in globe: each with its centre and how many visitors are there now.
+  const cities = new Map<string, { country: string | null; city: string; lat: number; lon: number; visitors: Set<string> }>();
+  for (const s of present) {
+    if (!s.place) continue;
+    const key = `${s.country}|${s.place.city}`;
+    if (!cities.has(key)) cities.set(key, { country: s.country, ...s.place, visitors: new Set() });
+    cities.get(key)!.visitors.add(s.visitor);
+  }
   return {
     visitors: new Set(present.map((s) => s.visitor)).size,
     countries: countBy(present, (s) => s.country),
+    cities: [...cities.values()].map(({ visitors, ...c }) => ({ ...c, v: visitors.size })).sort((a, b) => b.v - a.v || a.city.localeCompare(b.city)),
     pages: countBy(present, (s) => s.exitPath),
     sources: countBy(present, (s) => s.source),
     devices: countBy(present, (s) => s.device),

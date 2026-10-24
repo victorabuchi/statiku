@@ -23,7 +23,10 @@ function h(tag, props, ...kids) {
 }
 
 const ICONS = {
-  websites: '<rect x="2.75" y="3.75" width="14.5" height="12.5" rx="2"/><path d="M2.75 7.5h14.5"/><path d="M5.25 5.6h.01M7.25 5.6h.01M9.25 5.6h.01" stroke-width="1.9"/>',
+  // Three panels side by side, the outer two turned towards us: every website at once.
+  websites: '<path d="M2.6 5.3a.8.8 0 0 1 1-.77l2.6.72a.8.8 0 0 1 .58.77v7.96a.8.8 0 0 1-.58.77l-2.6.72a.8.8 0 0 1-1-.77Z"/><rect x="8.1" y="6.2" width="3.8" height="7.6" rx=".9"/><path d="M17.4 5.3a.8.8 0 0 0-1-.77l-2.6.72a.8.8 0 0 0-.58.77v7.96a.8.8 0 0 0 .58.77l2.6.72a.8.8 0 0 0 1-.77Z"/>',
+  minus: '<path d="M4.5 10h11"/>',
+  globe: '<circle cx="10" cy="10" r="7"/><path d="M3 10h14M10 3c1.9 2.1 2.9 4.4 2.9 7s-1 4.9-2.9 7c-1.9-2.1-2.9-4.4-2.9-7s1-4.9 2.9-7Z"/>',
   chart: '<path d="M4 16.5v-4M8 16.5v-8M12 16.5v-6M16 16.5V4"/>',
   live: '<circle cx="10" cy="10" r="1.8"/><path d="M6.8 13.2a4.5 4.5 0 0 1 0-6.4M13.2 6.8a4.5 4.5 0 0 1 0 6.4M4.3 15.7a8 8 0 0 1 0-11.4M15.7 4.3a8 8 0 0 1 0 11.4"/>',
   code: '<path d="m7 6-4 4 4 4M13 6l4 4-4 4"/>',
@@ -191,7 +194,7 @@ const saved = (() => {
 const NO_FILTERS = { source: null, country: null, device: null, browser: null, os: null, page: null };
 const state = {
   user: undefined, sites: null, range: saved.range ?? "d30", from: saved.from ?? null, to: saved.to ?? null,
-  metric: "visitors", appMetric: "installs", filters: { ...NO_FILTERS }, pagesTab: "top", table: false,
+  metric: "visitors", appMetric: "installs", filters: { ...NO_FILTERS }, pagesTab: "top", table: false, by: null,
 };
 const remember = () => {
   try {
@@ -630,7 +633,7 @@ async function setupPage(key) {
   };
   drawPlatform();
   const mail = `mailto:?subject=${encodeURIComponent(`Add Statiku analytics to ${domain}`)}&body=${encodeURIComponent(
-    `Hi,\n\nCould you add Statiku analytics to ${domain}? It's one line, to paste just before </head> on every page:\n\n${snippet}\n\nIt sets no cookies and is under 2 KB, so it won't slow the site down.\n\nThanks!`)}`;
+    `Hi,\n\nCould you add Statiku analytics to ${domain}? It's one line, to paste just before </head> on every page:\n\n${snippet}\n\nIt sets no cookies and is under 10 KB, so it won't slow the site down.\n\nThanks!`)}`;
 
   const result = h("div", { role: "status" });
   const checkButton = h("button", {
@@ -657,7 +660,7 @@ async function setupPage(key) {
         h("div", { class: "card-head" }, h("h2", { text: "1. Copy your tracking code" })),
         h("div", { class: "card-body", style: { display: "grid", gap: "10px" } },
           h("div", { class: "code-block" }, snippet, copyButton),
-          h("p", { class: "muted", text: "It's under 2 KB, sets no cookies and needs no consent banner. Add it to every page you want to count." }))),
+          h("p", { class: "muted", text: "It's under 10 KB, sets no cookies and needs no consent banner. Add it to every page you want to count." }))),
       h("div", { class: "card" },
         h("div", { class: "card-head" }, h("h2", { text: "2. Add it to your website" }), h("span", { class: "sub", text: "Pick what your site is built with." })),
         h("div", { class: "card-body", style: { display: "grid", gap: "16px" } }, pills, steps,
@@ -683,7 +686,11 @@ async function setupPage(key) {
 const RANGES = [
   ["today", "Today", "by hour"], ["yesterday", "Yesterday", "by hour"], ["d7", "Last 7 days", "by day"],
   ["d30", "Last 30 days", "by day"], ["d90", "Last 90 days", "by day"], ["m12", "Last 12 months", "by month"],
+  ["all", "All time", "since the first visit"],
 ];
+// How a chart can be grouped, given how many days its period spans.
+const UNITS = [["hour", "Hour", (days) => days <= 7], ["day", "Day", (days) => days <= 731], ["week", "Week", (days) => days >= 14],
+  ["month", "Month", (days) => days >= 60], ["year", "Year", (days) => days >= 365]];
 const METRICS = [
   { id: "visitors", label: "Visitors", fmt: int, tick: compact },
   { id: "visits", label: "Visits", fmt: int, tick: compact },
@@ -724,6 +731,8 @@ function bucketLabel(t, unit, long = false) {
   const [y, mo, d] = date.split("-").map(Number);
   const when = new Date(y, mo - 1, d);
   if (unit === "hour") return long ? `${when.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${time}` : time;
+  if (unit === "year") return String(y);
+  if (unit === "week") return `${long ? "Week of " : ""}${when.toLocaleDateString("en-US", { month: "short", day: "numeric", year: long ? "numeric" : undefined })}`;
   if (unit === "month") return when.toLocaleDateString("en-US", { month: "short", year: long ? "numeric" : undefined });
   return when.toLocaleDateString("en-US", { month: "short", day: "numeric", year: long ? "numeric" : undefined });
 }
@@ -784,6 +793,7 @@ async function analyticsPage(key) {
     state.from = query.get("from");
     state.to = query.get("to");
   }
+  state.by = query.get("by");
   const body = h("div", {}, h("p", { class: "muted", text: "Loading…" }));
   const refreshed = h("span", { class: "muted" });
   const rangeButton = h("button", { class: "btn", type: "button", "aria-haspopup": "menu", "aria-expanded": "false" });
@@ -794,6 +804,7 @@ async function analyticsPage(key) {
 
   const rangeLabel = () => (state.range === "custom" && state.from && state.to
     ? `${day(`${state.from}T12:00`)} – ${day(`${state.to}T12:00`)}`
+    : state.range === "all" && data?.range.id === "all" ? `All time, since ${day(data.range.from)}`
     : RANGES.find(([id]) => id === state.range)?.[1] ?? "Last 30 days");
 
   const drawTools = () => {
@@ -804,7 +815,7 @@ async function analyticsPage(key) {
       const toInput = h("input", { class: "input", type: "date", required: true, max: today, value: state.to ?? today });
       openPopover(rangeButton, [
         ...RANGES.map(([id, label]) => menuItem([label, id === state.range ? h("span", { class: "end" }, icon("check", 16)) : null],
-          () => { state.range = id; remember(); load(); }, { role: "menuitemradio", "aria-checked": String(id === state.range) })),
+          () => { state.range = id; state.by = null; remember(); load(); }, { role: "menuitemradio", "aria-checked": String(id === state.range) })),
         h("form", {
           class: "custom-range",
           onsubmit: (e) => {
@@ -812,6 +823,7 @@ async function analyticsPage(key) {
             if (!fromInput.value || !toInput.value) return;
             [state.from, state.to] = [fromInput.value, toInput.value].sort();
             state.range = "custom";
+            state.by = null;
             remember();
             closePopover();
             load();
@@ -837,6 +849,7 @@ async function analyticsPage(key) {
       q.set("from", state.from);
       q.set("to", state.to);
     }
+    if (state.by) q.set("by", state.by);
     for (const [f, v] of Object.entries(state.filters)) if (v) q.set(f, v);
     history.replaceState({}, "", `/sites/${key}${q.size ? `?${q}` : ""}`);
   }
@@ -850,6 +863,7 @@ async function analyticsPage(key) {
         q.set("from", state.from);
         q.set("to", state.to);
       }
+      if (state.by) q.set("by", state.by);
       for (const [f, v] of Object.entries(state.filters)) if (v) q.set(f, v);
       data = await api(`/api/sites/${key}/stats?${q}`);
       refreshed.textContent = `Last refreshed ${clock().slice(0, 5)}`;
@@ -892,10 +906,13 @@ async function analyticsPage(key) {
     const points = series.map((s) => ({ label: bucketLabel(s.t, unit, true), short: bucketLabel(s.t, unit), v: s[m.id] }));
     const compare = prevSeries.map((s) => ({ label: bucketLabel(s.t, unit, true), v: s[m.id] }));
     const toggle = h("button", { class: "btn plain", type: "button", "aria-expanded": String(state.table), text: state.table ? "Hide table" : "Show as table", onclick: () => { state.table = !state.table; draw(); } });
-    tableHost.append(h("table", {}, h("thead", {}, h("tr", {}, h("th", { text: unit === "hour" ? "Hour" : unit === "month" ? "Month" : "Day" }), h("th", { text: m.label }), h("th", { text: "Previous period" }))),
+    // Hour, day, week, month or year, as many as suit the period.
+    const days = (new Date(d.range.to) - new Date(d.range.from)) / 86400e3;
+    const grouping = tabs(UNITS.filter(([, , fits]) => fits(days)).map(([id, label]) => [id, label]), unit, (id) => { state.by = id; load(); });
+    tableHost.append(h("table", {}, h("thead", {}, h("tr", {}, h("th", { text: UNITS.find(([id]) => id === unit)?.[1] ?? "Day" }), h("th", { text: m.label }), h("th", { text: "Previous period" }))),
       h("tbody", {}, points.map((p, i) => h("tr", {}, h("td", { text: p.label }), h("td", { text: m.fmt(p.v) }), h("td", { text: compare[i] ? m.fmt(compare[i].v) : "–" }))).reverse())));
     const chartCard = h("div", { class: "card" },
-      h("div", { class: "card-head" }, h("h2", { text: `${m.label} over time` }), h("span", { class: "sub", text: unit === "hour" ? "by hour" : unit === "month" ? "by month" : "by day" }), h("div", { class: "end" }, toggle)),
+      h("div", { class: "card-head" }, h("h2", { text: `${m.label} over time` }), h("div", { class: "end" }, grouping, toggle)),
       h("div", { class: "card-body" },
         h("div", { style: { display: "flex", alignItems: "baseline", gap: "10px", flexWrap: "wrap" } }, h("span", { style: { fontSize: "24px", fontWeight: 650, letterSpacing: "-0.02em" }, text: m.fmt(totals[m.id]) }), delta(m, totals[m.id], previous[m.id])),
         chartHost, tableHost));
@@ -937,7 +954,7 @@ async function analyticsPage(key) {
     ];
     // Sections with nothing to show (no conversions, no app) are left out.
     body.replaceChildren(...content.filter(Boolean));
-    lineChart(chartHost, points, compare, m, { current: spanName(d.range.from, d.range.to), previous: spanName(d.range.prevFrom, d.range.prevTo) });
+    lineChart(chartHost, points, compare, m, { current: spanName(d.range.from, d.range.to), previous: d.range.id === "all" ? null : spanName(d.range.prevFrom, d.range.prevTo) });
     drawTools();
   }
 
@@ -1038,21 +1055,68 @@ async function livePage(key) {
   const tip = h("div", { class: "globe-tip", hidden: true });
   const caption = h("div", { class: "caption" });
   const overCount = h("span");
-  const globeCard = h("div", { class: "card globe-card" }, canvas,
-    h("div", { class: "over" }, h("b", { text: "Visitors right now" }), overCount), caption, tip);
+  const crumbs = h("nav", { class: "crumbs", "aria-label": "Where the globe is looking" });
+  const locationsTitle = h("h2", { text: "Top locations" });
+  const locationsSub = h("span", { class: "sub", text: "Click one to fly there" });
   const locations = h("div"), pages = h("div"), perMinute = h("div", { class: "chart" }), sources = h("div"), feed = h("div", { class: "feed" });
   let latest = null;
+  let view = { country: null, city: null };
 
   const globe = createGlobe(canvas, {
     onHover: (dot, x, y) => {
       if (!dot) return void (tip.hidden = true);
-      tip.replaceChildren(h("b", {}, `${flag(dot.code)} ${countryName(dot.code)}`), h("span", { class: "muted", text: `${dot.v} ${dot.v === 1 ? "visitor" : "visitors"} now` }));
+      const where = dot.city ? `${dot.city}, ${countryName(dot.code)}` : dot.unplaced ? `${countryName(dot.code)}, city unknown` : countryName(dot.code);
+      tip.replaceChildren(h("b", {}, `${flag(dot.code)} ${where}`), h("span", { class: "muted", text: `${dot.v} ${dot.v === 1 ? "visitor" : "visitors"} now` }));
       tip.style.left = `${x}px`;
       tip.style.top = `${y}px`;
       tip.hidden = false;
     },
+    onView: (next) => {
+      view = next;
+      drawCrumbs();
+      if (latest) drawLocations();
+    },
   });
   onLeave(() => globe.destroy());
+  const controls = h("div", { class: "globe-controls" },
+    h("button", { type: "button", "aria-label": "Zoom in", title: "Zoom in", onclick: () => globe.zoomBy(2) }, icon("plus", 16)),
+    h("button", { type: "button", "aria-label": "Zoom out", title: "Zoom out", onclick: () => globe.zoomBy(0.5) }, icon("minus", 16)),
+    h("button", { type: "button", "aria-label": "The whole world", title: "The whole world", onclick: () => globe.world() }, icon("globe", 16)));
+  const globeCard = h("div", { class: "card globe-card" }, canvas,
+    h("div", { class: "over" }, h("div", { class: "where" }, h("b", { text: "Visitors right now" }), crumbs), overCount), caption, controls, tip);
+
+  // World › Finland › Kuopio: each part flies back to it.
+  function drawCrumbs() {
+    const parts = [h("button", { type: "button", text: "World", onclick: () => globe.world() })];
+    if (view.country) {
+      parts.push(h("span", { text: "›" }), h("button", { type: "button", text: countryName(view.country), onclick: () => globe.focusCountry(view.country) }));
+      if (view.city) parts.push(h("span", { text: "›" }), h("b", { text: view.city }));
+    }
+    crumbs.replaceChildren(...parts);
+  }
+
+  // The list beside the globe: countries, or, once the globe is on a country, that country's cities.
+  function drawLocations() {
+    const d = latest;
+    if (!view.country) {
+      locationsTitle.textContent = "Top locations";
+      locationsSub.textContent = "Click one to fly there";
+      return locations.replaceChildren(bars(d.countries, {
+        head: ["Country", "Visitors"], label: (r) => countryName(r.label), lead: (r) => h("span", { class: "flag", text: flag(r.label) }),
+        onPick: (r) => globe.focusCountry(r.label), canPick: (r) => r.label !== "Unknown",
+      }));
+    }
+    const here = d.cities.filter((c) => c.country === view.country);
+    const total = d.countries.find((c) => c.label === view.country)?.v ?? 0;
+    const unplaced = total - here.reduce((sum, c) => sum + c.v, 0);
+    const rows = [...here.map((c) => ({ label: c.city, v: c.v, city: c })), ...(unplaced > 0 ? [{ label: "City unknown", v: unplaced }] : [])];
+    locationsTitle.textContent = `${flag(view.country)} ${countryName(view.country)}`;
+    locationsSub.textContent = "Cities, approximately";
+    locations.replaceChildren(
+      rows.length ? bars(rows, { head: ["City", "Visitors"], onPick: (r) => globe.focusCity(r.city), canPick: (r) => !!r.city, active: view.city })
+        : h("p", { class: "empty-note", text: "No one here right now." }),
+      h("button", { class: "btn plain", type: "button", style: { marginTop: "8px" }, onclick: () => globe.world() }, icon("back", 14), " All countries"));
+  }
 
   async function load() {
     try {
@@ -1119,14 +1183,14 @@ async function livePage(key) {
         h("span", { class: "delta", text: "On the site this minute" })),
       ...[["Visits today", d.today.visits], ["Visitors today", d.today.visitors], ["Page views today", d.today.pageviews]].map(([label, v]) =>
         h("div", { class: "card kpi" }, h("span", { class: "label", text: label }), h("span", { class: "value num", text: int(v) }), h("span", { class: "delta", text: "Since midnight" }))));
-    globe.update(d.countries);
+    globe.update(d.countries, d.cities);
     overCount.textContent = d.visitors ? `${d.visitors} in ${d.countries.length} ${d.countries.length === 1 ? "country" : "countries"}` : "";
     canvas.setAttribute("aria-label", d.visitors ? `Visitors right now: ${d.countries.map((c) => `${c.v} in ${countryName(c.label)}`).join(", ")}` : "No visitors right now");
-    caption.textContent = d.visitors ? "Each dot is a country with visitors right now. Drag to turn the globe." : "No one's on the site right now. New visitors appear the moment they arrive.";
-    locations.replaceChildren(bars(d.countries, {
-      head: ["Country", "Visitors"], label: (r) => countryName(r.label), lead: (r) => h("span", { class: "flag", text: flag(r.label) }),
-      onPick: (r) => globe.focus(r.label), canPick: (r) => r.label !== "Unknown",
-    }));
+    caption.textContent = d.visitors
+      ? "Scroll, pinch or tap a country to zoom in to its cities. Drag to turn the globe."
+      : "No one's on the site right now. New visitors appear the moment they arrive.";
+    drawLocations();
+    drawCrumbs();
     pages.replaceChildren(bars(d.pages, { head: ["Page", "Visitors"] }));
     sources.replaceChildren(bars(d.sources, { head: ["Source", "Visitors"] }));
     minuteBars(perMinute, d.perMinute, (v) => `${v} ${v === 1 ? "page view" : "page views"}`);
@@ -1142,11 +1206,17 @@ async function livePage(key) {
       h("a", { class: "btn", href: `/sites/${key}` }, icon("chart", 16), "Analytics")),
     kpis,
     h("div", { class: "grid g-globe" }, globeCard,
-      h("div", { class: "stack" }, card("Top locations", locations, { sub: "Click to find one on the globe" }), card("Pages being viewed", pages))),
+      h("div", { class: "stack" },
+        h("div", { class: "card" }, h("div", { class: "card-head" }, locationsTitle, locationsSub), h("div", { class: "card-body" }, locations)),
+        card("Pages being viewed", pages))),
     h("div", { class: "grid g3" },
       card("Page views per minute", perMinute, { sub: "Last 30 minutes" }),
       card("Sources right now", sources),
-      card("Recent activity", feed, { sub: "Last 30 minutes" })));
+      card("Recent activity", feed, { sub: "Last 30 minutes" })),
+    h("p", { class: "faint", style: { fontSize: "12px", marginTop: "4px" } },
+      "Locations are approximate, from each visitor's IP address (",
+      h("a", { href: "https://db-ip.com", target: "_blank", rel: "noopener", "data-external": "", text: "IP Geolocation by DB-IP" }),
+      "). Cities are used only for this view while people are on the site, and are never stored."));
 }
 
 // ---------- A site's settings ----------

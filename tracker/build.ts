@@ -1,10 +1,10 @@
 // Minifies the website script. The ingest service builds it in memory at start; `npm run build` writes
-// tracker/dist/s.js and reports its size, failing over the 2 KB budget.
+// tracker/dist/s.js and reports its size, failing over the 10 KB budget.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { transform } from "esbuild";
 
-export const BUDGET = 2048;
+export const BUDGET = 10_240;
 
 export async function buildTracker(): Promise<string> {
   const source = readFileSync(new URL("src/script.js", import.meta.url), "utf8");

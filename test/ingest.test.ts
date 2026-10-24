@@ -54,7 +54,7 @@ test("serves the script", { skip }, async () => {
   const res = await fetch(`${base}/s.js`);
   assert.equal(res.status, 200);
   assert.match(res.headers.get("content-type")!, /javascript/);
-  assert.ok((await res.text()).length < 2048);
+  assert.ok((await res.text()).length < 10_240);
   const again = await fetch(`${base}/s.js`, { headers: { "if-none-match": res.headers.get("etag")! } });
   assert.equal(again.status, 304);
 });

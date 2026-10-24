@@ -17,7 +17,7 @@ Notchlight ([notchlight.com](https://notchlight.com)) is the first customer.
 ## Status
 
 - [x] Website script: page views, sources and campaigns, countries, devices, custom events, download clicks, and
-      checkout clicks that carry a reference to the payment. Under 2 KB, no cookies.
+      checkout clicks that carry a reference to the payment. Under 10 KB, no cookies.
 - [x] Ingest service: sessions, daily-rotating visitor hashes, batched writes to Postgres partitioned by month
 - [x] Swift package for macOS and iOS: an anonymous install, the days it's used, versions, trial and licence state,
       custom events and an opt-out. Each install is credited to the website visit it was downloaded from.
@@ -123,7 +123,7 @@ npm run stats -- <project key>                          # a text report
 ```sh
 npm test         # unit tests, the ingest service and the dashboard's API against Postgres (uses statiku_test and empties it)
 npm run e2e      # the script on Notchlight's real pages in Chrome; needs Chrome Canary and ../notchlight; cleans up after
-npm run build    # minifies the script and fails over 2 KB
+npm run build    # minifies the script and fails over 10 KB
 cd sdk/swift && swift test   # the Swift package
 ```
 

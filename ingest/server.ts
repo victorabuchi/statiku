@@ -20,7 +20,7 @@ import { Salts } from "./salts.ts";
 import { Sessions } from "./sessions.ts";
 import { Writer } from "./writer.ts";
 
-export type Options = { databaseUrl: string; trustProxy: boolean; geoPath: string | URL; flushMs?: number; dashboard?: boolean };
+export type Options = { databaseUrl: string; trustProxy: boolean; geoPath: string | URL; cityPath?: string | URL; flushMs?: number; dashboard?: boolean };
 
 const CORS = {
   "access-control-allow-origin": "*",
@@ -65,7 +65,7 @@ export async function createApp(options: Options) {
   const sessions = new Sessions(pool);
   const writer = new Writer(pool, sessions);
   const salts = new Salts(pool);
-  const deps: Deps = { projects: new Projects(pool), salts, sessions, installs: new Installs(pool, salts), writer, geo: new Geo(options.geoPath), hub: new Hub() };
+  const deps: Deps = { projects: new Projects(pool), salts, sessions, installs: new Installs(pool, salts), writer, geo: new Geo(options.geoPath, options.cityPath), hub: new Hub() };
 
   const script = await buildTracker();
   // The dashboard tells the ingest side when a site's domains change, so the cached copy goes at once.
@@ -154,6 +154,7 @@ if (import.meta.main) {
     databaseUrl,
     trustProxy: process.env.TRUST_PROXY === "1",
     geoPath: process.env.GEO_DB ?? new URL("../data/country.mmdb", import.meta.url),
+    cityPath: process.env.GEO_CITY_DB ?? new URL("../data/city.mmdb", import.meta.url),
   });
   const port = Number(process.env.PORT ?? 8787);
   app.server.listen(port, () => console.log(`Statiku ingest on :${port}`));

@@ -16,7 +16,7 @@ Notchlight (notchlight.com) is the first customer.
 - IP addresses are never stored or logged. The IP is used in memory to look up the country and to build a daily hash,
   then dropped.
 - Data stays in the EU: the service and the database run in Render's Frankfurt region.
-- The website script stays under 2 KB.
+- The website script stays under 10 KB.
 
 ## Stack
 
@@ -26,7 +26,7 @@ Notchlight (notchlight.com) is the first customer.
 | Ingest | `ingest/`: a small `node:http` service, no framework | It is the hot path; it stays tiny and scales on its own |
 | Database | Postgres 17 on Render (Frankfurt), `pg` driver, plain SQL migrations | Simple to start; events are partitioned by month so it grows |
 | Country lookup | DB-IP Country Lite (`.mmdb`, CC BY 4.0), downloaded at build time, read with `mmdb-lib` | Country only, offline, no third-party calls |
-| Website script | `tracker/`: plain JS, minified with esbuild, served at `/s.js` | Under 2 KB |
+| Website script | `tracker/`: plain JS, minified with esbuild, served at `/s.js` | Under 10 KB |
 | App SDK | `sdk/swift/`: a Swift package for macOS and iOS, no dependencies, sending to `/v1/app` | Notchlight first |
 | Dashboard | `dashboard/`: accounts and a JSON API in the same `node:http` service as ingest; the app in `client/` is plain JS modules bundled by esbuild at start, in Onshipy's Shopify-admin style; the live globe uses d3-geo and world-atlas | One service to run; nothing loaded from other sites |
 | SaaS billing (later) | Polar as merchant of record | It handles EU VAT, and you already use it |
