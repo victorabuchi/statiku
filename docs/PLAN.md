@@ -50,7 +50,12 @@ Notchlight (notchlight.com) is the first customer.
 - **Sessions:** a session is a visitor's events with gaps under 30 minutes. Its source (UTM, then the referrer, then
   Direct) is set by its first event and copied onto every event in it, so "downloads by source" is a simple count.
 - **What the script sends:** the event name, the page URL without its query string (only `utm_*`, `ref`, `source` and
-  `via` are kept), the referrer, the window width (for the device type) and optional props.
+  `via` are kept), the referrer, the window width (for the device type) and optional props. While the page is in view
+  it also checks in every 30 seconds (`_p`, for up to half an hour on one page) and says when the page closes (`_l`);
+  those only stretch the open visit and move the visitor in or out of "right now" in memory, and are never stored.
+- **Right now:** the visitors seen in the last 90 seconds who haven't closed the page, held in the ingest process's
+  memory with the open visits and pushed to dashboards over server-sent events. With more than one instance this
+  moves to a shared store.
 - **Country:** looked up from the IP in memory. No city, no region.
 - **Bots:** dropped by user agent; automated browsers are skipped by the script.
 - **Opting out:** site owners set `localStorage.statiku_ignore = "1"` in their own browser; the app SDK has an opt-out
@@ -80,7 +85,9 @@ Accounts (built):
 - `workspaces` (id, name, plan): the billing unit; each person starts with one
 - `memberships` (workspace, user, role)
 - `logins` (hash of the cookie's token, user, expires_at): 30-day sign-ins
-- next: `invites` (workspace, email, role, token hash, expires_at, accepted_at), email verification and password reset
+- `invites` (workspace, role, hash of the link's token, created_by, expires_at, accepted_by): links that work once, for a week
+- `users.avatar` and `projects.icon`: a profile photo, and each site's own icon fetched by the server
+- next: email verification, password reset and emailed invitations, once there's an email provider
 
 Collection (built now):
 
@@ -117,8 +124,8 @@ Revenue (after that):
 2. **Swift SDK and app ingestion** (built; not yet in Notchlight): `/v1/app`, installs, active installs by version,
    trial and licensed state, opt-out, install attribution. Into Notchlight with the privacy page updated the same day.
 3. **Revenue:** Polar and Stripe webhooks, attributed back to the source. Paddle, Lemon Squeezy and the App Store later.
-4. **Accounts and dashboard** (built, apart from invites and email): sign-up, workspaces, adding a website without
-   code knowledge, and per site: analytics, a live view with a globe, conversions, installs. Revenue by source comes
-   with step 3.
+4. **Accounts and dashboard** (built, apart from email): sign-up, workspaces, team invitations by link, adding a
+   website without code knowledge, and per site: analytics with filters, custom periods and export, a live view with
+   a globe, conversions, installs. Revenue by source comes with step 3.
 5. **Billing:** a free tier, then paid plans by monthly events, through Polar.
 6. **Launch:** a name and domain, the landing page, docs, privacy policy and DPA.

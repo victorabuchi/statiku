@@ -23,16 +23,20 @@ Notchlight ([notchlight.com](https://notchlight.com)) is the first customer.
       custom events and an opt-out. Each install is credited to the website visit it was downloaded from.
 - [x] Accounts and the dashboard, served by the same service: sign up, add a website by its address with steps for
       WordPress, Shopify, Wix, Squarespace, Webflow, Framer and Tag Manager, and an installation check; analytics
-      against the previous period, sources, pages, locations, devices, conversions, events and campaigns; a live view
-      with a globe of the visitors on the site right now; the app's installs, versions and licences
+      against the previous period, filters on any breakdown, custom periods and CSV export; sources, pages, locations,
+      devices, conversions, events and campaigns; a live view with a globe that changes the moment someone arrives or
+      leaves; the app's installs, versions and licences; each site's own icon; account settings, a profile photo and
+      team invitations by link
 - [ ] Revenue from Polar and Stripe webhooks, credited to the source of the visit
-- [ ] Team invites, password reset by email, and plans
+- [ ] Email (verification, password reset, sending invitations) and plans
 
 The full plan, the stack and the data model are in [docs/PLAN.md](docs/PLAN.md).
 
 ## Privacy
 
 - **Nothing in the browser:** no cookies, no localStorage, no identifier sent.
+- **Live, not tracked:** while a page is in view, the script checks in every 30 seconds (for up to half an hour) and
+  says when the page closes. That keeps the live view and visit lengths right; check-ins are never stored as events.
 - **No stored IPs:** an IP is used in memory to look up the country and build the visitor hash, then dropped.
 - **Visitors can't be traced:** a visitor is a hash of the project, IP and browser, mixed with a secret that changes
   every day and is deleted after two days.
@@ -47,7 +51,8 @@ The full plan, the stack and the data model are in [docs/PLAN.md](docs/PLAN.md).
 <script defer data-project="p_…" src="https://<ingest host>/s.js"></script>
 ```
 
-Page views count on their own, including single-page navigation. Clicks on files (.dmg, .zip, .exe and so on) send
+Page views count on their own, including single-page navigation, and the live view shows a visitor the moment they
+arrive. Clicks on files (.dmg, .zip, .exe and so on) send
 `download`. Clicks on Polar or Stripe checkout links send `checkout`, and the link gets a reference that the payment
 webhook brings back. For anything else:
 
