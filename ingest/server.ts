@@ -10,6 +10,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createHash } from "node:crypto";
 import pg from "pg";
 import type { Mailer } from "../dashboard/mail.ts";
+import type { Polar } from "../dashboard/billing.ts";
+import type { Outbound } from "../dashboard/check.ts";
 import { createDashboard, type ImportApis } from "../dashboard/server.ts";
 import { buildTracker } from "../tracker/build.ts";
 import { collectApp, MAX_APP_BODY } from "./app.ts";
@@ -29,8 +31,9 @@ export type Options = {
   geocode?: Geocoder;
   // Email to the people who use the dashboard; tests keep what would be sent.
   mailer?: Mailer;
-  // Where imports reach Google, GitHub and Plausible; tests use stand-ins.
+  // Where imports reach Google, GitHub and Plausible, and where billing reaches Polar; tests use stand-ins.
   imports?: ImportApis;
+  polar?: Polar & { request?: Outbound };
 };
 
 const CORS = {
@@ -88,6 +91,7 @@ export async function createApp(options: Options) {
     streets: deps.streets,
     mailer: options.mailer,
     imports: options.imports,
+    polar: options.polar,
   });
   const etag = `"${createHash("sha256").update(script).digest("base64url").slice(0, 16)}"`;
 

@@ -176,6 +176,8 @@ function cell(value) {
 
 // ---------- Server ----------
 class SignedOut extends Error {}
+// A report closed because the trial ended unpaid.
+class Locked extends Error {}
 async function api(path, { method = "GET", body } = {}) {
   const res = await fetch(path, {
     method,
@@ -189,6 +191,7 @@ async function api(path, { method = "GET", body } = {}) {
     go(`/login?next=${encodeURIComponent(location.pathname)}`, true);
     throw new SignedOut();
   }
+  if (res.status === 402) throw new Locked(data.error);
   if (!res.ok) throw new Error(data.error || `Something went wrong (${res.status}).`);
   return data;
 }
@@ -340,7 +343,86 @@ function shell(site, active, content) {
 function pageHead(titleParts, tools) {
   return h("div", { class: "page-head" }, h("div", { class: "title" }, titleParts), tools ? h("div", { class: "tools" }, tools) : null);
 }
-const failure = (e) => h("div", { class: "error", role: "alert", text: e.message || String(e) });
+const failure = (e) => (e instanceof Locked ? lockedCard(e.message) : h("div", { class: "error", role: "alert", text: e.message || String(e) }));
+
+// ---------- Your plan ----------
+const daysLeft = (at) => Math.max(0, Math.ceil((new Date(at) - Date.now()) / 86400e3));
+function lockedCard(message) {
+  return h("div", { class: "card status-card" }, h("span", { class: "icon wait" }, icon("wait", 22)),
+    h("div", { class: "what" }, h("b", { text: "These reports are closed for now" }), h("span", { class: "muted", text: message })),
+    h("a", { class: "btn primary", href: "/settings#plan" }, "Choose a plan"));
+}
+// A reminder above every page: the trial's last week, a closed account, or a month over the plan's events.
+function billingBanner() {
+  const b = state.billing;
+  if (!b || b.access === "comp") return null;
+  const text = b.access === "locked" ? "Your free trial has ended. Statiku is still counting your visitors: choose a plan to see them."
+    : b.access === "trial" && daysLeft(b.trialEndsAt) <= 7 ? `Your free trial ends in ${daysLeft(b.trialEndsAt)} ${daysLeft(b.trialEndsAt) === 1 ? "day" : "days"}.`
+    : b.over ? `Your sites sent ${int(b.usage)} events this month, more than the ${int(b.limit)} in your plan.`
+    : null;
+  return text ? h("div", { class: `banner${b.access === "locked" ? " bad" : ""}`, role: "status" }, h("span", { text }), h("a", { href: "/settings#plan", text: b.over ? "Upgrade" : "Choose a plan" })) : null;
+}
+
+async function planCard() {
+  const b = await api("/api/billing");
+  state.billing = b;
+  const body = h("div", { class: "form" });
+  let interval = "month";
+  const status = b.access === "comp" ? "Unlimited: Statiku is free for this account, with no limit on events."
+    : b.access === "trial" ? `Free trial: ${daysLeft(b.trialEndsAt)} days left, until ${new Date(b.trialEndsAt).toLocaleDateString("en-US", { month: "long", day: "numeric" })}. Every feature, no card needed.`
+    : b.access === "paid" ? `${b.planName}${b.status && b.status !== "active" ? ` (${b.status.replace("_", " ")})` : ""}, ${b.cancelAtPeriodEnd || b.status === "canceled" ? "ends" : "renews"} ${b.periodEnd ? new Date(b.periodEnd).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : ""}.`
+    : "Your free trial has ended. Statiku is still counting your visitors: choose a plan to see them.";
+  const meter = b.limit
+    ? h("div", { class: "meter" }, h("div", { class: "meter-bar" }, h("i", { style: { width: `${Math.min(100, (100 * b.usage) / b.limit)}%` }, class: b.over ? "over" : "" })),
+      h("span", { class: "muted", text: `${int(b.usage)} of ${int(b.limit)} events this month` }))
+    : h("span", { class: "muted", text: `${int(b.usage)} events this month` });
+  const plans = h("div", { class: "plans" });
+  const drawPlans = () => plans.replaceChildren(...b.plans.map((p) => {
+    const current = b.plan === p.id && b.access === "paid";
+    const buyable = b.buyable.includes(`${p.id}:${interval}`);
+    const choose = h("button", {
+      class: `btn${current ? "" : " primary"}`, type: "button", disabled: current || !buyable,
+      text: current ? "Your plan" : buyable ? `Choose ${p.name}` : "Not on sale yet",
+      onclick: async () => {
+        choose.disabled = true;
+        try {
+          location.href = (await api("/api/billing/checkout", { method: "POST", body: { plan: p.id, interval } })).url;
+        } catch (err) {
+          toast(err.message);
+          choose.disabled = false;
+        }
+      },
+    });
+    return h("div", { class: `plan${current ? " current" : ""}` }, h("b", { text: p.name }),
+      h("div", { class: "price" }, h("span", { text: `€${interval === "year" ? p.year : p.month}` }), h("small", { text: interval === "year" ? "a year" : "a month" })),
+      h("span", { class: "muted", text: `Up to ${int(p.events)} events a month` }), choose);
+  }));
+  drawPlans();
+  // Monthly or yearly: the tabs are drawn again to show which is picked.
+  const periods = h("div");
+  const drawPeriods = () => periods.replaceChildren(tabs([["month", "Monthly"], ["year", "Yearly, 2 months free"]], interval, (id) => {
+    interval = id;
+    drawPeriods();
+    drawPlans();
+  }));
+  drawPeriods();
+  const manage = b.customer ? h("button", {
+    class: "btn", type: "button", text: "Invoices, card and cancelling",
+    onclick: async () => {
+      try {
+        location.href = (await api("/api/billing/portal", { method: "POST" })).url;
+      } catch (err) {
+        toast(err.message);
+      }
+    },
+  }) : null;
+  body.append(h("p", { text: status }), meter);
+  if (b.access !== "comp") {
+    body.append(h("div", { class: "row-between" }, periods, manage), plans,
+      h("p", { class: "help", text: "Events are page views and the other things your sites and apps send. Prices in euros; VAT is added where it applies. Payments are handled by Polar." }));
+  }
+  return card("Plan", body, { id: "plan", sub: b.planName ?? (b.access === "trial" ? "Free trial" : null) });
+}
 function card(title, body, { sub, end, id } = {}) {
   return h("div", { class: "card", id }, h("div", { class: "card-head" }, h("h2", { text: title }), sub ? h("span", { class: "sub", text: sub }) : null, end ? h("div", { class: "end" }, end) : null),
     h("div", { class: "card-body" }, body));
@@ -1564,6 +1646,13 @@ async function siteSettingsPage(key) {
 async function accountPage() {
   const sites = await loadSites(true);
   const user = state.user;
+  // Back from Polar's checkout: the plan starts when Polar confirms the payment, usually within seconds.
+  if (new URLSearchParams(location.search).get("billing") === "done") {
+    toast("Thank you! Your plan starts as soon as Polar confirms the payment.");
+    history.replaceState({}, "", "/settings#plan");
+    setTimeout(() => location.pathname === "/settings" && render(), 4000);
+  }
+  const plan = await planCard();
   const status = (form, message, ok = true) => {
     const note = form.querySelector(".form-status") ?? form.appendChild(h("div", { class: "form-status" }));
     note.replaceChildren(h("div", { class: `notice ${ok ? "ok" : "warn"}`, role: "status" }, icon(ok ? "check" : "wait"), h("span", { text: message })));
@@ -1722,6 +1811,7 @@ async function accountPage() {
   return h("div", { class: "page narrow" },
     pageHead([icon("settings", 20), h("h1", { text: "Settings" })]),
     h("div", { class: "stack" },
+      plan,
       card("Profile", profile),
       card("Websites", websites, { sub: `${sites.length} ${sites.length === 1 ? "site" : "sites"}`, id: "websites" }),
       card("Team", team, { id: "team" }),
@@ -1755,7 +1845,9 @@ async function render() {
   try {
     if (state.user === undefined) {
       const res = await fetch("/api/me", { credentials: "same-origin" });
-      state.user = res.ok ? (await res.json()).user : null;
+      const me = res.ok ? await res.json() : null;
+      state.user = me?.user ?? null;
+      state.billing = me?.billing ?? null;
     }
     if (run !== rendering) return;
     if (join) {
@@ -1786,7 +1878,7 @@ async function render() {
     root.replaceChildren(...shell(site, active, h("div", { class: "page" }, h("p", { class: "muted", text: "Loading…" }))));
     const content = await pending;
     if (run !== rendering) return;
-    $("main").replaceChildren(content);
+    $("main").replaceChildren(...[billingBanner(), content].filter(Boolean));
     document.title = `${TITLES[active]}${site ? ` · ${site.name}` : ""} · Statiku`;
     if (!location.hash) window.scrollTo(0, 0);
   } catch (err) {

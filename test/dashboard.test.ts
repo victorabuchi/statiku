@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { crc32 } from "node:zlib";
+import { createHmac, randomBytes } from "node:crypto";
+import { verifyWebhook } from "../dashboard/billing.ts";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import pg from "pg";
@@ -23,6 +25,9 @@ let app: Awaited<ReturnType<typeof createApp>>;
 let elsewhere: Server;
 let elsewhereUrl: string;
 const github = { releases: [] as any[] };
+// Polar's stand-in keeps the checkouts asked for and knows which customers exist.
+const polar = { checkouts: [] as any[], customers: new Set<string>() };
+const POLAR_SECRET = `whsec_${randomBytes(24).toString("base64")}`;
 let pool: pg.Pool;
 let base: string;
 // What the app would have emailed.
@@ -52,6 +57,10 @@ before(async () => {
     imports: {
       request: openRequest, github: elsewhereUrl,
       google: { auth: `${elsewhereUrl}/auth`, token: `${elsewhereUrl}/token`, data: elsewhereUrl, admin: elsewhereUrl, clientId: "id", clientSecret: "secret" },
+    },
+    polar: {
+      api: elsewhereUrl, token: "polar-token", secret: POLAR_SECRET, request: openRequest,
+      products: { "starter:month": "prod-starter-month", "growth:month": "prod-growth-month", "growth:year": "prod-growth-year" },
     },
   });
   await new Promise<void>((resolve) => app.server.listen(0, resolve));
@@ -579,6 +588,15 @@ function standIn(req: import("node:http").IncomingMessage, res: import("node:htt
       };
       return send(200, { results: (rows[by] ?? []).map(([d, v, m]) => ({ dimensions: by === "total" ? [d] : [d, v], metrics: m })) });
     }
+    if (path === "/v1/checkouts/" || path === "/v1/customer-sessions/") {
+      if (req.headers.authorization !== "Bearer polar-token") return send(401, { detail: "Unauthorized" });
+      const q = JSON.parse(body);
+      if (path === "/v1/checkouts/") {
+        polar.checkouts.push(q);
+        return send(201, { id: "co_1", url: `https://polar.test/checkout/${polar.checkouts.length}` });
+      }
+      return polar.customers.has(q.external_customer_id) ? send(201, { customer_portal_url: "https://polar.test/portal" }) : send(404, { detail: "Customer not found" });
+    }
     if (path === "/repos/acme/app/releases") return send(200, github.releases);
     if (path === "/repos/acme/missing/releases") return send(404, { message: "Not Found" });
     if (path === "/token") {
@@ -772,4 +790,96 @@ test("imports: Plausible, Google Analytics, files and GitHub releases, each day 
   const plausible = list.find((x: any) => x.label.startsWith("Plausible"));
   await owner(`/api/sites/${key}/imports/${plausible.id}`, { method: "DELETE" });
   assert.equal((await report("range=custom&from=2025-01-01&to=2025-01-03")).totals.visitors, 0);
+});
+
+// ---------- Billing ----------
+
+test("Polar's webhook signatures: either kind of secret, never forged, never stale", () => {
+  const body = Buffer.from('{"type":"subscription.active"}'), at = String(Math.floor(Date.now() / 1000));
+  const signed = (key: Buffer, t = at) => `v1,${createHmac("sha256", key).update(`msg_1.${t}.`).update(body).digest("base64")}`;
+  const modern = Buffer.from(POLAR_SECRET.slice(6), "base64"), legacy = Buffer.from(POLAR_SECRET, "utf8");
+  assert.ok(verifyWebhook(POLAR_SECRET, { id: "msg_1", timestamp: at, signature: signed(modern) }, body));
+  assert.ok(verifyWebhook(POLAR_SECRET, { id: "msg_1", timestamp: at, signature: `v1,bm9wZQ== ${signed(legacy)}` }, body));
+  assert.ok(!verifyWebhook(POLAR_SECRET, { id: "msg_2", timestamp: at, signature: signed(modern) }, body));
+  assert.ok(!verifyWebhook(POLAR_SECRET, { id: "msg_1", timestamp: at, signature: signed(Buffer.from("another key")) }, body));
+  const old = String(Number(at) - 600);
+  assert.ok(!verifyWebhook(POLAR_SECRET, { id: "msg_1", timestamp: old, signature: signed(modern, old) }, body));
+  assert.ok(!verifyWebhook("", { id: "msg_1", timestamp: at, signature: signed(Buffer.alloc(0)) }, body));
+});
+
+test("plans: a trial, a checkout with Polar, its webhook, and reports that close only when nothing's paid", { skip }, async () => {
+  const owner = await signUp("paying@example.com");
+  const { key } = (await owner("/api/sites", { method: "POST", body: { address: "paying.example", timezone: "UTC" } })).data.site;
+  const { rows: [{ workspace_id: workspace }] } = await pool.query("select m.workspace_id from memberships m join users u on u.id = m.user_id where u.email = 'paying@example.com'");
+
+  // A new workspace is in its 30-day trial, with every plan on offer that has a product in Polar.
+  let billing = (await owner("/api/billing")).data;
+  assert.equal(billing.access, "trial");
+  // Thirty days, give or take a daylight saving change.
+  assert.ok(Math.abs(new Date(billing.trialEndsAt).getTime() - Date.now() - 30 * 86400_000) <= 3600_000 + 60_000);
+  assert.deepEqual(billing.buyable.sort(), ["growth:month", "growth:year", "starter:month"]);
+  assert.equal((await owner("/api/me")).data.billing.access, "trial");
+
+  // Choosing a plan: a Polar checkout for this workspace, which comes back to Settings.
+  assert.equal((await owner("/api/billing/checkout", { method: "POST", body: { plan: "business", interval: "month" } })).status, 400);
+  const checkout = await owner("/api/billing/checkout", { method: "POST", body: { plan: "growth", interval: "year" } });
+  assert.match(checkout.data.url, /^https:\/\/polar\.test\/checkout\//);
+  assert.deepEqual([polar.checkouts.at(-1).products, polar.checkouts.at(-1).external_customer_id, polar.checkouts.at(-1).customer_email], [["prod-growth-year"], workspace, "paying@example.com"]);
+  assert.match(polar.checkouts.at(-1).success_url, /\/settings\?billing=done#plan$/);
+  assert.equal((await owner("/api/billing/portal", { method: "POST" })).status, 404);
+
+  // Polar's webhook: anything not signed with the secret is refused; a signed one sets the plan.
+  const deliver = (event: object, at = Math.floor(Date.now() / 1000), id = `msg_${Math.random()}`) => {
+    const body = JSON.stringify(event);
+    const signature = `v1,${createHmac("sha256", Buffer.from(POLAR_SECRET.slice(6), "base64")).update(`${id}.${at}.${body}`).digest("base64")}`;
+    return fetch(`${base}/api/polar/webhook`, { method: "POST", headers: { "content-type": "application/json", "webhook-id": id, "webhook-timestamp": String(at), "webhook-signature": signature }, body }).then((r) => r.status);
+  };
+  const subscription = (status: string, extra: object = {}) => ({
+    type: `subscription.${status === "active" ? "active" : "updated"}`,
+    data: { id: "sub_1", status, product_id: "prod-growth-year", current_period_end: new Date(Date.now() + 365 * 86400_000).toISOString(), cancel_at_period_end: false, customer: { id: "cus_1", external_id: workspace, email: "paying@example.com" }, ...extra },
+  });
+  const forged = await fetch(`${base}/api/polar/webhook`, { method: "POST", headers: { "content-type": "application/json", "webhook-id": "x", "webhook-timestamp": String(Math.floor(Date.now() / 1000)), "webhook-signature": "v1,AAAA" }, body: JSON.stringify(subscription("active")) });
+  assert.equal(forged.status, 401);
+  assert.equal((await owner("/api/billing")).data.access, "trial");
+  assert.equal(await deliver(subscription("active")), 202);
+  billing = (await owner("/api/billing")).data;
+  assert.deepEqual([billing.access, billing.plan, billing.planName, billing.limit, billing.status], ["paid", "growth", "Growth", 100_000, "active"]);
+  polar.customers.add(workspace);
+  assert.equal((await owner("/api/billing/portal", { method: "POST" })).data.url, "https://polar.test/portal");
+
+  // An older delivery that arrives late changes nothing.
+  assert.equal(await deliver(subscription("canceled"), Math.floor(Date.now() / 1000) - 120), 202);
+  assert.equal((await owner("/api/billing")).data.status, "active");
+
+  // Cancelled: the time paid for stays open; when it's over and the trial is long gone, the reports close (the site is
+  // still counted), for its team too, until a plan is chosen again.
+  const member = await signUp("paying-member@example.com");
+  const { link } = (await owner("/api/team/invites", { method: "POST" })).data;
+  await member(`/api/invites/${link.split("/join/")[1]}/accept`, { method: "POST" });
+  await pool.query("update workspaces set trial_ends_at = now() - interval '1 day' where id = $1", [workspace]);
+  assert.equal(await deliver(subscription("canceled", { cancel_at_period_end: true, ends_at: new Date(Date.now() + 86400_000).toISOString() })), 202);
+  assert.equal((await owner("/api/billing")).data.access, "paid");
+  assert.equal((await owner(`/api/sites/${key}/stats`)).status, 200);
+  assert.equal(await deliver(subscription("canceled", { ends_at: new Date(Date.now() - 1000).toISOString() })), 202);
+  assert.equal((await owner("/api/billing")).data.access, "locked");
+  const closed = await owner(`/api/sites/${key}/stats`);
+  assert.equal(closed.status, 402);
+  assert.match(closed.data.error, /Choose a plan/);
+  assert.match((await member(`/api/sites/${key}/live`)).data.error, /Its owner can choose a plan/);
+  assert.equal(await visit(key, "https://paying.example/", "91.152.40.70"), 202);
+  assert.equal((await owner(`/api/sites/${key}`)).status, 200);
+
+  // A plan given for free is never closed, whatever Polar says later.
+  await pool.query("update workspaces set plan = 'comp' where id = $1", [workspace]);
+  assert.equal(await deliver(subscription("canceled")), 202);
+  assert.equal((await owner("/api/billing")).data.access, "comp");
+  assert.equal((await owner(`/api/sites/${key}/stats`)).status, 200);
+
+  // Going over the plan's events only brings a reminder.
+  await pool.query("update workspaces set plan = 'starter' where id = $1", [workspace]);
+  await pool.query("update workspaces set subscription_status = 'active' where id = $1", [workspace]);
+  const { rows: [{ id: siteId }] } = await pool.query("select id from projects where key = $1", [key]);
+  await pool.query("insert into usage_daily (project_id, day, events) values ($1, (now() at time zone 'utc')::date, 12000) on conflict (project_id, day) do update set events = 12000", [siteId]);
+  billing = (await owner("/api/billing")).data;
+  assert.deepEqual([billing.usage, billing.limit, billing.over, billing.access], [12000, 10_000, true, "paid"]);
 });

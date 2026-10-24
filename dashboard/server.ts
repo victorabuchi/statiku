@@ -17,6 +17,7 @@
 //   GET    /api/sites/:key/imports   POST { kind: ga4 | plausible | github, … }   POST …/imports/file (form data)
 //   DELETE /api/sites/:key/imports/:id   GET …/imports/google/start → Google → /api/imports/google/callback
 //   GET    /api/sites/:key/imports/google/properties?grant=
+//   GET    /api/billing   POST /api/billing/checkout { plan, interval }   POST /api/billing/portal   POST /api/polar/webhook
 import { createHash, randomBytes } from "node:crypto";
 import { Readable, Transform } from "node:stream";
 import { readFileSync } from "node:fs";
@@ -33,7 +34,9 @@ import {
   Attempts, changePassword, clearedCookie, cleanEmail, createUser, deleteAccount, emailLooksRight, endLogin,
   findByPassword, finishReset, loginCookie, resetFor, startLogin, startReset, userOf, type User,
 } from "./auth.ts";
+import type { Billing } from "./billing.ts";
 import { letter, smtpMailer, type Mailer } from "./mail.ts";
+import { access, applySubscription, BILLING_COLUMNS, checkoutUrl, planOf, PLANS, polarFromEnv, portalUrl, usage, verifyWebhook, type Polar } from "./billing.ts";
 import { checkInstall, fetchIcon, imageType, openRequest, publicRequest, type Outbound } from "./check.ts";
 import {
   addDownloadsSince, countsOf, GOOGLE, githubReleases, IMPORT_COLUMNS, importFiles, importGithub, importGoogle, importPlausible,
@@ -96,6 +99,20 @@ function json(res: ServerResponse, status: number, body: unknown, headers: Recor
 function image(res: ServerResponse, type: string, data: Buffer) {
   res.writeHead(200, { "content-type": type, "cache-control": "private, max-age=604800", ...IMAGE_HEADERS });
   res.end(data);
+}
+
+function readRaw(req: IncomingMessage, limit: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > limit) reject(new HttpError(413, "That's too large."));
+      else chunks.push(chunk);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
 }
 
 function readJson(req: IncomingMessage, limit = 16_384): Promise<Record<string, unknown>> {
@@ -163,9 +180,13 @@ export type ImportApis = { request?: Outbound; open?: Outbound; google?: Partial
 
 export async function createDashboard(options: {
   pool: pg.Pool; onSiteChanged: (key: string) => void; presence: Presence; hub: Hub; streets: Streets; mailer?: Mailer; imports?: ImportApis;
+  // Polar, for Statiku's own plans; tests use a stand-in.
+  polar?: Polar & { request?: Outbound };
 }) {
   const { pool, onSiteChanged, presence, hub, streets } = options;
   const mailer = options.mailer ?? smtpMailer();
+  const polar = options.polar ?? polarFromEnv();
+  const polarRequest = options.polar?.request ?? openRequest;
   const assets = await bundle();
   const signIns = new Attempts(10, 10 * 60_000);
   const checks = new Attempts(12, 60_000);
@@ -204,13 +225,25 @@ export async function createDashboard(options: {
   // The workspace a person's new sites and invitations belong to: the first one they own.
   async function ownWorkspace(userId: string) {
     const { rows: [own] } = await pool.query(
-      `select w.id, w.name, (select count(*) from projects p where p.workspace_id = w.id)::int as sites
+      `select w.id, w.name, (select count(*) from projects p where p.workspace_id = w.id)::int as sites, w.polar_customer_id as "customer", ${BILLING_COLUMNS}
          from memberships m join workspaces w on w.id = m.workspace_id
         where m.user_id = $1 and m.role = 'owner' order by m.created_at limit 1`,
       [userId],
     );
     if (!own) throw new HttpError(404, "There's no workspace for this account.");
-    return own as { id: string; name: string; sites: number };
+    return own as { id: string; name: string; sites: number; customer: string | null } & Billing;
+  }
+
+  // What someone's own workspace pays for, how much it has used this month, and whether its reports are open.
+  async function billingOf(userId: string) {
+    const own = await ownWorkspace(userId);
+    const plan = planOf(own.plan);
+    const used = await usage(pool, own.id);
+    return {
+      access: access(own), plan: own.plan, planName: plan?.name ?? (own.plan === "comp" ? "Unlimited" : null), status: own.status,
+      trialEndsAt: own.trialEndsAt, periodEnd: own.periodEnd, cancelAtPeriodEnd: own.cancelAtPeriodEnd,
+      usage: used, limit: plan?.events ?? null, over: !!plan && used > plan.events, customer: !!own.customer,
+    };
   }
 
   // Site icons: fetched from the site by this server, so no third party learns which sites someone tracks.
@@ -463,6 +496,17 @@ export async function createDashboard(options: {
       await endLogin(pool, req);
       return json(res, 200, { ok: true }, { "set-cookie": clearedCookie(r.secure) });
     }
+    // Polar, telling of a subscription that started, renewed, changed or ended.
+    if (path === "/api/polar/webhook" && method === "POST") {
+      const body = await readRaw(req, 1_000_000);
+      const header = (name: string) => [req.headers[name]].flat()[0];
+      if (!verifyWebhook(polar.secret ?? "", { id: header("webhook-id"), timestamp: header("webhook-timestamp"), signature: header("webhook-signature") }, body)) {
+        throw new HttpError(401, "That isn't signed by Polar.");
+      }
+      const event = JSON.parse(body.toString("utf8") || "{}");
+      await applySubscription(pool, polar, event, new Date(Number(header("webhook-timestamp")) * 1000));
+      return json(res, 202, { ok: true });
+    }
     if (path === "/api/password/forgot" && method === "POST") {
       if (!resets.allow(r.ip)) throw new HttpError(429, "Too many tries. Wait a few minutes and try again.");
       const email = cleanEmail((await readJson(req)).email);
@@ -533,7 +577,36 @@ export async function createDashboard(options: {
     if (importing) return importsApi(r, user, await mySite(user, importing[1]), importing[2]);
 
     // ---------- Your account ----------
-    if (path === "/api/me" && method === "GET") return json(res, 200, { user: me(user) });
+    if (path === "/api/me" && method === "GET") return json(res, 200, { user: me(user), billing: await billingOf(user.id).catch(() => null) });
+
+    // ---------- Your plan ----------
+    if (path === "/api/billing" && method === "GET") {
+      const own = await ownWorkspace(user.id);
+      return json(res, 200, {
+        ...(await billingOf(user.id)), plans: PLANS, owner: true, workspace: own.name,
+        // Which plans and periods can be bought on this server: those with a product in Polar.
+        buyable: polar.token ? Object.keys(polar.products) : [],
+      });
+    }
+    if (path === "/api/billing/checkout" && method === "POST") {
+      const body = await readJson(req);
+      const plan = planOf(text(body.plan, 20)), interval = body.interval === "year" ? "year" : "month";
+      const product = plan && polar.products[`${plan.id}:${interval}`];
+      if (!plan || !product || !polar.token) throw new HttpError(400, "That plan can't be bought here yet.");
+      const own = await ownWorkspace(user.id);
+      const url = await checkoutUrl(polarRequest, polar, { product, workspaceId: own.id, email: user.email, success: `${origin(r)}/settings?billing=done#plan` })
+        .catch((e) => {
+          throw new HttpError(502, (e as Error).message);
+        });
+      return json(res, 200, { url });
+    }
+    if (path === "/api/billing/portal" && method === "POST") {
+      if (!polar.token) throw new HttpError(400, "Billing isn't set up on this server yet.");
+      const own = await ownWorkspace(user.id);
+      const url = await portalUrl(polarRequest, polar, own.id, `${origin(r)}/settings#plan`);
+      if (!url) throw new HttpError(404, "There's no billing account yet. Choose a plan first.");
+      return json(res, 200, { url });
+    }
     if (path === "/api/me" && method === "PATCH") {
       const body = await readJson(req);
       const name = body.name === undefined ? user.name : text(body.name, 80);
@@ -701,6 +774,12 @@ export async function createDashboard(options: {
     if (action === "/check" && method === "POST") {
       if (!checks.allow(user.id)) throw new HttpError(429, "Wait a minute before checking again.");
       return json(res, 200, await checkInstall(site.domains[0], site.key));
+    }
+    // After an unpaid trial the reports close until a plan is chosen; the site is still counted meanwhile.
+    if (["/stats", "/live", "/stream"].includes(action) && access(site.billing) === "locked") {
+      throw new HttpError(402, site.role === "owner"
+        ? "Your free trial has ended. Choose a plan to see your numbers again: Statiku has kept counting meanwhile."
+        : "This team's free trial has ended. Its owner can choose a plan to open the reports again.");
     }
     if (action === "/stats" && method === "GET") {
       const url = new URL(req.url ?? "/", "http://x");
