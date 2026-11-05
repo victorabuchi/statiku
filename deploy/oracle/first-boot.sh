@@ -22,10 +22,11 @@ if [ ! -f /swapfile ]; then
 fi
 
 say "Opening ports 80 and 443"
-# Oracle's Ubuntu lets in only SSH; HTTP and HTTPS too, ahead of its final REJECT rule. The network's security list
-# has to allow them as well (see docs/OPERATIONS.md).
+# Oracle's Ubuntu lets in only SSH; HTTP and HTTPS too, first, ahead of its final REJECT rule (other hosts' Ubuntu
+# lets everything in, and this changes nothing there). The network's security list or firewall has to allow them as
+# well (see docs/OPERATIONS.md).
 for port in 443 80; do
-  iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null || iptables -I INPUT 5 -p tcp --dport "$port" -j ACCEPT
+  iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport "$port" -j ACCEPT
 done
 if command -v netfilter-persistent >/dev/null; then netfilter-persistent save; fi
 
