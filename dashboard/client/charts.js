@@ -9,6 +9,15 @@ export function svgEl(tag, attrs = {}) {
   return node;
 }
 
+// A scale that spans the values (a temperature, a rating) rather than starting at zero.
+function span(values) {
+  if (!values.length) return { ...nice(1), bottom: 0 };
+  const lo = Math.min(...values), hi = Math.max(...values);
+  const { step } = nice((hi - lo || Math.abs(hi) || 1) * 1.1);
+  const bottom = Math.floor(lo / step) * step;
+  return { bottom, step, top: Math.max(bottom + step, Math.ceil(hi / step) * step) };
+}
+
 // Round steps for the y axis: 4 or so lines, at 1, 2, 2.5 or 5 times a power of ten.
 function nice(max) {
   if (max <= 0) return { top: 4, step: 1 };
@@ -17,18 +26,20 @@ function nice(max) {
   return { top: step * Math.ceil(max / step), step };
 }
 
-// points: [{ label, v }], compare: the previous period's points by position, or null. m: { label, fmt, tick }.
+// points: [{ label, v }], compare: the previous period's points by position, or null. m: { label, fmt, tick }, and
+// optionally fit (the scale spans the values rather than starting at zero) and line (no wash under the line).
 export function lineChart(host, points, compare, m, names) {
   const W = Math.max(280, host.clientWidth || 800), H = W < 560 ? 200 : 260;
   const M = { l: 44, r: 12, t: 16, b: 26 };
   const values = [...points.map((p) => p.v ?? 0), ...(compare ?? []).map((p) => p.v ?? 0)];
-  const { top, step } = nice(Math.max(...values, 0) * 1.08);
+  let { top, step } = nice(Math.max(...values, 0) * 1.08), bottom = 0;
+  if (m.fit) ({ top, step, bottom } = span(points.concat(compare ?? []).map((p) => p.v).filter((v) => v != null)));
   const n = points.length;
   const x = (i) => M.l + (n === 1 ? (W - M.l - M.r) / 2 : (i * (W - M.l - M.r)) / (n - 1));
-  const y = (v) => M.t + (H - M.t - M.b) * (1 - (v ?? 0) / top);
+  const y = (v) => M.t + (H - M.t - M.b) * (1 - ((v ?? bottom) - bottom) / (top - bottom || 1));
   const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", tabindex: "0", "aria-label": `${m.label} over time, ${n} points. Use the arrow keys to read each one.` });
-  for (let v = 0; v <= top + 1e-9; v += step) {
-    svg.append(svgEl("line", { x1: M.l, x2: W - M.r, y1: y(v), y2: y(v), stroke: v === 0 ? "var(--axis)" : "var(--grid)", "stroke-width": 1, "shape-rendering": "crispEdges" }));
+  for (let v = bottom; v <= top + 1e-9; v += step) {
+    svg.append(svgEl("line", { x1: M.l, x2: W - M.r, y1: y(v), y2: y(v), stroke: v === bottom ? "var(--axis)" : "var(--grid)", "stroke-width": 1, "shape-rendering": "crispEdges" }));
     const t = svgEl("text", { x: M.l - 8, y: y(v) + 4, "text-anchor": "end", class: "axis-text" });
     t.textContent = m.tick(v);
     svg.append(t);
@@ -45,7 +56,7 @@ export function lineChart(host, points, compare, m, names) {
     svg.append(svgEl("path", { d: line(compare.slice(0, n)), fill: "none", stroke: "var(--series-prev)", "stroke-width": 2, "stroke-dasharray": "4 4", "stroke-linejoin": "round", "stroke-linecap": "round" }));
   }
   if (n > 1) {
-    svg.append(svgEl("path", { d: `${line(points)}L${x(n - 1)},${y(0)}L${x(0)},${y(0)}Z`, fill: "var(--series-wash)" }));
+    if (!m.line) svg.append(svgEl("path", { d: `${line(points)}L${x(n - 1)},${y(bottom)}L${x(0)},${y(bottom)}Z`, fill: "var(--series-wash)" }));
     svg.append(svgEl("path", { d: line(points), fill: "none", stroke: "var(--series)", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
   } else {
     svg.append(svgEl("circle", { cx: x(0), cy: y(points[0]?.v), r: 4, fill: "var(--series)" }));
@@ -169,4 +180,94 @@ export function minuteBars(host, points, fmt) {
     }
   });
   host.replaceChildren(svg);
+}
+
+
+// Bars over time (or over any labels), with the previous period as a ghost bar behind each, and a hover readout.
+// points: [{ label, short?, v }], compare: by position, or null; m: { label, fmt, tick }.
+export function barChart(host, points, compare, m) {
+  const W = Math.max(280, host.clientWidth || 800), H = W < 560 ? 200 : 260;
+  const M = { l: 44, r: 12, t: 16, b: 26 };
+  const values = [...points.map((p) => p.v ?? 0), ...(compare ?? []).map((p) => p.v ?? 0)];
+  const lowest = Math.min(0, ...values);
+  const { top, step } = nice(Math.max(...values, 0) * 1.08);
+  const bottom = lowest < 0 ? -nice(-lowest * 1.08).top : 0;
+  const n = points.length, slot = (W - M.l - M.r) / Math.max(1, n), bw = Math.max(2, Math.min(42, slot * 0.68));
+  const x = (i) => M.l + slot * i + (slot - bw) / 2;
+  const y = (v) => M.t + (H - M.t - M.b) * (1 - ((v ?? 0) - bottom) / (top - bottom || 1));
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": `${m.label}, ${n} bars` });
+  for (let v = bottom; v <= top + 1e-9; v += step) {
+    svg.append(svgEl("line", { x1: M.l, x2: W - M.r, y1: y(v), y2: y(v), stroke: v === 0 ? "var(--axis)" : "var(--grid)", "stroke-width": 1, "shape-rendering": "crispEdges" }));
+    const t = svgEl("text", { x: M.l - 8, y: y(v) + 4, "text-anchor": "end", class: "axis-text" });
+    t.textContent = m.tick(v);
+    svg.append(t);
+  }
+  const every = Math.max(1, Math.ceil(n / (W < 560 ? 4 : 8)));
+  for (let i = 0; i < n; i += every) {
+    const t = svgEl("text", { x: x(i) + bw / 2, y: H - 6, "text-anchor": "middle", class: "axis-text" });
+    t.textContent = points[i].short ?? points[i].label;
+    svg.append(t);
+  }
+  const tip = document.createElement("div");
+  tip.className = "tip";
+  tip.hidden = true;
+  points.forEach((p, i) => {
+    const prev = compare?.[i];
+    if (prev?.v) svg.append(svgEl("rect", { x: x(i) - Math.min(4, bw * 0.15), y: Math.min(y(prev.v), y(0)), width: bw, height: Math.abs(y(prev.v) - y(0)), rx: 3, fill: "var(--series-prev)", opacity: 0.35 }));
+    const bar = svgEl("rect", { x: x(i), y: Math.min(y(p.v), y(0)), width: bw, height: Math.max(p.v ? 1.5 : 0, Math.abs(y(p.v) - y(0))), rx: 3, fill: "var(--series)" });
+    bar.addEventListener("pointerenter", () => {
+      tip.replaceChildren(Object.assign(document.createElement("b"), { textContent: m.fmt(p.v) }), document.createTextNode(` ${p.label}${prev ? ` · before: ${m.fmt(prev.v)}` : ""}`));
+      tip.hidden = false;
+      tip.style.left = Math.min(Math.max(((x(i) + bw / 2) / W) * host.clientWidth, 90), host.clientWidth - 90) + "px";
+      tip.style.top = (y(Math.max(p.v ?? 0, 0)) / H) * host.clientHeight + "px";
+      bar.setAttribute("fill", "var(--series-strong, var(--series))");
+    });
+    bar.addEventListener("pointerleave", () => { tip.hidden = true; bar.setAttribute("fill", "var(--series)"); });
+    svg.append(bar);
+  });
+  host.replaceChildren(svg, tip);
+}
+
+// A donut of shares, with the total in the middle and a legend beside it. slices: [{ label, v }]; the first eight
+// get a colour each and the rest are "Other".
+export const SLICE_COLOURS = ["#2fb3eb", "#29c46b", "#f5a524", "#8b7cf6", "#eb6834", "#e64980", "#12b886", "#4c6ef5"];
+export function donutChart(host, slices, { fmt = String, centre = "" } = {}) {
+  const sorted = [...slices].filter((s) => s.v > 0).sort((a, b) => b.v - a.v);
+  const shown = sorted.length > 8 ? [...sorted.slice(0, 7), { label: "Other", v: sorted.slice(7).reduce((a, s) => a + s.v, 0) }] : sorted;
+  const total = shown.reduce((a, s) => a + s.v, 0);
+  const R = 90, r = 58, C = 100;
+  const svg = svgEl("svg", { viewBox: "0 0 200 200", width: 200, height: 200, role: "img", "aria-label": shown.map((s) => `${s.label}: ${fmt(s.v)}`).join(", ") });
+  let angle = -Math.PI / 2;
+  const point = (a, rad) => `${(C + rad * Math.cos(a)).toFixed(2)},${(C + rad * Math.sin(a)).toFixed(2)}`;
+  const legend = document.createElement("div");
+  legend.className = "donut-legend";
+  shown.forEach((s, i) => {
+    const colour = SLICE_COLOURS[i % SLICE_COLOURS.length], sweep = total ? (s.v / total) * Math.PI * 2 : 0;
+    const end = angle + Math.min(sweep, Math.PI * 2 - 0.0001), large = sweep > Math.PI ? 1 : 0;
+    const path = svgEl("path", { d: `M${point(angle, R)}A${R},${R} 0 ${large} 1 ${point(end, R)}L${point(end, r)}A${r},${r} 0 ${large} 0 ${point(angle, r)}Z`, fill: colour });
+    const tip = svgEl("title");
+    tip.textContent = `${s.label}: ${fmt(s.v)} (${Math.round((100 * s.v) / total)}%)`;
+    path.append(tip);
+    svg.append(path);
+    angle = end;
+    const row = document.createElement("div");
+    row.className = "row";
+    const dot = document.createElement("i");
+    dot.style.background = colour;
+    const name = document.createElement("span");
+    name.textContent = s.label;
+    const value = document.createElement("b");
+    value.textContent = `${fmt(s.v)}`;
+    const share = document.createElement("small");
+    share.textContent = `${total ? Math.round((100 * s.v) / total) : 0}%`;
+    row.append(dot, name, value, share);
+    legend.append(row);
+  });
+  const middle = svgEl("text", { x: C, y: C + 6, "text-anchor": "middle", class: "donut-total" });
+  middle.textContent = centre || fmt(total);
+  svg.append(middle);
+  const wrap = document.createElement("div");
+  wrap.className = "donut";
+  wrap.append(svg, legend);
+  host.replaceChildren(shown.length ? wrap : Object.assign(document.createElement("p"), { className: "empty-note", textContent: "Nothing to show for this period." }));
 }

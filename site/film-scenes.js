@@ -93,10 +93,11 @@ window.STATIKU_SCENES = {
     {
       id: "numbers", tab: "Trackers", title: "Track anything, live.",
       caption: "Send a number, a word or a yes/no from anywhere with one call (installs, scores, a sensor, a status), or upload a file, and chart it any way you like.",
-      url: "Trackers", dur: 8600, glow: "#4cc9f0",
-      frames: [[0, "numbers"], [2350, "numbers-live"], [4950, "numbers-send"]],
-      beats: [[0, null], [650, "tileWidgets", 0, "A tracker from the app"], [2450, "tileWidgets", 0, "Updated live"], [5600, "copyCurl", 0, "One call sends one"], [6250, "copyCurl", 250, "One call sends one"], [7650, null]],
-      pings: [[2350, "tileWidgets"]],
+      url: "Trackers", dur: 11000, glow: "#4cc9f0",
+      frames: [[0, "numbers"], [2400, "numbers-live"], [4800, "tracker-pie"], [7900, "numbers-send"]],
+      beats: [[0, null], [650, "tileWidgets", 0, "A tracker from the app"], [2500, "tileWidgets", 0, "Updated live"], [5100, "splitPick", 0, "Split by widget"],
+        [6000, "pieChart", 0, "As a pie, or a line, bars, a table"], [8500, "copyCurl", 0, "One call sends one"], [9100, "copyCurl", 250, "One call sends one"], [10400, null]],
+      pings: [[2400, "tileWidgets"]],
     },
   ],
 };

@@ -19,7 +19,8 @@
 //   GET    /api/sites/:key/imports   POST { kind: ga4 | plausible | github, … }   POST …/imports/file (form data)
 //   DELETE /api/sites/:key/imports/:id   GET …/imports/google/start → Google → /api/imports/google/callback
 //   GET    /api/sites/:key/imports/google/properties?grant=
-//   GET    /api/numbers?range=   every site's numbers, for the Websites page
+//   GET    /api/numbers?range=   every site's trackers, for the Trackers page
+//   GET    /api/sites/:key/trackers/:name?range=&by=&measure=&split=   one tracker's analytics
 //   GET    /api/sites/:key/numbers?range=   POST …/numbers/key (a new key)   POST …/numbers/upload (CSV)   DELETE …/numbers/:name
 //   GET    /api/sites/:key/match   the match view's scoreboard   POST|DELETE …/match/link   its public link
 //   GET    /api/match/:token   GET /api/match/:token/stream   the match view at its public link, and its live feed
@@ -57,7 +58,7 @@ import { assists, heatmap, injuries, momentum, ratings, revenue } from "./insigh
 import { createReports, slackHook } from "./reports.ts";
 import { askerFromEnv, numbersFor, whatChanged, type Asker } from "./ask.ts";
 import { paymentOf, payingSite, recordPayment, verifyPayment, type Provider } from "./payments.ts";
-import { deleteNumber, numbersReport, parseNumbersFile, renewNumbersKey, saveNumbers } from "./numbers.ts";
+import { deleteNumber, numbersReport, parseNumbersFile, renewNumbersKey, saveNumbers, trackerReport } from "./numbers.ts";
 import { access, applySubscription, BILLING_COLUMNS, checkoutUrl, planOf, PLANS, polarFromEnv, portalUrl, usage, verifyWebhook, type Polar } from "./billing.ts";
 import { checkInstall, fetchIcon, imageType, openRequest, publicRequest, type Outbound } from "./check.ts";
 import {
@@ -905,6 +906,18 @@ export async function createDashboard(options: {
         return json(res, 200, { url: null });
       }
       return json(res, 200, { url: `${origin(r)}/m/${await shareMatch(pool, site.id)}` });
+    }
+    const trackerAt = path.match(/^\/api\/sites\/(p_[a-z0-9]{6,20})\/trackers\/([^/]{1,200})$/);
+    if (trackerAt && method === "GET") {
+      const site = await mySite(user, trackerAt[1]);
+      if (access(site.billing) === "locked") throw new HttpError(402, "Your free trial has ended. Choose a plan to see your trackers again: Statiku has kept them meanwhile.");
+      const url = new URL(req.url ?? "/", "http://x");
+      const range = url.searchParams.get("range") ?? "d30";
+      const report = await trackerReport(pool, site, decodeURIComponent(trackerAt[2]), RANGE_IDS.includes(range) ? range : "d30", {
+        from: url.searchParams.get("from"), to: url.searchParams.get("to"), by: url.searchParams.get("by"), measure: url.searchParams.get("measure"), split: url.searchParams.get("split"),
+      });
+      if (!report) throw new HttpError(404, "There's no such tracker on this site.");
+      return json(res, 200, { site: { key: site.key, name: site.name, domain: site.domains[0], role: site.role }, ...report });
     }
     const numbersAt = path.match(/^\/api\/sites\/(p_[a-z0-9]{6,20})\/numbers(?:\/([^/]{1,200}))?$/);
     if (numbersAt) return numbersApi(r, await mySite(user, numbersAt[1]), numbersAt[2] ? decodeURIComponent(numbersAt[2]) : undefined);

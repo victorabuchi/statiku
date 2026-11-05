@@ -120,19 +120,23 @@ another network, a link passed on) show as not matched. The match is an estimate
 
 ## Trackers: track anything
 
-Anything a site measures beyond its visits (match scores, installs, sales, sensor readings) can be sent from a script,
-a server or a device, with the secret key from the site's **Numbers** page, and shows there as a live tile:
+Anything else a site or app wants followed (installs, sales, a score, a sensor's reading, a server's status) can be
+sent from a script, a server or a device with the secret key from **Add tracker**, and shows on the **Trackers** page,
+live. A value is a number, a word or a yes/no, and can carry labels to split it by:
 
 ```sh
-curl https://statiku.victorabuchi.com/v1/number \
+curl https://statiku.victorabuchi.com/v1/track \
   -H "Authorization: Bearer sn_…" \
-  -d '{"name": "Home goals", "value": 2}'
+  -d '{"name": "Sales", "value": 29, "op": "add", "labels": {"plan": "pro"}}'
 ```
 
-`"op": "add"` makes a number that counts up (each value is added to its total); any other keeps its latest value.
-`"ts"` (ISO time or Unix seconds) sends a value from another time, a body can hold a list of up to 100, and a device
-that can only open an address can use `/v1/number?key=…&name=…&value=…`. Numbers also come in CSV files on the same
-page: `time,name,value` rows, or a `time` column and a column for each number. They count towards the site's events.
+`"op": "add"` makes a number that counts up (each value is added to its total); any other number, and any word, keeps
+its latest value. `"ts"` (ISO time or Unix seconds) sends a value from another time, a body can hold a list of up to
+100 (`{"values": [...]}`), and a device that can only open an address can use `/v1/track?key=…&name=…&value=…`. Values
+also come in CSV files: `time,name,value` rows (any other column is a label), or a `time` column and a column for each
+tracker. Each tracker has a page of its own: a line, an area, bars, a pie or a table, by the hour, day, week or month,
+as a total, an average, the lowest, the highest or the latest, split by any label; for words, how often and how long
+each value was. They count towards the site's events.
 
 ## Run it locally
 

@@ -65,7 +65,8 @@ export async function renewNumbersKey(pool: pg.Pool, projectId: string) {
 
 // Numbers from CSV files: "time, name, value" rows, or a time column and a column per number. Times without a zone
 // are in the site's.
-export function parseNumbersFile(text: string, now = new Date()): { points: { name: string; ts: Date; value: number | null; text: string | null }[]; kinds: Map<string, Kind> } | string {
+type FilePoint = { name: string; ts: Date; value: number | null; text: string | null; labels?: Record<string, string> | null };
+export function parseNumbersFile(text: string, now = new Date()): { points: FilePoint[]; kinds: Map<string, Kind> } | string {
   const rows = parseCsv(text).filter((r) => r.some((c) => c.trim()) && !r[0]?.startsWith("#"));
   if (rows.length < 2) return "The file needs a header row and at least one row of numbers.";
   const head = rows[0].map((h) => h.trim().toLowerCase());
@@ -73,7 +74,7 @@ export function parseNumbersFile(text: string, now = new Date()): { points: { na
   const nameCol = head.findIndex((h) => /^(name|number|metric|series)$/.test(h));
   const valueCol = head.findIndex((h) => /^(value|amount|count|score|reading)$/.test(h));
   const opCol = head.findIndex((h) => /^(op|kind|type)$/.test(h));
-  const points: { name: string; ts: Date; value: number | null; text: string | null }[] = [];
+  const points: FilePoint[] = [];
   const kinds = new Map<string, Kind>();
   // A cell's value: a number, or a word (any other text).
   const cell = (c: string | undefined) => valueOf(String(c ?? ""));
@@ -87,10 +88,13 @@ export function parseNumbersFile(text: string, now = new Date()): { points: { na
   try {
     if (nameCol >= 0 && valueCol >= 0) {
       if (timeCol < 0) return 'Add a "time" column, with each value\'s date or time.';
+      // Any other column is a label of each value (plan, country, room).
+      const labelCols = head.map((h, i) => ({ i, key: nameOf(rows[0][i]).slice(0, 40) })).filter((c) => ![timeCol, nameCol, valueCol, opCol].includes(c.i) && c.key).slice(0, 10);
       for (const [i, r] of rows.slice(1).entries()) {
         const name = nameOf(r[nameCol]), value = cell(r[valueCol]);
         if (!name || value === null) continue;
-        points.push({ name, ts: when(r[timeCol], i + 2), ...value });
+        const labels = Object.fromEntries(labelCols.map((c) => [c.key, nameOf(r[c.i]).slice(0, 100)]).filter(([, v]) => v));
+        points.push({ name, ts: when(r[timeCol], i + 2), ...value, labels: Object.keys(labels).length ? labels : null });
         const op = String(r[opCol] ?? "").trim().toLowerCase();
         if (!kinds.has(name)) kinds.set(name, value.text !== null ? "text" : op === "add" ? "add" : "set");
       }
@@ -131,8 +135,8 @@ export async function saveNumbers(pool: pg.Pool, projectId: string, file: NonNul
     for (let i = 0; i < file.points.length; i += 5000) {
       const part = file.points.slice(i, i + 5000);
       await client.query(
-        "insert into metric_points (project_id, name, ts, value, text_value) select $1, * from unnest($2::text[], $3::timestamptz[], $4::float8[], $5::text[])",
-        [projectId, part.map((p) => p.name), part.map((p) => p.ts), part.map((p) => p.value), part.map((p) => p.text)],
+        "insert into metric_points (project_id, name, ts, value, text_value, props) select $1, * from unnest($2::text[], $3::timestamptz[], $4::float8[], $5::text[], $6::jsonb[])",
+        [projectId, part.map((p) => p.name), part.map((p) => p.ts), part.map((p) => p.value), part.map((p) => p.text), part.map((p) => (p.labels ? JSON.stringify(p.labels) : null))],
       );
     }
     await client.query("commit");
@@ -149,4 +153,61 @@ export async function deleteNumber(pool: pg.Pool, projectId: string, name: strin
   await pool.query("delete from metric_points where project_id = $1 and name = $2", [projectId, name]);
   const { rowCount } = await pool.query("delete from metrics where project_id = $1 and name = $2", [projectId, name]);
   return (rowCount ?? 0) > 0;
+}
+
+
+// One tracker's analytics for a period: its values bucketed by the hour, day, week or month (a total, an average, the
+// lowest, the highest, the latest or a count, as asked), the same for the period before, a summary, the labels its
+// values carry, a split by one of them, and its latest values. For a tracker of words: how often each word came and
+// how long each was the latest, and its last changes.
+export const MEASURES = { sum: "sum(value)", avg: "avg(value)", min: "min(value)", max: "max(value)", last: "(array_agg(value order by ts desc))[1]", count: "count(*)" } as const;
+export type Measure = keyof typeof MEASURES;
+export async function trackerReport(pool: pg.Pool, site: Site, name: string, rangeId: string, o: { from?: string | null; to?: string | null; by?: string | null; measure?: string | null; split?: string | null } = {}) {
+  const { rows: [tracker] } = await pool.query("select name, kind, created_at from metrics where project_id = $1 and name = $2", [site.id, name]);
+  if (!tracker) return null;
+  const b = await bounds(pool, site.id, site.timezone, rangeId, o);
+  const UNITS_OK = ["hour", "day", "week", "month"];
+  if (o.by && UNITS_OK.includes(o.by) && (b.to.getTime() - b.from.getTime()) / ({ hour: 3600e3, day: 86400e3, week: 7 * 86400e3, month: 30 * 86400e3 }[o.by]!) <= 1500) b.unit = o.by as typeof b.unit;
+  const words = tracker.kind === "text";
+  const measure: Measure = o.measure && o.measure in MEASURES ? (o.measure as Measure) : words ? "count" : tracker.kind === "add" ? "sum" : "last";
+  const agg = words ? "count(*)" : MEASURES[measure];
+  const q = async (sql: string, params: unknown[]) => (await pool.query(sql, params)).rows;
+  const series = (from: Date, to: Date) => q(`
+    with buckets as (
+      select generate_series(date_trunc($5, $2::timestamptz at time zone $4), date_trunc($5, ($3::timestamptz - interval '1 millisecond') at time zone $4), ('1 ' || $5)::interval) as t),
+    agg as (
+      select date_trunc($5, ts at time zone $4) as t, ${agg} as v from metric_points
+       where project_id = $1 and name = $6 and ts >= $2 and ts < $3 group by 1)
+    select to_char(buckets.t, 'YYYY-MM-DD"T"HH24:MI') as t, agg.v::float8 as v from buckets left join agg using (t) order by buckets.t`, [site.id, from, to, site.timezone, b.unit, name]);
+  const p = [site.id, b.from, b.to, name];
+  const SUMMARY = `select count(*)::int as count, sum(value)::float8 as sum, avg(value)::float8 as avg, min(value)::float8 as min, max(value)::float8 as max,
+                          (array_agg(coalesce(value::text, text_value) order by ts desc))[1] as last, (array_agg(coalesce(value::text, text_value) order by ts))[1] as first,
+                          count(distinct text_value)::int as distinct
+                     from metric_points where project_id = $1 and name = $4 and ts >= $2 and ts < $3`;
+  const splitKey = o.split ? nameOf(o.split).slice(0, 40) : null;
+  const [now, before, [summary], [previous], labels, split, values, wordShares] = await Promise.all([
+    series(b.from, b.to),
+    rangeId === "all" ? Promise.resolve([]) : series(b.prevFrom, b.prevTo),
+    q(SUMMARY, p),
+    rangeId === "all" ? Promise.resolve([{}]) : q(SUMMARY, [site.id, b.prevFrom, b.prevTo, name]),
+    q(`select k as key, count(*)::int as n from metric_points cross join lateral jsonb_object_keys(props) k
+        where project_id = $1 and name = $4 and ts >= $2 and ts < $3 and props is not null group by 1 order by 2 desc, 1 limit 12`, p),
+    splitKey
+      ? q(`select coalesce(props ->> $5, 'No ${"label"}') as label, ${words ? "count(*)" : MEASURES[measure === "last" ? (tracker.kind === "add" ? "sum" : "avg") : measure]}::float8 as v, count(*)::int as n
+             from metric_points where project_id = $1 and name = $4 and ts >= $2 and ts < $3 group by 1 order by 2 desc nulls last, 1 limit 24`, [...p, splitKey])
+      : Promise.resolve(null),
+    q(`select ts, value, text_value as text, props as labels from metric_points where project_id = $1 and name = $4 and ts >= $2 and ts < $3 order by ts desc limit 200`, p),
+    // How often each word came, and how long each was the latest (until the next value, or now).
+    words
+      ? q(`with w as (select text_value as label, ts, lead(ts) over (order by ts) as next from metric_points where project_id = $1 and name = $4 and ts >= $2 and ts < $3)
+           select label, count(*)::int as count, extract(epoch from sum(coalesce(next, least($3::timestamptz, now())) - ts))::float8 as seconds
+             from w group by 1 order by 2 desc, 1 limit 24`, p)
+      : Promise.resolve(null),
+  ]);
+  return {
+    tracker: { name: tracker.name as string, kind: tracker.kind as Kind, since: tracker.created_at as Date },
+    range: b, measure, split: splitKey,
+    series: now, previousSeries: before, summary, previous, labels, splitRows: split, values,
+    words: wordShares,
+  };
 }

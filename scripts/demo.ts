@@ -154,10 +154,21 @@ export async function demo(databaseUrl: string, log = console.log) {
         points.push(["Crash-free sessions (%)", at, Math.round((99.2 + random() * 0.7) * 10) / 10]);
         points.push(["App Store rating", at, Math.round((4.6 + day / 150 + random() * 0.05) * 10) / 10]);
       }
-      points.push(["Widgets added", at, Math.round(6 + random() * 14 + (at.getUTCHours() > 7 && at.getUTCHours() < 22 ? 12 : 0))]);
+      // Widgets added, each labelled with which widget it was.
+      for (const [widget, w] of [["Calendar", 5], ["Music", 4], ["Weather", 3], ["Timers", 2], ["Notes", 1]] as const) {
+        points.push(["Widgets added", at, Math.round((w + random() * w * 1.6) * (at.getUTCHours() > 7 && at.getUTCHours() < 22 ? 1.8 : 0.7)), null, { widget }]);
+      }
     }
-    await pool.query("insert into metrics (project_id, name, kind) values ($1, 'Active Macs', 'set'), ($1, 'Crash-free sessions (%)', 'set'), ($1, 'App Store rating', 'set'), ($1, 'Widgets added', 'add')", [site.id]);
-    await insert("metric_points", ["project_id", "name", "ts", "value"], ["uuid", "text", "timestamptz", "float8"], points.map((p) => [site.id, ...p]));
+    // A tracker of words: the update server's status, now and then degraded.
+    let status = "Online";
+    for (let h = 30 * 24; h >= 0; h -= 3) {
+      const next = random() < 0.06 ? "Degraded" : random() < 0.01 ? "Offline" : "Online";
+      if (next !== status || h % 24 === 0) points.push(["Update server", new Date(now - h * 3600_000), null, next, null]);
+      status = next;
+    }
+    await pool.query("insert into metrics (project_id, name, kind) values ($1, 'Active Macs', 'set'), ($1, 'Crash-free sessions (%)', 'set'), ($1, 'App Store rating', 'set'), ($1, 'Widgets added', 'add'), ($1, 'Update server', 'text')", [site.id]);
+    await insert("metric_points", ["project_id", "name", "ts", "value", "text_value", "props"], ["uuid", "text", "timestamptz", "float8", "text", "jsonb"],
+      points.map(([name, at, value, text = null, props = null]) => [site.id, name, at, typeof value === "number" || value === null ? value : null, text ?? (typeof value === "string" ? value : null), props]));
     await insert("installs", ["project_id", "id", "first_seen", "last_seen", "platform", "app_version", "build", "os_version", "state", "trial_at", "licensed_at", "country", "session_id", "source", "referrer_host", "utm_medium", "utm_campaign"],
       ["uuid", "uuid", "timestamptz", "timestamptz", "text", "text", "text", "text", "text", "timestamptz", "timestamptz", "text", "bigint", "text", "text", "text", "text"], installs);
     await pool.query(

@@ -6,7 +6,7 @@ import {
   siCloudflare, siFathom, siFramer, siGithub, siGoogleanalytics, siGoogletagmanager, siMatomo, siPlausibleanalytics, siShopify, siSimpleanalytics,
   siSquarespace, siUmami, siWebflow, siWix, siWordpress,
 } from "simple-icons";
-import { lineChart, minuteBars, sparkline, svgEl } from "./charts.js";
+import { barChart, donutChart, lineChart, minuteBars, sparkline, svgEl } from "./charts.js";
 import { createGlobe } from "./globe.js";
 
 // ---------- Helpers ----------
@@ -2147,14 +2147,14 @@ const NUMBER_RANGES = [["today", "Today"], ["d7", "7 days"], ["d30", "30 days"],
 // A tracker's tile: its value for the period (an "add" tracker's total, any other's latest), the change on the
 // previous period, its line (a word tracker's last few words instead), and when it last moved. update() takes a value
 // as it arrives.
-function numberTile(n, { owner = false, onDelete = null, big = false } = {}) {
+function numberTile(n, { owner = false, onDelete = null, big = false, href = null } = {}) {
   const words = n.kind === "text";
   const value = h("span", { class: `value${words ? " word" : ""}` });
   const when = h("span", { class: "muted small" });
   const line = h("span", { class: "spark-host" });
-  const tile = h("div", { class: `card kpi number-tile${big ? " big" : ""}` },
+  const tile = h(href ? "a" : "div", { class: `card kpi number-tile${big ? " big" : ""}${href ? " link" : ""}`, href },
     h("span", { class: "label" }, h("span", { text: n.name }), h("span", { class: "kind", text: n.kind === "add" ? "Total" : "Latest" }),
-      owner && onDelete ? h("button", { class: "btn plain icon-only", type: "button", "aria-label": `Delete ${n.name}`, title: "Delete", onclick: onDelete }, icon("trash", 14)) : null),
+      owner && onDelete ? h("button", { class: "btn plain icon-only", type: "button", "aria-label": `Delete ${n.name}`, title: "Delete", onclick: (e) => { e.preventDefault(); e.stopPropagation(); onDelete(); } }, icon("trash", 14)) : null),
     value, !words && n.previous != null ? delta({}, n.value, n.previous) : h("span", { class: "delta", text: n.kind === "add" ? "In this period" : " " }), line, when);
   const paint = () => {
     value.textContent = words ? n.value ?? n.last?.value ?? "–" : num(n.value ?? (n.kind === "add" ? 0 : n.last?.value));
@@ -2221,7 +2221,7 @@ function trackersPage() {
     body.replaceChildren(...withTrackers.map((s) => h("div", { class: "number-group" },
       h("div", { class: "row-between" }, h("b", { text: s.name }), s.role === "owner" ? h("a", { class: "btn plain", href: `/trackers/new?site=${s.key}`, text: "Send or upload values" }) : null),
       h("div", { class: "grid g4 numbers" }, s.numbers.map((n) => {
-        const tile = numberTile(n, { owner: s.role === "owner", onDelete: remove(s, n) });
+        const tile = numberTile(n, { owner: s.role === "owner", onDelete: remove(s, n), href: `/trackers/${s.key}/${encodeURIComponent(n.name)}` });
         tiles.set(`${s.key}:${n.name}`, tile);
         return tile;
       })))));
@@ -2244,6 +2244,103 @@ function trackersPage() {
   queueMicrotask(load);
   return h("div", { class: "page" },
     pageHead([icon("track", 20), h("h1", { text: "Trackers" })], [rangeTabs, h("a", { class: "btn primary", href: "/trackers/new" }, icon("plus", 16), "Add tracker")]), body);
+}
+
+// One tracker, charted any way: a line, an area, bars, a pie or a table, by the hour, day, week or month, as a total,
+// an average, the lowest, the highest, the latest or a count, and split by any label its values carry. For a tracker
+// of words: how often each word came, how long each one lasted, and its changes.
+const MEASURE_NAMES = [["sum", "Total"], ["avg", "Average"], ["min", "Lowest"], ["max", "Highest"], ["last", "Latest"], ["count", "Values"]];
+const TRACKER_RANGES = [["today", "Today"], ["d7", "7 days"], ["d30", "30 days"], ["d90", "90 days"], ["m12", "12 months"], ["all", "All time"]];
+const TRACKER_UNITS = [["hour", "Hour", (d) => d <= 7], ["day", "Day", (d) => d > 1 && d <= 400], ["week", "Week", (d) => d > 14], ["month", "Month", (d) => d > 60]];
+const lasted = (s) => (s < 90 ? `${Math.round(s)}s` : s < 5400 ? `${Math.round(s / 60)} min` : s < 172800 ? `${(s / 3600).toFixed(1)} h` : `${(s / 86400).toFixed(1)} days`);
+
+async function trackerPage(key, name) {
+  const view = saved.tracker ?? {};
+  let range = view.range ?? "d30", by = null, measure = null, split = null, chart = null, data = null;
+  const body = h("div", { class: "stack" }, h("p", { class: "muted", text: "Loading…" }));
+  const rangeTabs = h("span");
+  const keep = () => { saved.tracker = { range, chart }; remember(); };
+  async function load() {
+    rangeTabs.replaceChildren(tabs(TRACKER_RANGES, range, (id) => { range = id; by = null; keep(); load(); }));
+    const q = new URLSearchParams({ range });
+    if (by) q.set("by", by);
+    if (measure) q.set("measure", measure);
+    if (split) q.set("split", split);
+    try {
+      data = await api(`/api/sites/${key}/trackers/${encodeURIComponent(name)}?${q}`);
+      draw();
+    } catch (err) {
+      if (!(err instanceof SignedOut)) body.replaceChildren(failure(err));
+    }
+  }
+
+  function draw() {
+    const d = data, words = d.tracker.kind === "text", unit = d.range.unit;
+    measure = d.measure;
+    const charts = words ? [["often", "How often"], ["long", "How long"], ["bar", "Bars"], ["table", "Changes"]] : [["line", "Line"], ["area", "Area"], ["bar", "Bars"], ["pie", "Pie"], ["table", "Table"]];
+    if (!charts.some(([id]) => id === chart)) chart = view.chart && charts.some(([id]) => id === view.chart) ? view.chart : charts[0][0];
+    const fmt = (v) => (v == null ? "–" : words ? int(v) : num(v));
+    const s = d.summary, prev = d.previous ?? {};
+    const days = (new Date(d.range.to) - new Date(d.range.from)) / 86400e3;
+    const stat = (label, value, before, show = fmt) => h("div", { class: "card kpi" }, h("span", { class: "label", text: label }), h("span", { class: "value", text: value == null ? "–" : show(value) }),
+      before != null ? delta({}, value, before) : h("span", { class: "delta", text: " " }));
+    const summary = words
+      ? h("div", { class: "grid g4" }, stat("Latest", s.last, null, String), stat("Values sent", s.count, prev.count, int), stat("Different values", s.distinct, null, int),
+        stat("Most common", d.words?.[0]?.label ?? null, null, String))
+      : h("div", { class: "grid g6 tracker-stats" }, stat("Total", s.sum, prev.sum), stat("Average", s.avg, prev.avg), stat("Lowest", s.min, null), stat("Highest", s.max, null),
+        stat("Latest", s.last == null ? null : Number(s.last), null), stat("Values", s.count, prev.count, int));
+
+    // What to chart, and how.
+    const controls = h("div", { class: "chart-controls" },
+      tabs(charts, chart, (id) => { chart = id; keep(); draw(); }),
+      !words && chart !== "table" ? h("select", { class: "input", "aria-label": "Measure", onchange: (e) => { measure = e.target.value; load(); } },
+        MEASURE_NAMES.map(([id, label]) => h("option", { value: id, selected: id === measure ? true : null, text: label }))) : null,
+      ["line", "area", "bar"].includes(chart) ? tabs(TRACKER_UNITS.filter(([, , fits]) => fits(days)).map(([id, label]) => [id, label]), unit, (id) => { by = id; load(); }) : null,
+      d.labels.length && !words ? h("select", { class: "input", "aria-label": "Split by", onchange: (e) => { split = e.target.value || null; load(); } },
+        h("option", { value: "", text: "No split" }), d.labels.map((l) => h("option", { value: l.key, selected: l.key === d.split ? true : null, text: `Split by ${l.key}` }))) : null);
+
+    const host = h("div", { class: "chart" });
+    const points = d.series.map((p) => ({ label: bucketLabel(p.t, unit, true), short: bucketLabel(p.t, unit), v: p.v }));
+    const compare = d.previousSeries.map((p) => ({ label: bucketLabel(p.t, unit, true), v: p.v }));
+    const m = { label: `${d.tracker.name}`, fmt, tick: (v) => (Math.abs(v) >= 1000 ? compact(v) : String(Math.round(v * 100) / 100)), fit: !words && measure !== "sum" && measure !== "count", line: chart === "line" };
+    const draws = {
+      line: () => lineChart(host, points, compare, m, { current: spanName(d.range.from, d.range.to), previous: d.range.id === "all" ? null : spanName(d.range.prevFrom, d.range.prevTo) }),
+      area: () => lineChart(host, points, null, { ...m, fit: false, line: false }),
+      bar: () => (words ? barChart(host, (d.words ?? []).map((w) => ({ label: w.label, v: w.count })), null, { ...m, fmt: int }) : barChart(host, points, compare, m)),
+      pie: () => donutChart(host, d.splitRows ? d.splitRows.map((r) => ({ label: r.label, v: r.v })) : points.filter((p) => p.v).map((p) => ({ label: p.label, v: p.v })), { fmt }),
+      often: () => donutChart(host, (d.words ?? []).map((w) => ({ label: w.label, v: w.count })), { fmt: int }),
+      long: () => donutChart(host, (d.words ?? []).map((w) => ({ label: w.label, v: w.seconds })), { fmt: lasted, centre: lasted((d.words ?? []).reduce((a, w) => a + w.seconds, 0)) }),
+      table: () => host.replaceChildren(valuesTable(d)),
+    };
+    const hint = chart === "pie" && !d.splitRows ? h("p", { class: "help", text: d.labels.length ? "Each slice is one bucket of the period. Split by a label to see a slice for each of its values." : "Each slice is one bucket of the period. Send values with labels (\"labels\": {\"plan\": \"pro\"}) to split them." }) : null;
+    const chartCard = h("div", { class: "card" }, h("div", { class: "card-head" }, h("h2", { text: words ? "Values" : MEASURE_NAMES.find(([id]) => id === measure)?.[1] ?? "Values" }), h("div", { class: "end" }, controls)),
+      h("div", { class: "card-body" }, host, hint));
+    const splitCard = d.splitRows?.length ? card(`By ${d.split}`, bars(d.splitRows.map((r) => ({ label: r.label, v: r.v })), { head: [d.split, MEASURE_NAMES.find(([id]) => id === (measure === "last" ? (d.tracker.kind === "add" ? "sum" : "avg") : measure))?.[1] ?? ""], fmt })) : null;
+    const table = card(words ? "Latest changes" : "Latest values", valuesTable(d), { end: h("button", { class: "btn", type: "button", onclick: () => download(`${d.tracker.name}.csv`, toCsv(d)) }, icon("export", 16), "Download CSV") });
+    body.replaceChildren(...[summary, chartCard, splitCard, chart === "table" ? null : table].filter(Boolean));
+    queueMicrotask(() => draws[chart]());
+  }
+
+  const valuesTable = (d) => d.values.length
+    ? h("div", { class: "table-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, ["When", "Value", "Labels"].map((t) => h("th", { text: t })))),
+      h("tbody", {}, d.values.slice(0, 100).map((v) => h("tr", {}, h("td", { class: "muted", text: new Date(v.ts).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) }),
+        h("td", {}, h("b", { text: v.text ?? num(v.value) })), h("td", { class: "muted", text: v.labels ? Object.entries(v.labels).map(([k, x]) => `${k}: ${x}`).join(" · ") : "" }))))))
+    : h("p", { class: "empty-note", text: "No values in this period." });
+  const toCsv = (d) => ["time,value," + d.labels.map((l) => l.key).join(","), ...d.values.map((v) => [new Date(v.ts).toISOString(), cell(v.text ?? v.value), ...d.labels.map((l) => cell(v.labels?.[l.key] ?? ""))].join(","))].join("\n");
+
+  // New values as they're sent: the page is asked again, at most every few seconds.
+  let soon = null;
+  const stream = new EventSource(`/api/sites/${key}/stream`);
+  stream.onmessage = (m) => {
+    const msg = JSON.parse(m.data);
+    if (msg.t !== "number" || msg.n.name !== name || soon) return;
+    soon = setTimeout(() => { soon = null; load(); }, 2500);
+  };
+  onLeave(() => { stream.close(); clearTimeout(soon); });
+  queueMicrotask(load);
+  const site = state.sites.find((x) => x.key === key);
+  return h("div", { class: "page" },
+    pageHead([h("a", { class: "btn plain back", href: "/trackers", "aria-label": "All trackers" }, icon("back", 16)), icon("track", 20), h("h1", { text: name }), h("span", { class: "muted", text: site?.name ?? "" })], [rangeTabs]), body);
 }
 
 // Adding a tracker to one of your sites: its key (shown once, when it's made), the same call in a few languages,
@@ -2882,6 +2979,7 @@ const ROUTES = [
   [/^\/sites\/(p_[a-z0-9]+)\/import$/, (k) => ["import", k, importPage(k)]],
   [/^\/trackers$/, () => ["trackers", null, trackersPage()]],
   [/^\/trackers\/new$/, () => ["addTracker", null, addTrackerPage()]],
+  [/^\/trackers\/(p_[a-z0-9]+)\/[^/]+$/, (k) => ["trackers", null, trackerPage(k, decodeURIComponent(location.pathname.split("/")[3]))]],
   [/^\/sites\/(p_[a-z0-9]+)\/numbers$/, (k) => ["addTracker", null, addTrackerPage(k)]],
   [/^\/sites\/(p_[a-z0-9]+)\/heatmaps$/, (k) => ["heatmaps", k, heatmapsPage(k)]],
 ];

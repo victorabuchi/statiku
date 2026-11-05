@@ -148,7 +148,7 @@ async function capture(set: "desktop" | "phone") {
   const click = (expr: string) => page.evaluate(`(${expr})?.click()`);
   // A page, once what it shows has arrived (a report can take a few seconds on a cold database).
   const READY: [RegExp, string][] = [
-    [/^\/$/, ".site-card"], [/\/live$/, "button.bar-row"], [/\/tv$/, ".board"], [/\/heatmaps$/, ".heat-stage"], [/\/numbers$/, ".number-tile"], [/\/import$/, ".import-source"],
+    [/^\/$/, ".site-card"], [/^\/trackers$/, ".number-tile"], [/^\/trackers\/new$/, "#t-site"], [/^\/trackers\/p_/, ".chart svg"], [/\/live$/, "button.bar-row"], [/\/tv$/, ".board"], [/\/heatmaps$/, ".heat-stage"], [/\/numbers$/, ".number-tile"], [/\/import$/, ".import-source"],
     [/\/settings$/, "#alerts"], [/\/setup$/, ".status-card"], [/\/new$/, "#f-address"], [/./, "button.kpi"],
   ];
   const open = async (path: string, settle = 1200) => {
@@ -258,17 +258,24 @@ async function capture(set: "desktop" | "phone") {
   await shot("heat-read");
   await page.setViewport({ width: W, height: H, deviceScaleFactor: 2, isMobile: phone, hasTouch: phone });
 
-  // Numbers, on the Websites page: the tiles, one arriving live, and (on the site's own page) how to send one.
-  await open("/", 1000);
-  await page.waitForSelector(".home-numbers .number-tile", { timeout: 20_000 });
-  await into(`document.querySelector(".home-numbers")`);
-  await rect("tileWidgets", byText(".home-numbers .number-tile", "Widgets added"));
+  // Trackers: every tracker, one arriving live, one charted (split by its label, as a pie), and how to send one.
+  await open("/trackers", 1500);
+  await rect("tileWidgets", byText(".number-tile", "Widgets added"));
   await shot("numbers");
-  await sendNumber({ name: "Widgets added", value: 24, op: "add" });
+  await sendNumber({ name: "Update server", value: "Online" });
+  await sendNumber({ name: "Widgets added", value: 24, labels: { widget: "Calendar" } });
   await sleep(450);
   await shot("numbers-live");
-  await open(`/sites/${siteKey}/numbers`, 1500);
-  await into(byText(".card-head h2", "Send a number"));
+  await open(`/trackers/${siteKey}/${encodeURIComponent("Widgets added")}`, 1200);
+  await page.select(".chart-controls select[aria-label='Split by']", "widget");
+  await page.waitForFunction(`!!document.querySelector(".card-head h2") && [...document.querySelectorAll(".card-head h2")].some((h) => h.textContent === "By widget")`, { timeout: 15_000 });
+  await click(`[...document.querySelectorAll(".chart-controls button")].find((b) => b.textContent === "Pie")`);
+  await sleep(700);
+  await rect("pieChart", `document.querySelector(".donut svg")`);
+  await rect("splitPick", `document.querySelector(".chart-controls select[aria-label='Split by']")`);
+  await shot("tracker-pie");
+  await open(`/trackers/new?site=${siteKey}`, 1200);
+  await into(byText(".card-head h2", "Send a value"));
   await rect("copyCurl", `document.querySelector(".code-block .copy")`);
   await shot("numbers-send");
 

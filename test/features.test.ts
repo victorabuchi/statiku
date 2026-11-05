@@ -97,16 +97,16 @@ const sendNumber = (body: unknown, key: string | null, query = "") =>
 
 test("numbers: parsing one, a list, and what isn't one", () => {
   const now = new Date("2026-11-05T12:00:00Z");
-  assert.deepEqual(parseNumbers('{"name": " Home  goals ", "value": "2"}', new URLSearchParams(), now), [{ name: "Home goals", value: 2, text: null, ts: now, op: null }]);
+  assert.deepEqual(parseNumbers('{"name": " Home  goals ", "value": "2"}', new URLSearchParams(), now), [{ name: "Home goals", value: 2, text: null, ts: now, op: null, labels: null }]);
   // Words and yes/no are values too.
   assert.deepEqual(parseNumbers(JSON.stringify({ values: [{ name: "Status", value: "Online" }, { name: "Raining", value: true }] }), new URLSearchParams(), now),
-    [{ name: "Status", value: null, text: "Online", ts: now, op: null }, { name: "Raining", value: null, text: "Yes", ts: new Date(now.getTime() + 1), op: null }]);
+    [{ name: "Status", value: null, text: "Online", ts: now, op: null, labels: null }, { name: "Raining", value: null, text: "Yes", ts: new Date(now.getTime() + 1), op: null, labels: null }]);
   assert.match(String(parseNumbers('{"name": "Sales", "value": "lots", "op": "add"}', new URLSearchParams(), now)), /counts up/);
   const list = parseNumbers(JSON.stringify({ numbers: [{ name: "Installs", value: 1, op: "add", ts: 1793872800 }, { name: "Temp", value: -3.5, ts: "2026-11-05T10:00:00Z" }] }), new URLSearchParams(), now);
   assert.ok(Array.isArray(list));
   assert.equal(list[0].ts.toISOString(), "2026-11-05T10:00:00.000Z");
   assert.equal(list[0].op, "add");
-  assert.deepEqual(parseNumbers("", new URLSearchParams("name=Score&value=3"), now), [{ name: "Score", value: 3, text: null, ts: now, op: null }]);
+  assert.deepEqual(parseNumbers("", new URLSearchParams("name=Score&value=3"), now), [{ name: "Score", value: 3, text: null, ts: now, op: null, labels: null }]);
   assert.match(String(parseNumbers('{"name": "x"}', new URLSearchParams(), now)), /needs a value/);
   assert.match(String(parseNumbers('{"value": 1}', new URLSearchParams(), now)), /missing name/);
   assert.match(String(parseNumbers('{"name": "x", "value": 1, "ts": "2030-01-01"}', new URLSearchParams(), now)), /future/);
@@ -554,4 +554,38 @@ test("trackers of words: the latest word and the few before it, live, from a fil
   // Every site's trackers at once, for the Trackers page.
   const page = (await as("/api/numbers?range=all")).data.sites.find((s: any) => s.key === key);
   assert.deepEqual(page.numbers.map((n: any) => n.name).sort(), ["Score", "Status", "Weather"]);
+});
+
+test("a tracker's analytics: by the hour, total or average, split by a label, and for words how often and how long", { skip }, async () => {
+  const { as, key } = await siteOf("charts.example");
+  const secret = (await as(`/api/sites/${key}/numbers/key`, { method: "POST" })).data.key;
+  const now = Date.now() / 1000;
+  const send = (values: unknown[]) => fetch(`${base}/v1/track`, { method: "POST", headers: { authorization: `Bearer ${secret}` }, body: JSON.stringify({ values }) }).then((r) => r.status);
+  assert.equal(await send([
+    { name: "Sales", value: 29, op: "add", labels: { plan: "Pro", country: "FI" }, ts: now - 3600 },
+    { name: "Sales", value: 9, labels: { plan: "Basic" }, ts: now - 1800 },
+    { name: "Sales", value: 29, labels: { plan: "Pro", seats: 3 }, ts: now - 60 },
+    { name: "Status", value: "Online", ts: now - 3000 },
+    { name: "Status", value: "Offline", ts: now - 600 },
+    { name: "Status", value: "Online", ts: now - 300 },
+  ]), 202);
+  await app.writer.flush();
+  const sales = (await as(`/api/sites/${key}/trackers/Sales?range=today&split=plan`)).data;
+  assert.equal(sales.measure, "sum");
+  assert.equal(sales.summary.sum, 67);
+  assert.equal(sales.summary.count, 3);
+  assert.equal(sales.series.reduce((a: number, p: any) => a + (p.v ?? 0), 0), 67);
+  assert.deepEqual(sales.splitRows.map((r: any) => [r.label, r.v]), [["Pro", 58], ["Basic", 9]]);
+  assert.deepEqual(sales.labels.map((l: any) => l.key).sort(), ["country", "plan", "seats"]);
+  assert.equal(sales.values[0].labels.seats, "3");
+  const average = (await as(`/api/sites/${key}/trackers/Sales?range=today&measure=avg&by=day`)).data;
+  assert.equal(average.measure, "avg");
+  assert.equal(average.range.unit, "day");
+  assert.ok(Math.abs(average.series.at(-1).v - 67 / 3) < 0.01);
+  const status = (await as(`/api/sites/${key}/trackers/Status?range=today`)).data;
+  assert.deepEqual(status.words.map((w: any) => [w.label, w.count]), [["Online", 2], ["Offline", 1]]);
+  // Online for 40 minutes and then 5 more; offline for 5.
+  const seconds = Object.fromEntries(status.words.map((w: any) => [w.label, Math.round(w.seconds / 60)]));
+  assert.ok(seconds.Online >= 44 && seconds.Online <= 46 && seconds.Offline === 5, JSON.stringify(seconds));
+  assert.equal((await as(`/api/sites/${key}/trackers/Nope?range=today`)).status, 404);
 });

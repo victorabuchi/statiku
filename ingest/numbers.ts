@@ -6,7 +6,8 @@
 // ?name=&value=, for devices that can only open an address. A body may hold one value, a list of them, or
 // { "values": [...] } (or "numbers"); each can have a time ("ts", ISO or Unix seconds) and "op": "add" for a number
 // that counts up (installs, sales), where each value is added to the total. Any other number keeps its latest value
-// (a score, a temperature), and so do words. A tracker's kind is set by its first value. (/v1/number is the same.)
+// (a score, a temperature), and so do words. A tracker's kind is set by its first value. A value can carry labels,
+// "labels": {"plan": "pro"} (up to ten, short words or numbers), to split the tracker by. (/v1/number is the same.)
 import { createHash, randomBytes } from "node:crypto";
 import type pg from "pg";
 import type { Hub } from "./live.ts";
@@ -20,7 +21,19 @@ const PER_MINUTE = 1200;
 const TTL = 60_000;
 
 export type Kind = "set" | "add" | "text";
-export type NumberPoint = { name: string; value: number | null; text: string | null; ts: Date; op: "set" | "add" | null };
+export type NumberPoint = { name: string; value: number | null; text: string | null; ts: Date; op: "set" | "add" | null; labels?: Record<string, string> | null };
+
+// Labels as kept: up to ten, each a short name and a short word (numbers and yes/no as words).
+export function labelsOf(input: unknown): Record<string, string> | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(input).slice(0, 10)) {
+    const key = nameOf(k).slice(0, 40);
+    const value = typeof v === "string" ? nameOf(v).slice(0, 100) : typeof v === "number" && Number.isFinite(v) ? String(v) : typeof v === "boolean" ? (v ? "Yes" : "No") : "";
+    if (key && value) out[key] = value;
+  }
+  return Object.keys(out).length ? out : null;
+}
 
 export const newNumbersKey = () => `sn_${randomBytes(24).toString("base64url")}`;
 export const hashKey = (key: string) => createHash("sha256").update(key).digest("hex");
@@ -71,7 +84,7 @@ export function parseNumbers(body: string, query: URLSearchParams, now = new Dat
   for (const [i, item] of items.entries()) {
     const at = items.length > 1 ? ` (number ${i + 1})` : "";
     if (!item || typeof item !== "object") return `each value is an object with a name and a value${at}`;
-    const { name: rawName, value: rawValue, ts: rawTs, op: rawOp } = item as Record<string, unknown>;
+    const { name: rawName, value: rawValue, ts: rawTs, op: rawOp, labels: rawLabels, props: rawProps } = item as Record<string, unknown>;
     const name = nameOf(rawName);
     if (!name) return `missing name${at}`;
     const value = valueOf(rawValue);
@@ -81,7 +94,7 @@ export function parseNumbers(body: string, query: URLSearchParams, now = new Dat
     if (!ts) return `"${name}" has a time that isn't one (ISO, or Unix seconds), or is in the future${at}`;
     const op = rawOp === "add" || rawOp === "set" ? rawOp : null;
     if (op === "add" && value.text !== null) return `"${name}" counts up, so its values must be numbers${at}`;
-    points.push({ name, ...value, ts, op });
+    points.push({ name, ...value, ts, op, labels: labelsOf(rawLabels ?? rawProps) });
   }
   return points;
 }
@@ -161,7 +174,7 @@ export class Numbers {
     for (const p of points) {
       const kind = kinds.get(p.name) ?? "set";
       const text = kind === "text" ? p.text ?? String(p.value) : null;
-      this.writer.addRow("metric_points", { project_id: projectId, name: p.name, ts: p.ts, value: text === null ? p.value : null, text_value: text });
+      this.writer.addRow("metric_points", { project_id: projectId, name: p.name, ts: p.ts, value: text === null ? p.value : null, text_value: text, props: p.labels ? JSON.stringify(p.labels) : null });
       this.hub.publish(projectId, { t: "number", n: { name: p.name, value: text ?? p.value!, ts: p.ts, kind } });
     }
     return { status: 202, message: JSON.stringify({ ok: true, saved: points.length }) };
