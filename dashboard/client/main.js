@@ -56,6 +56,7 @@ const ICONS = {
   person: '<circle cx="10" cy="7.3" r="3.1"/><path d="M4.2 16.6c.9-2.9 3.1-4.4 5.8-4.4s4.9 1.5 5.8 4.4"/>',
   team: '<circle cx="7.5" cy="7.5" r="2.6"/><path d="M2.8 15.8c.7-2.4 2.5-3.7 4.7-3.7s4 1.3 4.7 3.7"/><circle cx="14" cy="6.8" r="2.1"/><path d="M13.6 11.6c1.8 0 3.1 1 3.7 3"/>',
   plus: '<path d="M10 4.5v11M4.5 10h11"/>',
+  pencil: '<path d="m12.8 4.2 3 3L7.4 15.6l-3.8.8.8-3.8Z"/><path d="m11.3 5.7 3 3"/>',
   down: '<path d="m6 8 4 4 4-4"/>',
   calendar: '<rect x="3.5" y="4.5" width="13" height="12" rx="2"/><path d="M3.5 8.5h13M7 3v3M13 3v3"/>',
   close: '<path d="m5.5 5.5 9 9M14.5 5.5l-9 9"/>',
@@ -140,18 +141,11 @@ function siteIcon(site, size = 32) {
   return img;
 }
 // A person's photo, or an empty silhouette.
-// A person's photo, or until they add one their initials on a colour of their own (the same every time).
+// A person's photo, or until they add one a person's outline, centred.
 function photo(user, size = 32) {
   const box = h("span", { class: "photo", style: { width: `${size}px`, height: `${size}px` } });
-  const initials = (user?.name || user?.email || "").split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
   if (user?.photo) box.append(h("img", { src: `/api/me/photo?v=${user.photo}`, alt: "" }));
-  else if (initials) {
-    let hue = 0;
-    for (const c of user.name || user.email) hue = (hue * 31 + c.charCodeAt(0)) % 360;
-    box.classList.add("initials");
-    Object.assign(box.style, { background: `hsl(${hue} 55% 90%)`, color: `hsl(${hue} 45% 28%)`, fontSize: `${Math.round(size * 0.4)}px` });
-    box.append(initials);
-  } else box.append(icon("person", Math.round(size * 0.62)));
+  else box.append(icon("person", Math.round(size * 0.62)));
   return box;
 }
 // `text` with code spans: "Paste it before `</head>`."
@@ -356,7 +350,7 @@ function shell(site, active, content) {
         go("/login", true);
       }),
     ], { align: "right", width: 280 }),
-  }, photo(state.user, 30));
+  }, state.user.photo ? h("img", { src: `/api/me/photo?v=${state.user.photo}`, alt: "" }) : icon("person", 18));
 
   const topbar = h("header", { class: "topbar" },
     h("button", { class: "menu-button", type: "button", "aria-label": "Menu", "aria-controls": "sidebar", onclick: () => toggleMenu(!sidebar.classList.contains("open")) }, icon("menu", 22)),
@@ -2003,6 +1997,11 @@ async function accountPage() {
   };
   const nameInput = h("input", { class: "input", id: "a-name", value: user.name, autocomplete: "name" });
   const emailInput = h("input", { class: "input", id: "a-email", type: "email", value: user.email, autocomplete: "email" });
+  // Shown as it is, with Edit profile for the name, the email and the photo.
+  const profileHost = h("div");
+  const showProfile = (editing) => profileHost.replaceChildren(editing ? profile : h("div", { class: "profile-view" }, photo(user, 56),
+    h("div", { class: "who" }, h("b", { text: user.name }), h("span", { class: "muted", text: user.email })),
+    h("button", { class: "btn", type: "button", onclick: () => { showProfile(true); nameInput.focus(); } }, icon("pencil", 16), "Edit profile")));
   const profile = h("form", {
     class: "form",
     onsubmit: async (e) => {
@@ -2021,7 +2020,9 @@ async function accountPage() {
     user.photo ? h("button", { class: "btn plain", type: "button", text: "Remove", onclick: removePhoto }) : null),
   h("div", { class: "field" }, h("label", { for: "a-name", text: "Name" }), nameInput),
   h("div", { class: "field" }, h("label", { for: "a-email", text: "Email" }), emailInput),
-  h("div", {}, h("button", { class: "btn primary", type: "submit", text: "Save" })));
+  h("div", { class: "row-gap" }, h("button", { class: "btn primary", type: "submit", text: "Save" }),
+    h("button", { class: "btn plain", type: "button", text: "Cancel", onclick: () => { nameInput.value = user.name; emailInput.value = user.email; showProfile(false); } })));
+  showProfile(false);
 
   // Websites: every site, to edit or remove.
   const removeSite = async (s) => {
@@ -2130,7 +2131,7 @@ async function accountPage() {
   return h("div", { class: "page narrow" },
     pageHead([icon("settings", 20), h("h1", { text: "Settings" })]),
     h("div", { class: "stack" },
-      card("Profile", profile),
+      card("Profile", profileHost),
       card("Websites", websites, { sub: `${sites.length} ${sites.length === 1 ? "site" : "sites"}`, id: "websites" }),
       card("Team", team, { id: "team" }),
       card("Password", password),
