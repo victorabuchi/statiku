@@ -272,6 +272,13 @@ code { font: 12px var(--mono); background: var(--surface-2); border: 1px solid v
 .input, select.input { width: 100%; height: 36px; padding: 0 12px; border: 1px solid #8a8a8a; border-radius: 8px; background: var(--surface); }
 .input:focus { outline: 2px solid var(--link); outline-offset: -1px; border-color: transparent; }
 .input.big { height: 44px; font-size: 15px; }
+/* A password with its show and hide button inside the field, on the right (and not Edge's own as well). */
+.secret { position: relative; }
+.secret .input { padding-right: 42px; }
+.secret input::-ms-reveal, .secret input::-ms-clear { display: none; }
+.secret .reveal { position: absolute; top: 1px; right: 1px; bottom: 1px; width: 40px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 0 7px 7px 0; background: none; color: var(--text-2); cursor: pointer; }
+.secret .reveal:hover { color: var(--text); }
+.secret .reveal:focus-visible { outline: 2px solid var(--link); outline-offset: -3px; }
 .input-row { display: flex; gap: 8px; }
 .input-row .input { flex: 1; min-width: 0; }
 .error { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; background: var(--critical-wash); color: #8e1f0b; }

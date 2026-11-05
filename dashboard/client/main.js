@@ -51,6 +51,7 @@ const ICONS = {
   mail: '<rect x="3" y="5" width="14" height="10.5" rx="2"/><path d="m3.5 6 6.5 5 6.5-5"/>',
   wait: '<circle cx="10" cy="10" r="7"/><path d="M10 6.3V10l2.5 1.8"/>',
   eye: '<path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5Z"/><circle cx="10" cy="10" r="2.2"/>',
+  eyeOff: '<path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5Z"/><circle cx="10" cy="10" r="2.2"/><path d="M3.5 3.5l13 13"/>',
   download: '<path d="M10 3.5v9M6.3 9l3.7 3.7L13.7 9M4 16.5h12"/>',
   export: '<path d="M10 12.5v-9M6.3 7.2 10 3.5l3.7 3.7M4 12v3.5a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V12"/>',
   cart: '<path d="M3 4h2l1.6 8.2a1 1 0 0 0 1 .8h6.6a1 1 0 0 0 1-.8L16.5 7H6"/><circle cx="8.5" cy="16" r="1"/><circle cx="14" cy="16" r="1"/>',
@@ -70,6 +71,20 @@ function icon(name, size = 18) {
     ? `<svg width="${size}" height="${size}" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${shape}</svg>`
     : `<svg width="${size}" height="${size}" viewBox="${shape.box}" fill="currentColor" aria-hidden="true">${shape.path}</svg>`;
   return t.content.firstChild;
+}
+
+// A password (or a key) with a button inside the field that shows what's typed, and hides it again.
+function revealable(input, what = "password") {
+  const button = h("button", { class: "reveal", type: "button", "aria-label": `Show ${what}`, "aria-pressed": "false" }, icon("eye"));
+  button.addEventListener("click", () => {
+    const show = input.type === "password";
+    input.type = show ? "text" : "password";
+    button.setAttribute("aria-label", `${show ? "Hide" : "Show"} ${what}`);
+    button.setAttribute("aria-pressed", String(show));
+    button.replaceChildren(icon(show ? "eyeOff" : "eye"));
+    input.focus();
+  });
+  return h("div", { class: "secret" }, input, button);
 }
 
 const int = (n) => Math.round(n ?? 0).toLocaleString("en-US");
@@ -456,8 +471,9 @@ function authForm(mode, { invite = null, onDone } = {}) {
   const error = h("div", { class: "error", role: "alert", hidden: true });
   const field = (label, name, type, autocomplete, help) => {
     const id = `f-${name}`;
+    const input = h("input", { class: "input big", id, name, type, autocomplete, required: true });
     return h("div", { class: "field" }, h("label", { for: id, text: label }),
-      h("input", { class: "input big", id, name, type, autocomplete, required: true }),
+      type === "password" ? revealable(input) : input,
       help ? h("span", { class: "help", text: help }) : null);
   };
   const button = h("button", { class: "btn primary big", type: "submit", text: signup ? (invite ? "Create account and join" : "Create account") : "Sign in" });
@@ -569,7 +585,7 @@ async function resetPage(token) {
           button.disabled = false;
         }
       },
-    }, error, h("div", { class: "field" }, h("label", { for: "f-password", text: "New password" }), password, h("span", { class: "help", text: "At least 8 characters." })), button)));
+    }, error, h("div", { class: "field" }, h("label", { for: "f-password", text: "New password" }), revealable(password), h("span", { class: "help", text: "At least 8 characters." })), button)));
 }
 
 async function joinPage(token) {
@@ -1524,8 +1540,10 @@ async function importPage(key) {
   // Each source opens its own small form.
   let fields = 0;
   const field = (label, input, help) => {
-    input.id = `i-${++fields}`;
-    return h("div", { class: "field" }, h("label", { for: input.id, text: label }), input, help ? h("span", { class: "help", text: help }) : null);
+    // The input itself, also when it comes with its show button around it.
+    const control = input.querySelector("input") ?? input;
+    control.id = `i-${++fields}`;
+    return h("div", { class: "field" }, h("label", { for: control.id, text: label }), input, help ? h("span", { class: "help", text: help }) : null);
   };
   const error = query.get("error");
 
@@ -1554,7 +1572,7 @@ async function importPage(key) {
   const pHost = h("input", { class: "input", value: "https://plausible.io" });
   const pGo = h("button", { class: "btn primary", type: "submit", text: "Import" });
   const plausible = h("form", { class: "form", onsubmit: (e) => { e.preventDefault(); started(api(`/api/sites/${key}/imports`, { method: "POST", body: { kind: "plausible", key: pKey.value, site: pSite.value, host: pHost.value } }), pGo); } },
-    field("Stats API key", pKey, "In Plausible: your account settings → API Keys → New API Key, for the Stats API."),
+    field("Stats API key", revealable(pKey, "key"), "In Plausible: your account settings → API Keys → New API Key, for the Stats API."),
     field("Site, as Plausible names it", pSite), field("Plausible's address", pHost, "Change this only if you host Plausible yourself."), pGo);
 
   // GitHub: the repository whose releases people download.
@@ -1563,7 +1581,7 @@ async function importPage(key) {
   const gGo = h("button", { class: "btn primary", type: "submit", text: "Import" });
   const githubForm = h("form", { class: "form", onsubmit: (e) => { e.preventDefault(); started(api(`/api/sites/${key}/imports`, { method: "POST", body: { kind: "github", repo: gRepo.value, token: gToken.value } }), gGo); } },
     field("Repository", gRepo, "Every release's downloads so far, on the day it came out; then what they gain, every day."),
-    field("Token", gToken, `A fine-grained token with read access to the repository's contents.${info.tokens ? "" : " This server doesn't keep tokens, so it's used once."}`), gGo);
+    field("Token", revealable(gToken, "token"), `A fine-grained token with read access to the repository's contents.${info.tokens ? "" : " This server doesn't keep tokens, so it's used once."}`), gGo);
 
   // A file from any other tool.
   const input = h("input", { type: "file", multiple: true, accept: ".csv,.tsv,.txt,.zip", hidden: true });
@@ -1834,8 +1852,8 @@ async function accountPage() {
       }
     },
   },
-  h("div", { class: "field" }, h("label", { for: "p-current", text: "Current password" }), current),
-  h("div", { class: "field" }, h("label", { for: "p-next", text: "New password" }), next, h("span", { class: "help", text: "At least 8 characters." })),
+  h("div", { class: "field" }, h("label", { for: "p-current", text: "Current password" }), revealable(current)),
+  h("div", { class: "field" }, h("label", { for: "p-next", text: "New password" }), revealable(next), h("span", { class: "help", text: "At least 8 characters." })),
   h("div", {}, h("button", { class: "btn primary", type: "submit", text: "Change password" })));
 
   // Closing the account.
@@ -1856,7 +1874,7 @@ async function accountPage() {
     },
   },
   h("p", { class: "muted", text: "This deletes your account and the websites only you can see, with every visit and event they collected." }),
-  h("div", { class: "field" }, h("label", { for: "d-password", text: "Your password" }), closePassword),
+  h("div", { class: "field" }, h("label", { for: "d-password", text: "Your password" }), revealable(closePassword)),
   h("div", {}, h("button", { class: "btn critical", type: "submit", text: "Delete account" })));
 
   if (location.hash) setTimeout(() => $(location.hash.slice(1))?.scrollIntoView({ block: "start" }));
