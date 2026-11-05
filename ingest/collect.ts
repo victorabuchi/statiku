@@ -170,7 +170,10 @@ export async function collect(deps: Deps, body: string, ua: string, ip: string, 
   });
   deps.hub.publish(project.id, {
     t: "event",
-    e: { ts: now, name: hit.name, path, country, source: session.source, device: agent.device, browser: agent.browser, os: agent.os, app: false },
+    e: {
+      ts: now, name: hit.name, path, country, source: session.source, device: agent.device, browser: agent.browser, os: agent.os, app: false,
+      city: session.place?.city ?? null, revenue: hit.revenue, first: session.events === 1,
+    },
   });
   if (hit.name === "download") {
     deps.writer.addMark({

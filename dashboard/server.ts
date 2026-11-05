@@ -20,6 +20,9 @@
 //   DELETE /api/sites/:key/imports/:id   GET …/imports/google/start → Google → /api/imports/google/callback
 //   GET    /api/sites/:key/imports/google/properties?grant=
 //   GET    /api/sites/:key/numbers?range=   POST …/numbers/key (a new key)   POST …/numbers/upload (CSV)   DELETE …/numbers/:name
+//   GET    /api/sites/:key/match   the match view's scoreboard   POST|DELETE …/match/link   its public link
+//   GET    /api/match/:token   GET /api/match/:token/stream   the match view at its public link, and its live feed
+//   GET    /api/sites/:key/momentum   who's attacking right now
 //   GET    /api/billing   POST /api/billing/checkout { plan, interval }   POST /api/billing/portal   POST /api/polar/webhook
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
@@ -43,6 +46,8 @@ import type { Billing } from "./billing.ts";
 import { letter, smtpMailer, type Mailer } from "./mail.ts";
 import { createMonitor, type Probe } from "./monitor.ts";
 import { OWNER, ownerSetup } from "./owner.ts";
+import { cleanGoals, goalsOf, matchSummary, shareMatch, siteByMatchToken, stopSharingMatch } from "./match.ts";
+import { momentum } from "./insights.ts";
 import { deleteNumber, numbersReport, parseNumbersFile, renewNumbersKey, saveNumbers } from "./numbers.ts";
 import { access, applySubscription, BILLING_COLUMNS, checkoutUrl, planOf, PLANS, polarFromEnv, portalUrl, usage, verifyWebhook, type Polar } from "./billing.ts";
 import { checkInstall, fetchIcon, imageType, openRequest, publicRequest, type Outbound } from "./check.ts";
@@ -664,6 +669,14 @@ export async function createDashboard(options: {
       return json(res, 200, { workspace: found.workspace, invitedBy: found.invited_by, valid: !found.expired && !found.used });
     }
 
+    const shared = path.match(/^\/api\/match\/([\w-]{20,40})(\/stream)?$/);
+    if (shared && method === "GET") {
+      const site = await siteByMatchToken(pool, shared[1]);
+      if (!site) throw new HttpError(404, "This match link has been turned off, or there's no such link.");
+      if (access(site.billing) === "locked") throw new HttpError(402, "This site's reports are closed for now.");
+      if (shared[2]) return liveStream(r, site.id, true);
+      return json(res, 200, await matchSummary(pool, site, presence(site.id)));
+    }
     const user = await signedIn(r);
     if (invitation?.[2] && method === "POST") return json(res, 200, { workspace: await acceptInvite(invitation[1], user.id) });
 
@@ -831,6 +844,16 @@ export async function createDashboard(options: {
       return json(res, 201, { site: { key: site.key, name: site.name, domains: site.domains, timezone: site.timezone } });
     }
 
+    const matchLink = path.match(/^\/api\/sites\/(p_[a-z0-9]{6,20})\/match\/link$/);
+    if (matchLink && (method === "POST" || method === "DELETE")) {
+      const site = await mySite(user, matchLink[1]);
+      ownerOnly(site);
+      if (method === "DELETE") {
+        await stopSharingMatch(pool, site.id);
+        return json(res, 200, { url: null });
+      }
+      return json(res, 200, { url: `${origin(r)}/m/${await shareMatch(pool, site.id)}` });
+    }
     const numbersAt = path.match(/^\/api\/sites\/(p_[a-z0-9]{6,20})\/numbers(?:\/([^/]{1,200}))?$/);
     if (numbersAt) return numbersApi(r, await mySite(user, numbersAt[1]), numbersAt[2] ? decodeURIComponent(numbersAt[2]) : undefined);
 
@@ -841,13 +864,14 @@ export async function createDashboard(options: {
 
     if (action === "" && method === "GET") {
       const { rows: [info] } = await pool.query(
-        `select created_at, (select ts from events where project_id = $1 order by ts desc limit 1) as last_event_at from projects where id = $1`,
+        `select created_at, match_token, (select ts from events where project_id = $1 order by ts desc limit 1) as last_event_at from projects where id = $1`,
         [site.id],
       );
       return json(res, 200, {
         site: {
           key: site.key, name: site.name, domains: site.domains, timezone: site.timezone, role: site.role, askLocation: site.askLocation,
-          alertQuiet: site.alertQuiet, alertSurge: site.alertSurge,
+          alertQuiet: site.alertQuiet, alertSurge: site.alertSurge, goals: site.goals ?? null, defaultGoals: goalsOf({}),
+          matchUrl: info.match_token ? `${origin(r)}/m/${info.match_token}` : null,
           createdAt: info.created_at, lastEventAt: info.last_event_at,
         },
         snippet: snippet(r, site.key),
@@ -869,13 +893,14 @@ export async function createDashboard(options: {
       const askLocation = typeof body.askLocation === "boolean" ? body.askLocation : site.askLocation;
       const alertQuiet = typeof body.alertQuiet === "boolean" ? body.alertQuiet : site.alertQuiet;
       const alertSurge = typeof body.alertSurge === "boolean" ? body.alertSurge : site.alertSurge;
+      const goals = body.goals === undefined ? site.goals ?? null : cleanGoals(body.goals);
       await pool.query(
-        "update projects set name = $2, domains = $3, timezone = $4, ask_location = $5, alert_quiet = $6, alert_surge = $7 where id = $1",
-        [site.id, name, domains, timezone, askLocation, alertQuiet, alertSurge],
+        "update projects set name = $2, domains = $3, timezone = $4, ask_location = $5, alert_quiet = $6, alert_surge = $7, goals = $8 where id = $1",
+        [site.id, name, domains, timezone, askLocation, alertQuiet, alertSurge, goals],
       );
       onSiteChanged(site.key);
       if (domains[0] !== site.domains[0]) void refreshIcon({ id: site.id, domains }, true);
-      return json(res, 200, { site: { key: site.key, name, domains, timezone, askLocation, alertQuiet, alertSurge } });
+      return json(res, 200, { site: { key: site.key, name, domains, timezone, askLocation, alertQuiet, alertSurge, goals } });
     }
     if (action === "" && method === "DELETE") {
       ownerOnly(site);
@@ -903,7 +928,7 @@ export async function createDashboard(options: {
       return json(res, 200, await checkInstall(site.domains[0], site.key));
     }
     // After an unpaid trial the reports close until a plan is chosen; the site is still counted meanwhile.
-    if (["/stats", "/live", "/stream"].includes(action) && access(site.billing) === "locked") {
+    if (["/stats", "/live", "/stream", "/match", "/momentum"].includes(action) && access(site.billing) === "locked") {
       throw new HttpError(402, site.role === "owner"
         ? "Your free trial has ended. Choose a plan to see your numbers again: Statiku has kept counting meanwhile."
         : "This team's free trial has ended. Its owner can choose a plan to open the reports again.");
@@ -917,20 +942,30 @@ export async function createDashboard(options: {
       }));
     }
     if (action === "/live" && method === "GET") return json(res, 200, await live(pool, site, presence(site.id), streets));
-    if (action === "/stream" && method === "GET") {
-      // Server-sent events: each event on the site as it's collected, and a nudge when someone arrives or leaves.
-      res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", "x-accel-buffering": "no", ...HEADERS });
-      res.write("retry: 3000\n\n");
-      const stop = hub.subscribe(site.id, (message) => res.write(`data: ${message}\n\n`));
-      // A comment now and then keeps proxies from closing a quiet stream.
-      const keepAlive = setInterval(() => res.write(": still here\n\n"), 20_000);
-      req.on("close", () => {
-        clearInterval(keepAlive);
-        stop();
-      });
-      return;
-    }
+    if (action === "/match" && method === "GET") return json(res, 200, await matchSummary(pool, site, presence(site.id)));
+    if (action === "/momentum" && method === "GET") return json(res, 200, await momentum(pool, site));
+    if (action === "/stream" && method === "GET") return liveStream(r, site.id);
     throw new HttpError(404, "Not found.");
+  }
+
+  // Server-sent events: each event on the site as it's collected, each number sent, and a nudge when someone arrives
+  // or leaves. At a shared match link, events go without the visitor's device details.
+  function liveStream({ req, res }: Request, projectId: string, shared = false) {
+    res.writeHead(200, { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", "x-accel-buffering": "no", ...HEADERS });
+    res.write("retry: 3000\n\n");
+    const stop = hub.subscribe(projectId, (message) => {
+      if (shared && message.startsWith('{"t":"event"')) {
+        const { t, e } = JSON.parse(message);
+        message = JSON.stringify({ t, e: { ts: e.ts, name: e.name, path: e.path, country: e.country, city: e.city, source: e.source, revenue: e.revenue, first: e.first, app: e.app } });
+      }
+      res.write(`data: ${message}\n\n`);
+    });
+    // A comment now and then keeps proxies from closing a quiet stream.
+    const keepAlive = setInterval(() => res.write(": still here\n\n"), 20_000);
+    req.on("close", () => {
+      clearInterval(keepAlive);
+      stop();
+    });
   }
 
   return Object.assign(async function handle(r: Request) {

@@ -9,6 +9,8 @@ import { BILLING_COLUMNS, type Billing } from "./billing.ts";
 export type Site = {
   id: string; key: string; name: string; domains: string[]; timezone: string; role: string; askLocation: boolean; alertQuiet: boolean; alertSurge: boolean;
   workspaceId: string; billing: Billing;
+  // The events that count as goals (null: the usual ones; see match.ts).
+  goals?: string[] | null;
 };
 export type Presence = (projectId: string) => Session[];
 
@@ -145,7 +147,7 @@ const APP_LIFECYCLE = "('install', 'active', 'update', 'state')";
 export async function siteFor(pool: pg.Pool, userId: string, key: string): Promise<Site | null> {
   const { rows: [site] } = await pool.query(
     `select p.id, p.key, p.name, p.domains, p.timezone, m.role, p.ask_location as "askLocation", p.alert_quiet as "alertQuiet", p.alert_surge as "alertSurge",
-            p.workspace_id as "workspaceId", ${BILLING_COLUMNS}
+            p.workspace_id as "workspaceId", p.goals, ${BILLING_COLUMNS}
        from projects p join memberships m on m.workspace_id = p.workspace_id join workspaces w on w.id = p.workspace_id
       where p.key = $1 and m.user_id = $2`,
     [key, userId],

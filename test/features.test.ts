@@ -169,3 +169,66 @@ test("numbers: sent with the site's key, shown per period, live, from a file, an
   const stranger = (await siteOf("stranger.example")).as;
   assert.equal((await stranger(`/api/sites/${key}/numbers`)).status, 404);
 });
+
+const hit = (key: string, ip: string, n: string, u: string, extra: Record<string, unknown> = {}) =>
+  fetch(`${base}/e`, {
+    method: "POST",
+    headers: { "user-agent": SAFARI, "x-forwarded-for": ip },
+    body: JSON.stringify({ k: key, n, u, r: "https://news.ycombinator.com/", w: 1440, ...extra }),
+  }).then((r) => r.status);
+
+test("the match view: today's scoreboard, goals, takings, commentary and momentum, signed in or at a shared link", { skip }, async () => {
+  const { as, key } = await siteOf("match.example");
+  assert.equal(await hit(key, "203.0.113.10", "pageview", "https://match.example/"), 202);
+  assert.equal(await hit(key, "203.0.113.10", "signup", "https://match.example/join"), 202);
+  assert.equal(await hit(key, "203.0.113.11", "pageview", "https://match.example/pricing"), 202);
+  assert.equal(await hit(key, "203.0.113.11", "purchase", "https://match.example/pricing", { $: { amount: 49, currency: "EUR" } }), 202);
+  assert.equal(await hit(key, "203.0.113.12", "pageview", "https://match.example/blog"), 202);
+  assert.equal(await hit(key, "203.0.113.12", "newsletter", "https://match.example/blog"), 202);
+  await app.writer.flush();
+
+  const board = await as(`/api/sites/${key}/match`);
+  assert.equal(board.status, 200, JSON.stringify(board.data));
+  assert.equal(board.data.today.visitors, 3);
+  // A sign-up and a sale are goals; a newsletter isn't one of the usual ones.
+  assert.equal(board.data.today.goals, 2);
+  assert.deepEqual(board.data.today.takings, [{ currency: "EUR", minor: 4900 }]);
+  const kinds = board.data.commentary.map((c: any) => `${c.kind}:${c.name ?? c.path}:${c.goal}`);
+  assert.ok(kinds.includes("event:signup:true") && kinds.includes("event:purchase:true") && kinds.includes("event:newsletter:false"), kinds.join(" "));
+  assert.equal(board.data.commentary.filter((c: any) => c.kind === "visit").length, 3);
+  assert.equal(board.data.commentary.find((c: any) => c.name === "purchase").revenue.minor, 4900);
+  assert.equal(board.data.momentum.wave.length, 24);
+  assert.equal(board.data.momentum.wave.at(-1).now, 3);
+  assert.deepEqual(board.data.momentum.sources, [{ source: "Hacker News", now: 3, before: 0 }]);
+  assert.equal((await as(`/api/sites/${key}/momentum`)).data.wave.length, 24);
+
+  // A site's own goals replace the usual ones.
+  assert.equal((await as(`/api/sites/${key}`, { method: "PATCH", body: { goals: "newsletter, purchase" } })).status, 200);
+  const own = await as(`/api/sites/${key}/match`);
+  assert.deepEqual(own.data.goals, ["newsletter", "purchase"]);
+  assert.equal(own.data.today.goals, 2);
+  assert.deepEqual((await as(`/api/sites/${key}`)).data.site.goals, ["newsletter", "purchase"]);
+
+  // Shared at a link of its own: anyone sees the scoreboard, and the live feed without visitors' device details.
+  assert.equal((await fetch(`${base}/api/match/${"x".repeat(24)}`)).status, 404);
+  const link = await as(`/api/sites/${key}/match/link`, { method: "POST" });
+  const token = link.data.url.split("/m/")[1];
+  assert.match(link.data.url, /\/m\/[\w-]{24}$/);
+  const outside = await fetch(`${base}/api/match/${token}`).then((r) => r.json());
+  assert.equal(outside.today.goals, 2);
+  assert.equal(outside.site.name, "match.example");
+  const stream = await fetch(`${base}/api/match/${token}/stream`);
+  const reader = stream.body!.getReader();
+  await hit(key, "203.0.113.13", "pageview", "https://match.example/live");
+  let text = "";
+  for (let i = 0; i < 20 && !text.includes('"t":"event"'); i++) text += new TextDecoder().decode((await reader.read()).value);
+  await reader.cancel();
+  const event = JSON.parse(text.split("\n").find((l) => l.includes('"t":"event"'))!.slice(6)).e;
+  assert.equal(event.path, "/live");
+  assert.equal(event.first, true);
+  assert.equal("device" in event || "browser" in event, false);
+  // The page itself is the app, for anyone.
+  assert.equal((await fetch(`${base}/m/${token}`)).status, 200);
+  assert.equal((await as(`/api/sites/${key}/match/link`, { method: "DELETE" })).status, 200);
+  assert.equal((await fetch(`${base}/api/match/${token}`)).status, 404);
+});

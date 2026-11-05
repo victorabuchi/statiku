@@ -6,7 +6,7 @@ import {
   siCloudflare, siFathom, siFramer, siGithub, siGoogleanalytics, siGoogletagmanager, siMatomo, siPlausibleanalytics, siShopify, siSimpleanalytics,
   siSquarespace, siUmami, siWebflow, siWix, siWordpress,
 } from "simple-icons";
-import { lineChart, minuteBars, sparkline } from "./charts.js";
+import { lineChart, minuteBars, sparkline, svgEl } from "./charts.js";
 import { createGlobe } from "./globe.js";
 
 // ---------- Helpers ----------
@@ -35,6 +35,8 @@ const ICONS = {
   chart: '<path d="M4 16.5v-4M8 16.5v-8M12 16.5v-6M16 16.5V4"/>',
   live: '<circle cx="10" cy="10" r="1.8"/><path d="M6.8 13.2a4.5 4.5 0 0 1 0-6.4M13.2 6.8a4.5 4.5 0 0 1 0 6.4M4.3 15.7a8 8 0 0 1 0-11.4M15.7 4.3a8 8 0 0 1 0 11.4"/>',
   code: '<path d="m7 6-4 4 4 4M13 6l4 4-4 4"/>',
+  // A football: the match view.
+  ball: '<circle cx="10" cy="10" r="7"/><path d="m10 7 2.9 2.1-1.1 3.4H8.2L7.1 9.1Z"/><path d="M10 3v4M12.9 9.1l3.6-1.3M11.8 12.5l2.3 3.1M8.2 12.5l-2.3 3.1M7.1 9.1 3.5 7.8"/>',
   // A number sign: anything a site counts beyond its visits.
   hash: '<path d="M8 3.5 6.5 16.5M13.5 3.5 12 16.5M4 7.5h12.5M3.5 12.5H16"/>',
   // A cog (after Feather's, MIT), drawn on a 24 grid and scaled to this one.
@@ -352,6 +354,7 @@ function shell(site, active, content) {
         navItem(`/sites/${site.key}`, "chart", "Analytics", active === "analytics"),
         navItem(`/sites/${site.key}/live`, "live", "Live view", active === "live",
           h("span", { class: "count", id: "nav-live", hidden: !site.live }, h("i", { class: "dot pulse" }), h("span", { text: String(site.live) }))),
+        navItem(`/sites/${site.key}/match`, "ball", "Match view", false),
         navItem(`/sites/${site.key}/numbers`, "hash", "Numbers", active === "numbers"),
         navItem(`/sites/${site.key}/setup`, "code", "Setup", active === "setup"),
         navItem(`/sites/${site.key}/import`, "history", "Import history", active === "import"),
@@ -1463,10 +1466,15 @@ async function livePage(key) {
   // A safety net for anything the stream can't say, such as a laptop closed without a goodbye.
   every(10_000, load);
   queueMicrotask(load);
+  // Momentum changes by the five minutes: asked for once a minute.
+  const momentumHost = h("div", {}, h("p", { class: "muted", text: "Loading…" }));
+  const loadMomentum = () => api(`/api/sites/${key}/momentum`).then((m) => momentumHost.replaceChildren(momentumView(m)), () => {});
+  every(60_000, loadMomentum);
+  queueMicrotask(loadMomentum);
 
   return h("div", { class: "page" },
     pageHead([icon("live", 20), h("h1", { text: "Live view" }), connection, h("span", { class: "muted", text: site?.domains[0] }), updated],
-      h("a", { class: "btn", href: `/sites/${key}` }, icon("chart", 16), "Analytics")),
+      [h("a", { class: "btn", href: `/sites/${key}/match` }, icon("ball", 16), "Match view"), h("a", { class: "btn", href: `/sites/${key}` }, icon("chart", 16), "Analytics")]),
     kpis,
     h("div", { class: "grid g-globe" }, globeCard,
       h("div", { class: "stack" },
@@ -1476,6 +1484,7 @@ async function livePage(key) {
       card("Page views per minute", perMinute, { sub: "Last 30 minutes" }),
       card("Sources right now", sources),
       card("Recent activity", feed, { sub: "Last 30 minutes" })),
+    card("Momentum", momentumHost, { sub: "Who's attacking: the last two hours against the same time last week" }),
     h("p", { class: "faint", style: { fontSize: "12px", marginTop: "4px" } },
       "Locations are approximate, from each visitor's IP address (",
       h("a", { href: "https://db-ip.com", target: "_blank", rel: "noopener", "data-external": "", text: "IP Geolocation by DB-IP" }),
@@ -1658,6 +1667,17 @@ async function siteSettingsPage(key) {
       h("p", { class: "help", text: "Emails go to the site's owners." }), owner ? h("div", {}, save) : null), { id: "alerts" });
   };
 
+  // Goals: the events the match view cheers, assists credit and the match report counts.
+  const goalsCard = () => {
+    const goals = h("input", { class: "input", id: "s-goals", value: (site.goals ?? []).join(", "), placeholder: site.defaultGoals.join(", "), disabled: !owner });
+    const save = h("button", { class: "btn primary", type: "button", text: "Save", hidden: !owner, onclick: () => saveSite({ goals: goals.value.trim() ? goals.value : null }, save, "Goals saved") });
+    return card("Goals", h("div", { class: "form" },
+      h("p", { class: "muted", text: "The events that count as a goal: the match view cheers them, assists credit the pages and sources that led to them, and the weekly match report counts them. Anything that earns money counts too." }),
+      h("div", { class: "field" }, h("label", { for: "s-goals", text: "Events, separated by commas" }), goals,
+        h("span", { class: "help", text: site.goals ? "Leave it empty for the usual ones." : `Empty: the usual ones, ${site.defaultGoals.slice(0, 6).join(", ")} and the like.` })),
+      owner ? h("div", {}, save) : null), { id: "goals" });
+  };
+
   const name = h("input", { class: "input", id: "s-name", value: site.name, disabled: !owner });
   const zone = zoneSelect("s-zone", site.timezone);
   zone.disabled = !owner;
@@ -1719,6 +1739,7 @@ async function siteSettingsPage(key) {
       card("Tracking code", h("div", { style: { display: "grid", gap: "10px" } }, h("div", { class: "code-block" }, snippet, copyButton),
         h("a", { href: `/sites/${key}/setup`, text: "Steps for WordPress, Shopify, Wix and more" }))),
       alertsCard(),
+      goalsCard(),
       locationCard,
       owner ? h("div", { class: "card", style: { borderColor: "#fbd5d0" } }, h("div", { class: "card-head" }, h("h2", { text: "Delete site" })),
         h("div", { class: "card-body form" },
@@ -1915,9 +1936,10 @@ function numberTile(n, { owner = false, onDelete = null, big = false } = {}) {
     when.textContent = n.last ? `Updated ${ago(n.last.ts)}` : "Nothing yet";
     // A latest-value number holds its value through the hours nothing was sent; a total is 0 then.
     let held = n.series.find((p) => p.v != null)?.v ?? 0;
-    line.replaceChildren(sparkline(n.series.map((p) => (n.kind === "add" ? p.v ?? 0 : (held = p.v ?? held))), big ? { width: 220, height: 44 } : {}));
+    line.replaceChildren(sparkline(n.series.map((p) => (n.kind === "add" ? p.v ?? 0 : (held = p.v ?? held))), { ...(big ? { width: 320, height: 44 } : {}), fit: n.kind !== "add" }));
   };
   paint();
+  tile.data = n;
   tile.update = (v, ts) => {
     n.value = n.kind === "add" ? (n.value ?? 0) + v : v;
     n.last = { value: v, ts };
@@ -2056,6 +2078,228 @@ async function numbersPage(key) {
   return h("div", { class: "page" }, pageHead([icon("hash", 20), h("h1", { text: "Numbers" }), h("span", { class: "muted", text: site?.domains[0] })], [rangeTabs]), body);
 }
 
+// ---------- Match view ----------
+// A site's day as a live scoreboard: for a TV, a launch day, or a link to share.
+const money = (minor, currency) => {
+  try {
+    const f = new Intl.NumberFormat("en", { style: "currency", currency });
+    return f.format(minor / 10 ** (f.resolvedOptions().maximumFractionDigits ?? 2));
+  } catch {
+    return `${minor} ${currency}`;
+  }
+};
+const EVENT_NAMES = { signup: "Sign-up", sign_up: "Sign-up", register: "Sign-up", subscribe: "Subscription", trial: "Trial", purchase: "Sale", order: "Order", checkout: "Checkout", download: "Download", install: "Install", lead: "Lead", contact: "Message" };
+const eventName = (name) => EVENT_NAMES[name] ?? name.replace(/[_-]+/g, " ").replace(/^./, (c) => c.toUpperCase());
+const fromWhere = (c) => [c.source && c.source !== "Direct" ? `from ${c.source}` : "direct", [c.city, c.country ? countryName(c.country) : null].filter(Boolean).join(", ")].filter(Boolean).join(" · ");
+
+// Momentum: five-minute bars above the line when visits beat the same time last week, below when they don't, and the
+// sources attacking now against the half hour before.
+function momentumView(m, { dark = false } = {}) {
+  const W = 480, H = 120, mid = H / 2, gap = 3, bw = W / m.wave.length - gap;
+  const most = Math.max(1, ...m.wave.map((b) => Math.abs(b.now - b.before)));
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "wave", role: "img", "aria-label": "Visits in each five minutes of the last two hours, against the same time last week" });
+  svg.append(svgEl("line", { x1: 0, x2: W, y1: mid, y2: mid, class: "axis" }));
+  m.wave.forEach((b, i) => {
+    const d = b.now - b.before, hgt = Math.max(d ? 3 : 1, (Math.abs(d) / most) * (mid - 6));
+    const bar = svgEl("rect", { x: i * (bw + gap), y: d >= 0 ? mid - hgt : mid, width: bw, height: hgt, rx: 2, class: d > 0 ? "up" : d < 0 ? "down" : "even" });
+    const tip = svgEl("title");
+    tip.textContent = `${b.ago ? `${b.ago * 5}–${b.ago * 5 + 5} min ago` : "Last 5 min"}: ${b.now} new ${b.now === 1 ? "visit" : "visits"} (${b.before} a week ago)`;
+    bar.append(tip);
+    svg.append(bar);
+  });
+  const attackers = m.sources.length
+    ? h("div", { class: "attackers" }, m.sources.slice(0, 6).map((s) => {
+      const up = s.now > s.before, down = s.now < s.before;
+      return h("div", { class: "attacker" }, h("span", { class: "who", text: s.source }), h("b", { text: int(s.now) }),
+        h("span", { class: `trend ${up ? "up" : down ? "down" : ""}`, text: up ? `↑ ${s.now - s.before}` : down ? `↓ ${s.before - s.now}` : "=" }));
+    }))
+    : h("p", { class: dark ? "quiet" : "empty-note", text: "No one has arrived in the last hour." });
+  return h("div", { class: "momentum" }, svg,
+    h("div", { class: "wave-legend" }, h("span", { text: "2 hours ago" }), h("span", { text: "Above the line: more visits than the same time last week" }), h("span", { text: "Now" })),
+    h("div", { class: "attackers-head" }, h("span", { text: "Attacking now" }), h("span", { text: "Last 30 min" })), attackers);
+}
+
+// The sound of a goal, made on the spot: a short rising horn over a swell of noise. Only after "Sound on".
+let audio = null;
+function cheer() {
+  if (!audio) return;
+  const t = audio.currentTime, out = audio.createGain();
+  out.gain.setValueAtTime(0.0001, t);
+  out.gain.exponentialRampToValueAtTime(0.5, t + 0.05);
+  out.gain.exponentialRampToValueAtTime(0.0001, t + 2.2);
+  out.connect(audio.destination);
+  [523.25, 659.25, 783.99, 1046.5].forEach((f, i) => {
+    const o = audio.createOscillator(), g = audio.createGain();
+    o.type = "triangle";
+    o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t + i * 0.12);
+    g.gain.exponentialRampToValueAtTime(0.35, t + i * 0.12 + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + i * 0.12 + 0.9);
+    o.connect(g).connect(out);
+    o.start(t + i * 0.12);
+    o.stop(t + i * 0.12 + 1);
+  });
+  const noise = audio.createBufferSource(), buf = audio.createBuffer(1, audio.sampleRate * 2, audio.sampleRate);
+  const ch = buf.getChannelData(0);
+  for (let i = 0; i < ch.length; i++) ch[i] = (Math.random() * 2 - 1) * Math.sin((Math.PI * i) / ch.length);
+  noise.buffer = buf;
+  const band = audio.createBiquadFilter();
+  band.type = "bandpass";
+  band.frequency.value = 1400;
+  const ng = audio.createGain();
+  ng.gain.value = 0.25;
+  noise.connect(band).connect(ng).connect(out);
+  noise.start(t);
+}
+
+async function matchPage({ key = null, token = null }) {
+  const base = token ? `/api/match/${token}` : `/api/sites/${key}/match`;
+  const page = h("div", { class: "match" }, h("p", { class: "quiet", text: "Loading…" }));
+  let data = null, last = 0, pending = null;
+  const tiles = new Map();
+  const clockEl = h("span", { class: "clock" });
+  const tick = () => { clockEl.textContent = clock().slice(0, 5); };
+  tick();
+  every(10_000, tick);
+
+  const load = async () => {
+    last = Date.now();
+    try {
+      data = await api(base);
+      draw();
+    } catch (err) {
+      if (!(err instanceof SignedOut)) page.replaceChildren(h("div", { class: "match-error" }, h("b", { text: err.message })));
+    }
+  };
+  // Arrivals and departures nudge often; the scoreboard is asked again at most every ten seconds.
+  const soon = () => {
+    if (pending) return;
+    pending = setTimeout(() => { pending = null; load(); }, Math.max(0, 10_000 - (Date.now() - last)));
+  };
+
+  const goalsEl = h("b", { class: "big" }), nowEl = h("b", { class: "huge" }), visitorsEl = h("b", { class: "big" }), takingsEl = h("b", { class: "big" });
+  const feed = h("ol", { class: "feed" });
+  const overlay = h("div", { class: "goal-overlay", hidden: true });
+  const line = (c) => h("li", { class: c.goal ? "goal" : c.kind === "number" ? "number" : "" },
+    h("time", { text: clock(new Date(c.ts)).slice(0, 5) }),
+    h("span", { class: "what" },
+      c.goal ? h("b", { text: `GOAL · ${eventName(c.name)}` })
+        : c.kind === "visit" ? h("span", { text: "New visitor" })
+        : c.kind === "number" ? h("b", { text: `${c.name}: ${num(c.value)}` })
+        : h("span", { text: eventName(c.name) }),
+      c.kind === "number" ? null : h("span", { class: "where", text: ` ${fromWhere(c)}${c.path && c.kind === "visit" ? ` · ${c.path}` : ""}` })),
+    c.revenue ? h("span", { class: "money", text: money(c.revenue.minor, c.revenue.currency) }) : null);
+
+  function celebrate(c) {
+    overlay.replaceChildren(h("div", { class: "goal-card" }, h("span", { class: "ball", text: "⚽" }), h("b", { text: "GOAL!" }),
+      h("span", { text: `${eventName(c.name)}${c.revenue ? ` · ${money(c.revenue.minor, c.revenue.currency)}` : ""}` }), h("span", { class: "where", text: fromWhere(c) })),
+      ...Array.from({ length: 36 }, (_, i) => h("i", { class: "confetti", style: { "--a": `${(i * 360) / 36}deg`, "--d": `${120 + ((i * 37) % 140)}px`, "--c": ["#29c46b", "#fff", "#ffd60a", "#4cc9f0"][i % 4] } })));
+    overlay.hidden = false;
+    overlay.classList.remove("play");
+    void overlay.offsetWidth;
+    overlay.classList.add("play");
+    cheer();
+    clearTimeout(celebrate.timer);
+    celebrate.timer = setTimeout(() => { overlay.hidden = true; }, 4200);
+  }
+
+  function scoreboard() {
+    const t = data.today;
+    nowEl.textContent = int(data.now);
+    visitorsEl.textContent = int(t.visitors);
+    goalsEl.textContent = int(t.goals);
+    takingsEl.textContent = t.takings.length ? t.takings.slice(0, 2).map((x) => money(x.minor, x.currency)).join(" + ") : "–";
+  }
+
+  function draw() {
+    const d = data;
+    scoreboard();
+    tiles.clear();
+    const numbers = d.numbers.length ? h("div", { class: "match-numbers" }, d.numbers.slice(0, 8).map((n) => {
+      const tile = numberTile(n, { big: true });
+      tiles.set(n.name, tile);
+      return tile;
+    })) : null;
+    feed.replaceChildren(...d.commentary.map(line));
+    if (!d.commentary.length) feed.append(h("li", { class: "quiet", text: "Nothing yet today. Goals and new visitors appear here the moment they happen." }));
+    const soundButton = h("button", { class: "btn ghost", type: "button", "aria-pressed": String(!!audio), onclick: async () => {
+      if (audio) { await audio.close(); audio = null; } else { audio = new AudioContext(); cheer(); }
+      soundButton.setAttribute("aria-pressed", String(!!audio));
+      soundButton.replaceChildren(audio ? "Sound on" : "Sound off");
+    } }, audio ? "Sound on" : "Sound off");
+    const full = h("button", { class: "btn ghost", type: "button", text: "Full screen", onclick: () => (document.fullscreenElement ? document.exitFullscreen() : page.requestFullscreen?.()) });
+    const share = key && state.sites?.find((s) => s.key === key)?.role === "owner" ? h("button", { class: "btn ghost", type: "button", text: "Share", onclick: () => shareMenu(share) }) : null;
+    page.replaceChildren(
+      h("header", { class: "match-top" },
+        h("div", { class: "who" }, key ? siteIcon(state.sites.find((s) => s.key === key), 28) : null, h("b", { text: d.site.name }), h("span", { class: "live-pill" }, h("i", { class: "dot pulse" }), "LIVE")),
+        clockEl,
+        h("div", { class: "tools" }, soundButton, full, share, key ? h("a", { class: "btn ghost", href: `/sites/${key}/live`, "aria-label": "Leave the match view" }, icon("close", 16)) : null)),
+      h("section", { class: "board" },
+        h("div", { class: "stat now" }, h("span", { text: "On the site now" }), nowEl),
+        h("div", { class: "stat" }, h("span", { text: "Visitors today" }), visitorsEl),
+        h("div", { class: "stat" }, h("span", { text: "Goals today" }), goalsEl),
+        h("div", { class: "stat" }, h("span", { text: "Takings today" }), takingsEl)),
+      numbers,
+      h("section", { class: "match-main" },
+        h("div", { class: "panel" }, h("h2", { text: "Momentum" }), momentumView(d.momentum, { dark: true })),
+        h("div", { class: "panel" }, h("h2", { text: "Commentary" }), feed)),
+      token ? h("footer", { class: "match-foot" }, h("a", { href: "/", "data-external": "" }, h("img", { src: LOGO, alt: "", width: 18, height: 18 }), "Live analytics by Statiku")) : null,
+      overlay);
+  }
+
+  async function shareMenu(anchor) {
+    const info = await api(`/api/sites/${key}`).catch(() => null);
+    let url = info?.site.matchUrl ?? null;
+    const box = h("div", { class: "share-box" });
+    const paint = () => {
+      const copyBtn = h("button", { class: "btn copy", type: "button", onclick: () => copy(url, copyBtn) }, icon("copy", 14), "Copy");
+      box.replaceChildren(url
+        ? h("div", { class: "form" }, h("b", { text: "Anyone with this link sees this scoreboard, and nothing else of the site." }), h("div", { class: "code-block small" }, url, copyBtn),
+          h("button", { class: "btn", type: "button", text: "Turn the link off", onclick: async () => { url = (await api(`/api/sites/${key}/match/link`, { method: "DELETE" })).url; paint(); } }))
+        : h("div", { class: "form" }, h("b", { text: "Share this scoreboard at a link of its own" }), h("span", { class: "muted", text: "For a launch day, a team channel or a TV. Only the scoreboard shows; you can turn the link off at any time." }),
+          h("button", { class: "btn primary", type: "button", text: "Create a link", onclick: async () => { url = (await api(`/api/sites/${key}/match/link`, { method: "POST" })).url; paint(); } })));
+    };
+    paint();
+    openPopover(anchor, [box], { align: "right", width: 360 });
+  }
+
+  const stream = new EventSource(token ? `${base}/stream` : `/api/sites/${key}/stream`);
+  stream.onmessage = (m) => {
+    const msg = JSON.parse(m.data);
+    if (!data) return;
+    if (msg.t === "presence") return soon();
+    if (msg.t === "number") {
+      const tile = tiles.get(msg.n.name);
+      if (tile) tile.update(msg.n.value, msg.n.ts);
+      else soon();
+      feed.prepend(line({ kind: "number", ts: msg.n.ts, name: msg.n.name, value: tile ? tile.data.value : msg.n.value }));
+      return;
+    }
+    if (msg.t !== "event" || msg.e.name === "pageview" && !msg.e.first) return;
+    const e = msg.e;
+    const c = { ts: e.ts, kind: e.name === "pageview" ? "visit" : "event", name: e.name, path: e.path, source: e.source, country: e.country, city: e.city, revenue: e.revenue ?? null };
+    c.goal = c.kind === "event" && (data.goals.includes(e.name) || !!c.revenue);
+    feed.querySelector(".quiet")?.remove();
+    feed.prepend(line(c));
+    while (feed.children.length > 80) feed.lastChild.remove();
+    if (c.goal) {
+      data.today.goals += 1;
+      if (c.revenue) {
+        const same = data.today.takings.find((x) => x.currency === c.revenue.currency);
+        if (same) same.minor += c.revenue.minor;
+        else data.today.takings.push({ ...c.revenue });
+      }
+      scoreboard();
+      celebrate(c);
+    }
+    soon();
+  };
+  onLeave(() => { stream.close(); clearTimeout(pending); });
+  every(60_000, load);
+  queueMicrotask(load);
+  return page;
+}
+
 // ---------- Rendering ----------
 const ROUTES = [
   [/^\/$/, () => ["home", null, homePage()]],
@@ -2081,7 +2325,15 @@ async function render() {
   const auth = path === "/login" || path === "/signup";
   const join = path.match(/^\/join\/([\w-]{20,80})$/);
   const reset = path.match(/^\/reset\/([\w-]{20,80})$/);
+  const sharedMatch = path.match(/^\/m\/([\w-]{20,40})$/);
+  const ownMatch = path.match(/^\/sites\/(p_[a-z0-9]+)\/match$/);
   try {
+    if (sharedMatch) {
+      const content = await matchPage({ token: sharedMatch[1] });
+      if (run === rendering) root.replaceChildren(content);
+      document.title = "Live · Statiku";
+      return;
+    }
     if (state.user === undefined) {
       const res = await fetch("/api/me", { credentials: "same-origin" });
       const me = res.ok ? await res.json() : null;
@@ -2108,6 +2360,14 @@ async function render() {
       return root.replaceChildren(authPage(path === "/signup" ? "signup" : "login"));
     }
     await loadSites();
+    if (ownMatch) {
+      const site = state.sites.find((s) => s.key === ownMatch[1]);
+      if (!site) return go("/", true);
+      const content = await matchPage({ key: site.key });
+      if (run === rendering) root.replaceChildren(content);
+      document.title = `Match view · ${site.name} · Statiku`;
+      return;
+    }
     const route = ROUTES.find(([re]) => re.test(path));
     if (!route) return go("/", true);
     const key = path.match(route[0])[1];

@@ -3,7 +3,9 @@
 // with several, this becomes a shared channel (Redis pub/sub) and presence moves with the sessions.
 
 export type LiveMessage =
-  | { t: "event"; e: { ts: Date; name: string; path: string | null; country: string | null; source: string | null; device: string | null; browser: string | null; os: string | null; app: boolean } }
+  // An event; from a website, also the visitor's city (never stored), what it earned, and whether it began a visit.
+  | { t: "event"; e: { ts: Date; name: string; path: string | null; country: string | null; source: string | null; device: string | null; browser: string | null; os: string | null; app: boolean;
+      city?: string | null; revenue?: { minor: number; currency: string } | null; first?: boolean } }
   | { t: "presence" }
   // A number sent with the site's key: for an "add" number, the value is what it went up by.
   | { t: "number"; n: { name: string; value: number; ts: Date; kind: "set" | "add" } };

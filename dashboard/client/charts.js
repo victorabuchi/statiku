@@ -120,12 +120,14 @@ export function lineChart(host, points, compare, m, names) {
 }
 
 // A small line with no axes, for a stat card.
-export function sparkline(values, { width = 96, height = 30 } = {}) {
-  const svg = svgEl("svg", { width, height, viewBox: `0 0 ${width} ${height}`, "aria-hidden": "true", class: "spark" });
+// With fit, the line spans its own lowest to highest value (a temperature, a score) rather than starting at zero.
+export function sparkline(values, { width = 96, height = 30, fit = false } = {}) {
+  const svg = svgEl("svg", { width, height, viewBox: `0 0 ${width} ${height}`, "aria-hidden": "true", class: "spark", preserveAspectRatio: "none" });
   if (!values.length) return svg;
-  const max = Math.max(...values, 1);
+  const max = Math.max(...values, fit ? -Infinity : 1), min = fit ? Math.min(...values) : 0;
+  const span = max - min || 1;
   const x = (i) => (values.length === 1 ? width / 2 : 1 + (i * (width - 2)) / (values.length - 1));
-  const y = (v) => height - 2 - ((height - 4) * (v ?? 0)) / max;
+  const y = (v) => height - 2 - ((height - 4) * ((v ?? 0) - min)) / span - (fit && max === min ? (height - 4) / 2 : 0);
   const d = values.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
   svg.append(svgEl("path", { d: `${d}L${x(values.length - 1)},${height}L${x(0)},${height}Z`, fill: "var(--series-wash)" }));
   svg.append(svgEl("path", { d, fill: "none", stroke: "var(--series)", "stroke-width": 1.6, "stroke-linejoin": "round", "stroke-linecap": "round" }));
