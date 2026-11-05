@@ -41,6 +41,7 @@ export type Options = {
   polar?: Polar & { request?: Outbound };
   probe?: Probe;
   fetchIcon?: typeof fetchIcon;
+  post?: Outbound;
 };
 
 const CORS = {
@@ -106,6 +107,7 @@ export async function createApp(options: Options) {
     polar: options.polar,
     probe: options.probe,
     fetchIcon: options.fetchIcon,
+    post: options.post,
   });
   const etag = `"${createHash("sha256").update(script).digest("base64url").slice(0, 16)}"`;
 

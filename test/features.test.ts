@@ -36,6 +36,11 @@ before(async () => {
     mailer: async (mail) => void mailbox.push(mail),
     probe: async () => ({ error: "ENOTFOUND" }),
     fetchIcon: async () => null,
+    // Instead of Slack: what would have been posted.
+    post: async (to, init) => {
+      slack.push({ url: String(to), body: JSON.parse(init?.body ?? "{}") });
+      return { status: 200, type: "text/plain", body: Buffer.from("ok") };
+    },
   });
   await new Promise<void>((resolve) => app.server.listen(0, resolve));
   base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
@@ -380,4 +385,74 @@ test("revenue by source: Stripe and Polar payments, from each site's own webhook
   // A site that isn't connected has no webhook.
   const other = await siteOf("plain.example");
   assert.equal((await fetch(`${base}/api/pay/stripe/${other.key}`, { method: "POST", body: "{}" })).status, 404);
+});
+
+
+// A visit at a given time, written as the service would have.
+async function visitAt(projectId: string, visitor: number, source: string, at: Date, pages: string[], goal?: [string, number?]) {
+  const session = 5_000_000 + Math.floor(Math.random() * 1e9);
+  const t = (i: number) => new Date(at.getTime() + i * 60_000);
+  await pool.query(
+    `insert into sessions (project_id, id, visitor, started_at, last_seen, entry_path, exit_path, pageviews, events, source)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [projectId, session, visitor, at, t(pages.length + 1), pages[0], pages.at(-1), pages.length, pages.length + (goal ? 1 : 0), source],
+  );
+  for (const [i, path] of pages.entries()) {
+    await pool.query("insert into events (project_id, ts, name, session_id, visitor, path, source) values ($1, $2, 'pageview', $3, $4, $5, $6)", [projectId, t(i), session, visitor, path, source]);
+  }
+  if (goal) {
+    await pool.query("insert into events (project_id, ts, name, session_id, visitor, path, source, revenue_minor, currency) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+      [projectId, t(pages.length), goal[0], session, visitor, pages.at(-1), source, goal[1] ?? null, goal[1] ? "EUR" : null]);
+  }
+}
+
+test("the weekly match report: last week against the week before, by email and to Slack, once a week", { skip }, async () => {
+  const { as, key, id } = await siteOf("report.example");
+  assert.equal((await as(`/api/sites/${key}`, { method: "PATCH", body: { slackWebhook: "https://example.com/hook" } })).status, 400);
+  const hook = "https://hooks.slack.com/services/T000/B000/abcdefghijkl";
+  assert.equal((await as(`/api/sites/${key}`, { method: "PATCH", body: { slackWebhook: hook } })).status, 200);
+  assert.equal((await as(`/api/sites/${key}`)).data.site.slack, true);
+
+  // Monday of this week at 09:00 in Helsinki: the report is due.
+  const { rows: [w] } = await pool.query(
+    `select (date_trunc('week', now() at time zone 'Europe/Helsinki') + interval '9 hours') at time zone 'Europe/Helsinki' as due,
+            (date_trunc('week', now() at time zone 'Europe/Helsinki') - interval '7 days' + interval '12 hours') at time zone 'Europe/Helsinki' as last,
+            (date_trunc('week', now() at time zone 'Europe/Helsinki') - interval '14 days' + interval '12 hours') at time zone 'Europe/Helsinki' as before`);
+  const day = 86400_000;
+  // Last week: four visitors, three sign-ups and a sale, and a page that's seen before the goals.
+  await visitAt(id, 1, "Hacker News", new Date(w.last.getTime()), ["/", "/pricing"], ["signup"]);
+  await visitAt(id, 2, "Hacker News", new Date(w.last.getTime() + day), ["/", "/pricing"], ["signup"]);
+  await visitAt(id, 3, "Google", new Date(w.last.getTime() + 2 * day), ["/pricing"], ["purchase", 4900]);
+  await visitAt(id, 4, "Google", new Date(w.last.getTime() + 3 * day), ["/blog"]);
+  // The week before: two visitors and one smaller sale.
+  await visitAt(id, 1, "Google", new Date(w.before.getTime()), ["/"], ["purchase", 1900]);
+  await visitAt(id, 2, "Google", new Date(w.before.getTime() + day), ["/blog"]);
+
+  mailbox.length = 0;
+  slack.length = 0;
+  const sent = await app.jobs!.sendReports(w.due);
+  assert.ok(sent >= 1);
+  const mail = mailbox.find((m) => m.subject.startsWith("report.example"));
+  assert.ok(mail, JSON.stringify(mailbox.map((m) => m.subject)));
+  assert.equal(mail.subject, "report.example: you beat last week 4–0");
+  assert.match(mail.text, /Visitors: 4, up 100% on the week before\./);
+  assert.match(mail.text, /Goals: 3, up 200% on the week before\./);
+  assert.match(mail.text, /Revenue: €49\.00, up 158% on the week before\./);
+  assert.match(mail.text, /Top scorer: Hacker News, with 2 goals\./);
+  assert.match(mail.text, /Assist of the week: \/pricing, seen before 3 of the goals\./);
+  assert.match(mail.text, /Star player: |Injuries: none\./);
+  const posted = slack.find((p) => p.url === hook);
+  assert.ok(posted);
+  assert.match(posted.body.text, /^:soccer: \*report\.example: you beat last week 4–0\*/);
+  // Once a week.
+  const again = await app.jobs!.sendReports(new Date(w.due.getTime() + 3600_000));
+  assert.equal(again, 0);
+  // Not due on another day.
+  await pool.query("update projects set report_week = null where id = $1", [id]);
+  assert.equal(await app.jobs!.sendReports(new Date(w.due.getTime() + day)), 0);
+
+  // "Send me one now", from the settings page.
+  const now = await as(`/api/sites/${key}/report`, { method: "POST" });
+  assert.equal(now.status, 200, JSON.stringify(now.data));
+  assert.match(now.data.heading, /^report\.example: /);
 });

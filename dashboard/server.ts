@@ -24,6 +24,7 @@
 //   GET    /api/match/:token   GET /api/match/:token/stream   the match view at its public link, and its live feed
 //   GET    /api/sites/:key/momentum   who's attacking right now
 //   GET    /api/sites/:key/insights?range=   assists, player ratings, injuries and revenue by source for a period
+//   POST   /api/sites/:key/report   last week's match report, now, to the person asking (and Slack)
 //   POST   /api/pay/stripe/:key   POST /api/pay/polar/:key   a site's payments, from its own Stripe or Polar webhook
 //   GET    /api/sites/:key/heatmap?range=&path=&device=   where a page's visitors click, and how far down they read
 //   GET    /api/billing   POST /api/billing/checkout { plan, interval }   POST /api/billing/portal   POST /api/polar/webhook
@@ -51,6 +52,7 @@ import { createMonitor, type Probe } from "./monitor.ts";
 import { OWNER, ownerSetup } from "./owner.ts";
 import { cleanGoals, goalsOf, matchSummary, shareMatch, siteByMatchToken, stopSharingMatch } from "./match.ts";
 import { assists, heatmap, injuries, momentum, ratings, revenue } from "./insights.ts";
+import { createReports, slackHook } from "./reports.ts";
 import { paymentOf, payingSite, recordPayment, verifyPayment, type Provider } from "./payments.ts";
 import { deleteNumber, numbersReport, parseNumbersFile, renewNumbersKey, saveNumbers } from "./numbers.ts";
 import { access, applySubscription, BILLING_COLUMNS, checkoutUrl, planOf, PLANS, polarFromEnv, portalUrl, usage, verifyWebhook, type Polar } from "./billing.ts";
@@ -249,6 +251,8 @@ export async function createDashboard(options: {
   // How the site watcher looks at a site, and how icons are fetched; tests use stand-ins.
   probe?: Probe;
   fetchIcon?: typeof fetchIcon;
+  // How match reports reach Slack; tests use a stand-in.
+  post?: Outbound;
 }) {
   const { pool, onSiteChanged, presence, hub, streets } = options;
   const mailer = options.mailer ?? smtpMailer();
@@ -411,6 +415,9 @@ export async function createDashboard(options: {
   // Emails to site owners when a site goes quiet or gets a rush (monitor.ts).
   const monitor = createMonitor({ pool, mailer, probe: options.probe, origin: () => process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? "http://localhost:8787" });
   setInterval(() => void monitor.watch().catch((e) => console.error("Site watch:", (e as Error).message)), 5 * 60_000).unref();
+  // The weekly match report, each Monday morning in each site's time zone (reports.ts).
+  const reports = createReports({ pool, mailer, post: options.post, origin: () => process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? "http://localhost:8787" });
+  setInterval(() => void reports.send().catch((e) => console.error("Reports:", (e as Error).message)), 15 * 60_000).unref();
 
   // A form with files, up to 100 MB, read by the platform's own parser.
   async function filesOf(req: IncomingMessage) {
@@ -887,7 +894,7 @@ export async function createDashboard(options: {
 
     if (action === "" && method === "GET") {
       const { rows: [info] } = await pool.query(
-        `select created_at, match_token, stripe_secret is not null as stripe, polar_secret is not null as polar, (select ts from events where project_id = $1 order by ts desc limit 1) as last_event_at from projects where id = $1`,
+        `select created_at, match_token, report_weekly, slack_webhook is not null as slack, stripe_secret is not null as stripe, polar_secret is not null as polar, (select ts from events where project_id = $1 order by ts desc limit 1) as last_event_at from projects where id = $1`,
         [site.id],
       );
       return json(res, 200, {
@@ -895,6 +902,7 @@ export async function createDashboard(options: {
           key: site.key, name: site.name, domains: site.domains, timezone: site.timezone, role: site.role, askLocation: site.askLocation,
           alertQuiet: site.alertQuiet, alertSurge: site.alertSurge, goals: site.goals ?? null, defaultGoals: goalsOf({}),
           matchUrl: info.match_token ? `${origin(r)}/m/${info.match_token}` : null,
+          reportWeekly: info.report_weekly, slack: info.slack,
           payments: {
             stripe: info.stripe, polar: info.polar, canSeal: canSeal(),
             stripeUrl: `${origin(r)}/api/pay/stripe/${site.key}`, polarUrl: `${origin(r)}/api/pay/polar/${site.key}`,
@@ -921,6 +929,12 @@ export async function createDashboard(options: {
       const alertQuiet = typeof body.alertQuiet === "boolean" ? body.alertQuiet : site.alertQuiet;
       const alertSurge = typeof body.alertSurge === "boolean" ? body.alertSurge : site.alertSurge;
       const goals = body.goals === undefined ? site.goals ?? null : cleanGoals(body.goals);
+      if (typeof body.reportWeekly === "boolean") await pool.query("update projects set report_weekly = $2 where id = $1", [site.id, body.reportWeekly]);
+      if (body.slackWebhook !== undefined) {
+        const hook = body.slackWebhook === null || body.slackWebhook === "" ? null : slackHook(body.slackWebhook);
+        if (body.slackWebhook && !hook) throw new HttpError(400, "That isn't a Slack incoming webhook (https://hooks.slack.com/services/…).");
+        await pool.query("update projects set slack_webhook = $2 where id = $1", [site.id, hook]);
+      }
       for (const [field, column] of [["stripeSecret", "stripe_secret"], ["polarSecret", "polar_secret"]] as const) {
         if (body[field] === undefined) continue;
         const secret = body[field] === null ? null : text(body[field], 300);
@@ -977,6 +991,11 @@ export async function createDashboard(options: {
     if (action === "/live" && method === "GET") return json(res, 200, await live(pool, site, presence(site.id), streets));
     if (action === "/match" && method === "GET") return json(res, 200, await matchSummary(pool, site, presence(site.id)));
     if (action === "/momentum" && method === "GET") return json(res, 200, await momentum(pool, site));
+    if (action === "/report" && method === "POST") {
+      if (!checks.allow(`report:${user.id}`)) throw new HttpError(429, "Wait a minute before sending another.");
+      const { rows: [hook] } = await pool.query("select slack_webhook from projects where id = $1", [site.id]);
+      return json(res, 200, await reports.sendNow({ ...site, slack_webhook: hook?.slack_webhook ?? null }, user.email));
+    }
     if ((action === "/insights" || action === "/heatmap") && method === "GET") {
       const url = new URL(req.url ?? "/", "http://x");
       const range = url.searchParams.get("range") ?? "d30";
@@ -1037,5 +1056,5 @@ export async function createDashboard(options: {
       console.error("Dashboard:", (e as Error).message);
       if (!res.headersSent) json(res, 500, { error: "Something went wrong on our side. Try again." });
     }
-  }, { jobs: { refreshDownloads, watchSites: monitor.watch } });
+  }, { jobs: { refreshDownloads, watchSites: monitor.watch, sendReports: reports.send } });
 }

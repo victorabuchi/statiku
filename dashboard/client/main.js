@@ -1788,6 +1788,31 @@ async function siteSettingsPage(key) {
       h("p", { class: "help", text: "Emails go to the site's owners." }), owner ? h("div", {}, save) : null), { id: "alerts" });
   };
 
+  // The weekly match report: by email to the owners, and to a Slack channel through an incoming webhook.
+  const reportCard = () => {
+    const weekly = h("input", { type: "checkbox", id: "s-report", checked: site.reportWeekly, disabled: !owner });
+    const hook = h("input", { class: "input", id: "s-slack", type: "url", placeholder: site.slack ? "Connected: paste a new one to replace it" : "https://hooks.slack.com/services/…", disabled: !owner });
+    const save = h("button", { class: "btn primary", type: "button", text: "Save", hidden: !owner, onclick: () => saveSite({ reportWeekly: weekly.checked, ...(hook.value.trim() ? { slackWebhook: hook.value.trim() } : {}) }, save, "Report settings saved") });
+    const unhook = h("button", { class: "btn plain", type: "button", text: "Stop posting to Slack", onclick: () => saveSite({ slackWebhook: null }, unhook, "Slack disconnected") });
+    const now = h("button", { class: "btn", type: "button", text: "Send me last week's report now", onclick: async () => {
+      now.disabled = true;
+      try {
+        const r = await api(`/api/sites/${key}/report`, { method: "POST" });
+        toast(`Sent: ${r.heading}`);
+      } catch (e) {
+        if (!(e instanceof SignedOut)) toast(e.message);
+      } finally {
+        now.disabled = false;
+      }
+    } });
+    return card("Weekly match report", h("div", { class: "form" },
+      h("p", { class: "muted", text: "Every Monday morning, last week against the week before, read like a result: visitors, visits, goals and revenue each won or lost (\"you beat last week 3–1\"), the star player, the top scorer, the assist of the week, the injuries and your numbers." }),
+      h("label", { class: "check", for: "s-report" }, weekly, h("span", {}, h("b", { text: "Email it to the site's owners." }))),
+      h("div", { class: "field" }, h("label", { for: "s-slack", text: "Post it to Slack too" }), hook,
+        h("span", { class: "help" }, "An incoming webhook for the channel: in Slack, ", h("code", { text: "Apps → Incoming Webhooks → Add to Slack" }), ", pick the channel, and paste its address here.")),
+      h("div", { class: "row-gap" }, owner ? save : null, owner && site.slack ? unhook : null, now)), { id: "report" });
+  };
+
   // Goals: the events the match view cheers, assists credit and the match report counts.
   const goalsCard = () => {
     const goals = h("input", { class: "input", id: "s-goals", value: (site.goals ?? []).join(", "), placeholder: site.defaultGoals.join(", "), disabled: !owner });
@@ -1882,6 +1907,7 @@ async function siteSettingsPage(key) {
       card("Tracking code", h("div", { style: { display: "grid", gap: "10px" } }, h("div", { class: "code-block" }, snippet, copyButton),
         h("a", { href: `/sites/${key}/setup`, text: "Steps for WordPress, Shopify, Wix and more" }))),
       alertsCard(),
+      reportCard(),
       goalsCard(),
       paymentsCard(),
       locationCard,
