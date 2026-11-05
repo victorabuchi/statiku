@@ -1274,7 +1274,37 @@ function insightCards(x, key) {
       h("p", { class: "help", text: "Out of ten: how many visitors a page reaches, how long they stay on it, the goals it sets up, and how few visits end there." }))
     : h("p", { class: "empty-note", text: "No page views in this period." }),
   { sub: "How each page played" });
-  return [h("div", { class: "grid g2" }, assistsCard, ratingsCard), injuriesCard(x.injuries)];
+  return [revenueCard(x.revenue, key), h("div", { class: "grid g2" }, assistsCard, ratingsCard), injuriesCard(x.injuries)];
+}
+
+// Revenue by source: the period's takings in its main currency against the one before, and what each source,
+// campaign and landing page brought in.
+function revenueCard(x, key) {
+  if (!x.totals.length) {
+    return card("Revenue", h("p", { class: "empty-note" }, "No revenue in this period. ", h("a", { href: `/sites/${key}/settings#payments`, text: "Connect Stripe or Polar" }),
+      " to credit each payment to the visit that led to it, or send it with an event: ", h("code", { text: 'statiku("purchase", { revenue: { amount: 29, currency: "EUR" } })' })), { sub: "What each source earned" });
+  }
+  const main = x.totals[0], cur = main.currency;
+  const before = x.previous.find((p) => p.currency === cur);
+  const others = x.totals.slice(1);
+  const tabsHost = h("span"), body = h("div");
+  const show = () => {
+    const tab = state.revenueTab ?? "sources";
+    tabsHost.replaceChildren(tabs([["sources", "Sources"], ["campaigns", "Campaigns"], ["landings", "Landing pages"]], tab, (t) => { state.revenueTab = t; show(); }));
+    const rows = x[tab].filter((r) => r.currency === cur).map((r) => ({ label: r.label, v: r.minor, sales: r.sales }));
+    body.replaceChildren(rows.length ? bars(rows, { head: [tab === "sources" ? "Source" : tab === "campaigns" ? "Campaign" : "Landing page", "Revenue"], fmt: (v) => money(v, cur) })
+      : h("p", { class: "empty-note", text: tab === "campaigns" ? "None of this period's sales came from a tagged campaign." : "Nothing to show." }));
+  };
+  show();
+  const top = x.sources.find((r) => r.currency === cur && r.label !== "Not matched");
+  return card("Revenue", h("div", { class: "stack tight" },
+    h("div", { class: "revenue-head" },
+      h("span", { class: "big-money", text: money(main.minor, cur) }),
+      delta({}, main.minor, before?.minor),
+      h("span", { class: "muted", text: `${int(main.sales)} ${main.sales === 1 ? "sale" : "sales"}${others.length ? ` · and ${others.map((o) => money(o.minor, o.currency)).join(", ")}` : ""}` })),
+    top ? h("p", { class: "callout" }, h("b", { text: top.label }), ` brought the most: ${money(top.minor, cur)} from ${int(top.sales)} ${top.sales === 1 ? "sale" : "sales"}.`) : null,
+    body),
+  { sub: "What each source earned", end: tabsHost });
 }
 
 // Injuries: page speed as Google judges it (the 75th percentile of visits), the slowest pages, script errors and
@@ -1769,6 +1799,28 @@ async function siteSettingsPage(key) {
       owner ? h("div", {}, save) : null), { id: "goals" });
   };
 
+  // Payments: each provider's webhook, so a payment is credited to the visit that led to it.
+  const paymentsCard = () => {
+    const pay = site.payments;
+    const provider = (id, name, connected, url, steps) => {
+      const secret = h("input", { class: "input", type: "password", autocomplete: "off", placeholder: "whsec_…", "aria-label": `${name} webhook signing secret`, disabled: !owner || !pay.canSeal });
+      const field = id === "stripe" ? "stripeSecret" : "polarSecret";
+      const save = h("button", { class: "btn primary", type: "button", text: connected ? "Replace the secret" : "Connect", onclick: () => secret.value.trim() ? saveSite({ [field]: secret.value.trim() }, save, `${name} connected`) : toast("Paste the webhook's signing secret first.") });
+      const off = h("button", { class: "btn plain", type: "button", text: "Disconnect", onclick: () => saveSite({ [field]: null }, off, `${name} disconnected`) });
+      const copyUrl = h("button", { class: "btn copy", type: "button", onclick: () => copy(url, copyUrl) }, icon("copy", 14), "Copy");
+      return h("div", { class: "provider" },
+        h("div", { class: "row-between" }, h("b", { text: name }), h("span", { class: `badge${connected ? " ok" : ""}`, text: connected ? "Connected" : "Not connected" })),
+        h("ol", { class: "steps-list" }, steps.map((t) => h("li", {}, rich(t)))),
+        h("div", { class: "code-block small" }, url, copyUrl),
+        owner ? h("div", { class: "input-row" }, revealable(secret, "secret"), save, connected ? off : null) : null);
+    };
+    return card("Payments", h("div", { class: "form" },
+      h("p", { class: "muted", text: "Checkout links on your site (buy.stripe.com and buy.polar.sh) get a reference when they're clicked. Your payment provider's webhook brings it back with the payment, so each sale is credited to the source, campaign and page that led to it." }),
+      pay.canSeal ? null : h("div", { class: "notice warn", text: "This server needs a SECRET_KEY setting to keep payment secrets." }),
+      provider("stripe", "Stripe", pay.stripe, pay.stripeUrl, ["In Stripe, open `Developers → Webhooks` and add a destination.", "Choose the events `checkout.session.completed` and `checkout.session.async_payment_succeeded`, and this address:", "Paste the signing secret Stripe shows (`whsec_…`) here."]),
+      provider("polar", "Polar", pay.polar, pay.polarUrl, ["In Polar, open `Settings → Webhooks` and add an endpoint, format Raw.", "Choose the event `order.paid`, and this address:", "Paste its secret here."])), { id: "payments" });
+  };
+
   const name = h("input", { class: "input", id: "s-name", value: site.name, disabled: !owner });
   const zone = zoneSelect("s-zone", site.timezone);
   zone.disabled = !owner;
@@ -1831,6 +1883,7 @@ async function siteSettingsPage(key) {
         h("a", { href: `/sites/${key}/setup`, text: "Steps for WordPress, Shopify, Wix and more" }))),
       alertsCard(),
       goalsCard(),
+      paymentsCard(),
       locationCard,
       owner ? h("div", { class: "card", style: { borderColor: "#fbd5d0" } }, h("div", { class: "card-head" }, h("h2", { text: "Delete site" })),
         h("div", { class: "card-body form" },

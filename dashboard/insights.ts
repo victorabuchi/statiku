@@ -162,3 +162,21 @@ export async function injuries(pool: pg.Pool, site: Pick<Site, "id">, from: Date
     broken,
   };
 }
+
+// Revenue by source: what the period earned (per currency) against the one before, and what each source, campaign
+// and landing page brought in. Purchases a payment webhook couldn't match to a visit show as "Not matched".
+export async function revenue(pool: pg.Pool, site: Pick<Site, "id">, from: Date, to: Date, prevFrom: Date, prevTo: Date) {
+  const W = "e.project_id = $1 and e.ts >= $2 and e.ts < $3 and e.revenue_minor is not null";
+  const by = (label: string, join = "") =>
+    q(pool, `select ${label} as label, e.currency, sum(e.revenue_minor)::bigint as minor, count(*)::int as sales
+               from events e ${join} where ${W} group by 1, 2 having ${label} is not null order by 3 desc, 1 limit 20`, [site.id, from, to]);
+  const [totals, previous, sources, campaigns, landings] = await Promise.all([
+    q(pool, `select e.currency, sum(e.revenue_minor)::bigint as minor, count(*)::int as sales from events e where ${W} group by 1 order by 2 desc`, [site.id, from, to]),
+    q(pool, `select e.currency, sum(e.revenue_minor)::bigint as minor, count(*)::int as sales from events e where ${W} group by 1 order by 2 desc`, [site.id, prevFrom, prevTo]),
+    by("coalesce(e.source, 'Not matched')"),
+    by("e.utm_campaign"),
+    by("s.entry_path", "left join sessions s on s.project_id = e.project_id and s.id = e.session_id"),
+  ]);
+  const money = (rows: any[]) => rows.map((r) => ({ ...r, minor: Number(r.minor) }));
+  return { totals: money(totals), previous: money(previous), sources: money(sources), campaigns: money(campaigns), landings: money(landings) };
+}

@@ -23,7 +23,8 @@
 //   GET    /api/sites/:key/match   the match view's scoreboard   POST|DELETE …/match/link   its public link
 //   GET    /api/match/:token   GET /api/match/:token/stream   the match view at its public link, and its live feed
 //   GET    /api/sites/:key/momentum   who's attacking right now
-//   GET    /api/sites/:key/insights?range=   assists, player ratings and injuries for a period
+//   GET    /api/sites/:key/insights?range=   assists, player ratings, injuries and revenue by source for a period
+//   POST   /api/pay/stripe/:key   POST /api/pay/polar/:key   a site's payments, from its own Stripe or Polar webhook
 //   GET    /api/sites/:key/heatmap?range=&path=&device=   where a page's visitors click, and how far down they read
 //   GET    /api/billing   POST /api/billing/checkout { plan, interval }   POST /api/billing/portal   POST /api/polar/webhook
 import { createHash, randomBytes } from "node:crypto";
@@ -49,7 +50,8 @@ import { letter, smtpMailer, type Mailer } from "./mail.ts";
 import { createMonitor, type Probe } from "./monitor.ts";
 import { OWNER, ownerSetup } from "./owner.ts";
 import { cleanGoals, goalsOf, matchSummary, shareMatch, siteByMatchToken, stopSharingMatch } from "./match.ts";
-import { assists, heatmap, injuries, momentum, ratings } from "./insights.ts";
+import { assists, heatmap, injuries, momentum, ratings, revenue } from "./insights.ts";
+import { paymentOf, payingSite, recordPayment, verifyPayment, type Provider } from "./payments.ts";
 import { deleteNumber, numbersReport, parseNumbersFile, renewNumbersKey, saveNumbers } from "./numbers.ts";
 import { access, applySubscription, BILLING_COLUMNS, checkoutUrl, planOf, PLANS, polarFromEnv, portalUrl, usage, verifyWebhook, type Polar } from "./billing.ts";
 import { checkInstall, fetchIcon, imageType, openRequest, publicRequest, type Outbound } from "./check.ts";
@@ -671,6 +673,25 @@ export async function createDashboard(options: {
       return json(res, 200, { workspace: found.workspace, invitedBy: found.invited_by, valid: !found.expired && !found.used });
     }
 
+    const paying = path.match(/^\/api\/pay\/(stripe|polar)\/(p_[a-z0-9]{6,20})$/);
+    if (paying && method === "POST") {
+      const provider = paying[1] as Provider;
+      const site = await payingSite(pool, paying[2], provider);
+      if (!site) throw new HttpError(404, `This site isn't connected to ${provider === "stripe" ? "Stripe" : "Polar"} in Statiku.`);
+      const body = await readRaw(req, 1_000_000);
+      const header = (name: string) => [req.headers[name]].flat()[0];
+      if (!verifyPayment(provider, site.secret, header, body)) throw new HttpError(401, "That isn't signed with this site's webhook secret.");
+      let event: { type?: string; data?: unknown };
+      try {
+        event = JSON.parse(body.toString("utf8") || "{}");
+      } catch {
+        throw new HttpError(400, "The body isn't JSON.");
+      }
+      const payment = paymentOf(provider, event);
+      // Anything that isn't a payment is fine to send, and changes nothing.
+      if (!payment) return json(res, 202, { ok: true, payment: false });
+      return json(res, 202, { ok: true, ...(await recordPayment(pool, hub, site.id, provider, payment)) });
+    }
     const shared = path.match(/^\/api\/match\/([\w-]{20,40})(\/stream)?$/);
     if (shared && method === "GET") {
       const site = await siteByMatchToken(pool, shared[1]);
@@ -866,7 +887,7 @@ export async function createDashboard(options: {
 
     if (action === "" && method === "GET") {
       const { rows: [info] } = await pool.query(
-        `select created_at, match_token, (select ts from events where project_id = $1 order by ts desc limit 1) as last_event_at from projects where id = $1`,
+        `select created_at, match_token, stripe_secret is not null as stripe, polar_secret is not null as polar, (select ts from events where project_id = $1 order by ts desc limit 1) as last_event_at from projects where id = $1`,
         [site.id],
       );
       return json(res, 200, {
@@ -874,6 +895,10 @@ export async function createDashboard(options: {
           key: site.key, name: site.name, domains: site.domains, timezone: site.timezone, role: site.role, askLocation: site.askLocation,
           alertQuiet: site.alertQuiet, alertSurge: site.alertSurge, goals: site.goals ?? null, defaultGoals: goalsOf({}),
           matchUrl: info.match_token ? `${origin(r)}/m/${info.match_token}` : null,
+          payments: {
+            stripe: info.stripe, polar: info.polar, canSeal: canSeal(),
+            stripeUrl: `${origin(r)}/api/pay/stripe/${site.key}`, polarUrl: `${origin(r)}/api/pay/polar/${site.key}`,
+          },
           createdAt: info.created_at, lastEventAt: info.last_event_at,
         },
         snippet: snippet(r, site.key),
@@ -896,6 +921,12 @@ export async function createDashboard(options: {
       const alertQuiet = typeof body.alertQuiet === "boolean" ? body.alertQuiet : site.alertQuiet;
       const alertSurge = typeof body.alertSurge === "boolean" ? body.alertSurge : site.alertSurge;
       const goals = body.goals === undefined ? site.goals ?? null : cleanGoals(body.goals);
+      for (const [field, column] of [["stripeSecret", "stripe_secret"], ["polarSecret", "polar_secret"]] as const) {
+        if (body[field] === undefined) continue;
+        const secret = body[field] === null ? null : text(body[field], 300);
+        if (secret && !canSeal()) throw new HttpError(400, "This server needs a SECRET_KEY to keep payment secrets.");
+        await pool.query(`update projects set ${column} = $2 where id = $1`, [site.id, secret ? seal(secret) : null]);
+      }
       await pool.query(
         "update projects set name = $2, domains = $3, timezone = $4, ask_location = $5, alert_quiet = $6, alert_surge = $7, goals = $8 where id = $1",
         [site.id, name, domains, timezone, askLocation, alertQuiet, alertSurge, goals],
@@ -953,9 +984,11 @@ export async function createDashboard(options: {
       if (action === "/heatmap") {
         return json(res, 200, { range: b, ...(await heatmap(pool, site, b.from, b.to, text(url.searchParams.get("path"), 512) || null, text(url.searchParams.get("device"), 20) || null)) });
       }
-      const [helped, hurt] = await Promise.all([assists(pool, site, b.from, b.to, goalsOf(site)), injuries(pool, site, b.from, b.to)]);
+      const [helped, hurt, earned] = await Promise.all([
+        assists(pool, site, b.from, b.to, goalsOf(site)), injuries(pool, site, b.from, b.to), revenue(pool, site, b.from, b.to, b.prevFrom, b.prevTo),
+      ]);
       const rated = await ratings(pool, site, b.from, b.to, new Map(helped.pages.map((p) => [p.label, p.v])), helped.goals);
-      return json(res, 200, { range: b, assists: { ...helped, pages: helped.pages.slice(0, 12) }, ratings: rated, injuries: hurt });
+      return json(res, 200, { range: b, assists: { ...helped, pages: helped.pages.slice(0, 12) }, ratings: rated, injuries: hurt, revenue: earned });
     }
     if (action === "/stream" && method === "GET") return liveStream(r, site.id);
     throw new HttpError(404, "Not found.");

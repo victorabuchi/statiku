@@ -2,6 +2,7 @@
 // player ratings, match reports, heatmaps, injuries, revenue by source and "what changed". Needs TEST_DATABASE_URL
 // (createdb statiku_test); the test empties that database first.
 import assert from "node:assert/strict";
+import { createHmac, randomBytes } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { after, before, test } from "node:test";
 import pg from "pg";
@@ -10,6 +11,8 @@ import { parseNumbers } from "../ingest/numbers.ts";
 import { parseNumbersFile } from "../dashboard/numbers.ts";
 import { createApp } from "../ingest/server.ts";
 
+// Payment secrets are kept sealed with it.
+process.env.SECRET_KEY ??= randomBytes(32).toString("base64");
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? "set TEST_DATABASE_URL to run" : !/test/.test(url) ? "TEST_DATABASE_URL must name a test database" : false;
 export const SAFARI = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15";
@@ -325,4 +328,56 @@ test("heatmaps and injuries: clicks, scroll depth, page speed, errors and broken
   assert.equal(hurt.slow[0].path, "/pricing");
   assert.deepEqual(hurt.errors.map((e: any) => [e.message, e.n, e.line, e.browsers]), [["TypeError: plans is undefined", 2, 12, ["Safari"]]]);
   assert.deepEqual(hurt.broken, [{ path: "/gone", status: 404, n: 1 }]);
+});
+
+
+test("revenue by source: Stripe and Polar payments, from each site's own webhook, credited to the checkout's visit", { skip }, async () => {
+  const { as, key } = await siteOf("shop.example");
+  const stripeSecret = `whsec_${randomBytes(16).toString("hex")}`;
+  const polarSecret = `whsec_${randomBytes(24).toString("base64")}`;
+  assert.equal((await as(`/api/sites/${key}`, { method: "PATCH", body: { stripeSecret, polarSecret } })).status, 200);
+  const info = (await as(`/api/sites/${key}`)).data.site.payments;
+  assert.equal(info.stripe && info.polar, true);
+  assert.match(info.stripeUrl, new RegExp(`/api/pay/stripe/${key}$`));
+  // The secret isn't kept as it is.
+  const { rows: [kept] } = await pool.query("select stripe_secret from projects where key = $1", [key]);
+  assert.ok(kept.stripe_secret && !kept.stripe_secret.includes(stripeSecret));
+
+  // A visitor from Hacker News clicks a Stripe checkout link: the script sent "checkout" with the link's reference.
+  assert.equal(await hit(key, "203.0.113.40", "pageview", "https://shop.example/pricing"), 202);
+  assert.equal(await hit(key, "203.0.113.40", "checkout", "https://shop.example/pricing", { p: { ref: "stk_abc123" } }), 202);
+  await app.writer.flush();
+
+  const stripe = (event: unknown, secret = stripeSecret) => {
+    const body = JSON.stringify(event), t = Math.floor(Date.now() / 1000);
+    const sig = createHmac("sha256", secret).update(`${t}.${body}`).digest("hex");
+    return fetch(`${base}/api/pay/stripe/${key}`, { method: "POST", headers: { "stripe-signature": `t=${t},v1=${sig}`, "content-type": "application/json" }, body })
+      .then(async (r) => ({ status: r.status, data: await r.json() }));
+  };
+  const paid = { id: "evt_1", type: "checkout.session.completed", data: { object: { id: "cs_1", client_reference_id: "stk_abc123", amount_total: 2900, currency: "eur", payment_status: "paid" } } };
+  assert.equal((await stripe(paid, "whsec_wrong")).status, 401);
+  assert.deepEqual((await stripe(paid)).data, { ok: true, recorded: true, matched: true });
+  // Stripe sends again: counted once.
+  assert.deepEqual((await stripe(paid)).data, { ok: true, recorded: false, matched: false });
+  // Not a payment: nothing changes.
+  assert.deepEqual((await stripe({ type: "customer.created", data: { object: { id: "cus_1" } } })).data, { ok: true, payment: false });
+
+  // A Polar order whose reference Statiku never saw.
+  const body = JSON.stringify({ type: "order.paid", data: { id: "ord_1", total_amount: 1500, currency: "usd", metadata: { reference_id: "stk_unknown1" } } });
+  const id = "msg_1", ts = String(Math.floor(Date.now() / 1000));
+  const sig = createHmac("sha256", Buffer.from(polarSecret.slice(6), "base64")).update(`${id}.${ts}.${body}`).digest("base64");
+  const polar = await fetch(`${base}/api/pay/polar/${key}`, { method: "POST", headers: { "webhook-id": id, "webhook-timestamp": ts, "webhook-signature": `v1,${sig}` }, body });
+  assert.deepEqual(await polar.json(), { ok: true, recorded: true, matched: false });
+
+  const earned = (await as(`/api/sites/${key}/insights?range=today`)).data.revenue;
+  assert.deepEqual(earned.totals, [{ currency: "EUR", minor: 2900, sales: 1 }, { currency: "USD", minor: 1500, sales: 1 }]);
+  assert.deepEqual(earned.sources.map((r: any) => [r.label, r.currency, r.minor]), [["Hacker News", "EUR", 2900], ["Not matched", "USD", 1500]]);
+  assert.deepEqual(earned.landings.map((r: any) => [r.label, r.minor]), [["/pricing", 2900]]);
+  // Sales are goals in the match view, with their takings, and so is the checkout click (one of the usual goals).
+  const board = (await as(`/api/sites/${key}/match`)).data;
+  assert.equal(board.today.goals, 3);
+  assert.deepEqual(board.today.takings, [{ currency: "EUR", minor: 2900 }, { currency: "USD", minor: 1500 }]);
+  // A site that isn't connected has no webhook.
+  const other = await siteOf("plain.example");
+  assert.equal((await fetch(`${base}/api/pay/stripe/${other.key}`, { method: "POST", body: "{}" })).status, 404);
 });
