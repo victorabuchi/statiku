@@ -1013,6 +1013,7 @@ async function analyticsPage(key) {
   const liveButton = h("a", { class: "btn", href: `/sites/${key}/live` });
   const exportButton = h("button", { class: "btn", type: "button", disabled: true, onclick: () => data && exportCsv(data) }, icon("export", 16), "Export");
   const chips = h("div", { class: "filters", hidden: true });
+  const insightsHost = h("div", { class: "stack" });
   let data = null;
 
   const rangeLabel = () => (state.range === "custom" && state.from && state.to
@@ -1079,6 +1080,13 @@ async function analyticsPage(key) {
       if (state.by) q.set("by", state.by);
       for (const [f, v] of Object.entries(state.filters)) if (v) q.set(f, v);
       data = await api(`/api/sites/${key}/stats?${q}`);
+      // Assists and ratings take a little longer, so they follow the report rather than hold it up.
+      const iq = new URLSearchParams({ range: state.range });
+      if (state.range === "custom") {
+        iq.set("from", state.from);
+        iq.set("to", state.to);
+      }
+      api(`/api/sites/${key}/insights?${iq}`).then((x) => insightsHost.replaceChildren(...insightCards(x, key)), () => insightsHost.replaceChildren());
       refreshed.textContent = `Last refreshed ${clock().slice(0, 5)}`;
       exportButton.disabled = false;
       draw();
@@ -1186,6 +1194,7 @@ async function analyticsPage(key) {
         card("Browsers", bars(d.devices.browser, { head: ["Browser", "Visitors"], ...by("browser") })),
         card("Operating systems", bars(d.devices.os, { head: ["System", "Visitors"], ...by("os") }))),
       conversions(d, (name) => setFilter("source", name)),
+      insightsHost,
       d.releases ? releasesCard(d, values("releases")) : null,
       h("div", { class: "grid g2" },
         card("Events", d.events.length ? h("div", { class: "table-wrap" }, h("table", {},
@@ -1221,6 +1230,46 @@ async function analyticsPage(key) {
   return h("div", { class: "page" },
     pageHead([icon("chart", 20), h("h1", { text: "Analytics" }), h("span", { class: "muted", text: site?.domains[0] }), refreshed], [rangeButton, exportButton, liveButton]),
     chips, body);
+}
+
+// Assists and player ratings for the period, for the whole site (filters don't narrow them).
+const ratingClass = (r) => (r >= 8 ? "r-top" : r >= 7 ? "r-good" : r >= 6 ? "r-ok" : "r-low");
+const secs = (s) => (s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`);
+function insightCards(x, key) {
+  const a = x.assists, r = x.ratings;
+  const tabsHost = h("span"), body = h("div");
+  const show = () => {
+    const tab = state.assistsTab ?? "pages";
+    tabsHost.replaceChildren(tabs([["pages", "Pages"], ["sources", "Sources"], ["campaigns", "Campaigns"]], tab, (t) => { state.assistsTab = t; show(); }));
+    const rows = tab === "sources" ? a.sources : a.campaigns;
+    body.replaceChildren(tab === "pages"
+      ? bars(a.pages, { head: ["Page", "Goals it set up"] })
+      : rows.length ? h("div", { class: "table-wrap" }, h("table", {},
+        h("thead", {}, h("tr", {}, [tab === "sources" ? "Source" : "Campaign", "Scored", "Assisted", "Started"].map((t) => h("th", { text: t })))),
+        h("tbody", {}, rows.map((s) => h("tr", {}, h("td", { text: s.label }), h("td", { text: int(s.scored) }), h("td", { text: int(s.assisted) }), h("td", { text: int(s.opened) }))))))
+        : h("p", { class: "empty-note", text: tab === "sources" ? "No goals in this period." : "None of this period's goals came from a tagged campaign." }));
+  };
+  show();
+  const assistsCard = card("Assists", a.goals
+    ? h("div", { class: "stack tight" }, body,
+      h("p", { class: "help", text: "Scored: the goal came in a visit from it. Assisted: an earlier visit that day came from it. Started: the day's first visit did. Pages: those seen that day before the goal." }))
+    : h("p", { class: "empty-note" }, "No goals in this period. Goals are sign-ups, sales and the events you choose in ", h("a", { href: `/sites/${key}/settings#goals`, text: "Settings" }), "."),
+  { sub: a.goals ? `${int(a.goals)} ${a.goals === 1 ? "goal" : "goals"}${a.multiVisit ? `, ${int(a.multiVisit)} after more than one visit that day` : ""}` : null, end: a.goals ? tabsHost : null });
+
+  const best = r.pages.find((p) => p.path === r.best);
+  const ratingsCard = card("Player ratings", r.pages.length
+    ? h("div", { class: "stack tight" },
+      best ? h("div", { class: "motm" }, h("span", { class: "star", text: "★" }), h("span", {}, h("b", { text: "Man of the match: " }), h("code", { text: best.path })),
+        h("span", { class: `rating ${ratingClass(best.rating)}`, text: best.rating.toFixed(1) })) : null,
+      h("div", { class: "table-wrap" }, h("table", { class: "ratings" },
+        h("thead", {}, h("tr", {}, ["Page", "Rating", "Visitors", "Time", "Exits", "Assists"].map((t) => h("th", { text: t })))),
+        h("tbody", {}, r.pages.map((p) => h("tr", { class: p.path === r.best ? "best" : null },
+          h("td", { class: "path", text: p.path }), h("td", {}, h("span", { class: `rating ${ratingClass(p.rating)}`, text: p.rating.toFixed(1) })),
+          h("td", { text: int(p.visitors) }), h("td", { text: secs(p.secs) }), h("td", { text: `${p.exitRate}%` }), h("td", { text: int(p.assists) })))))),
+      h("p", { class: "help", text: "Out of ten: how many visitors a page reaches, how long they stay on it, the goals it sets up, and how few visits end there." }))
+    : h("p", { class: "empty-note", text: "No page views in this period." }),
+  { sub: "How each page played" });
+  return [h("div", { class: "grid g2" }, assistsCard, ratingsCard)];
 }
 
 // Downloads of the GitHub repository's releases, counted by GitHub: all time, in this period, and by release.

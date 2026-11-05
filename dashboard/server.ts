@@ -23,6 +23,7 @@
 //   GET    /api/sites/:key/match   the match view's scoreboard   POST|DELETE …/match/link   its public link
 //   GET    /api/match/:token   GET /api/match/:token/stream   the match view at its public link, and its live feed
 //   GET    /api/sites/:key/momentum   who's attacking right now
+//   GET    /api/sites/:key/insights?range=   assists and player ratings for a period
 //   GET    /api/billing   POST /api/billing/checkout { plan, interval }   POST /api/billing/portal   POST /api/polar/webhook
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
@@ -47,7 +48,7 @@ import { letter, smtpMailer, type Mailer } from "./mail.ts";
 import { createMonitor, type Probe } from "./monitor.ts";
 import { OWNER, ownerSetup } from "./owner.ts";
 import { cleanGoals, goalsOf, matchSummary, shareMatch, siteByMatchToken, stopSharingMatch } from "./match.ts";
-import { momentum } from "./insights.ts";
+import { assists, momentum, ratings } from "./insights.ts";
 import { deleteNumber, numbersReport, parseNumbersFile, renewNumbersKey, saveNumbers } from "./numbers.ts";
 import { access, applySubscription, BILLING_COLUMNS, checkoutUrl, planOf, PLANS, polarFromEnv, portalUrl, usage, verifyWebhook, type Polar } from "./billing.ts";
 import { checkInstall, fetchIcon, imageType, openRequest, publicRequest, type Outbound } from "./check.ts";
@@ -56,7 +57,7 @@ import {
   repoOf, Sink, startImport, googleProperties, type Google,
 } from "./imports.ts";
 import { canSeal, seal, unseal } from "./secrets.ts";
-import { FILTERS, live, overview, RANGE_IDS, siteFor, stats, type Filters, type Presence, type Site } from "./stats.ts";
+import { bounds, FILTERS, live, overview, RANGE_IDS, siteFor, stats, type Filters, type Presence, type Site } from "./stats.ts";
 
 export type Request = { req: IncomingMessage; res: ServerResponse; path: string; ip: string; secure: boolean };
 
@@ -928,7 +929,7 @@ export async function createDashboard(options: {
       return json(res, 200, await checkInstall(site.domains[0], site.key));
     }
     // After an unpaid trial the reports close until a plan is chosen; the site is still counted meanwhile.
-    if (["/stats", "/live", "/stream", "/match", "/momentum"].includes(action) && access(site.billing) === "locked") {
+    if (["/stats", "/live", "/stream", "/match", "/momentum", "/insights"].includes(action) && access(site.billing) === "locked") {
       throw new HttpError(402, site.role === "owner"
         ? "Your free trial has ended. Choose a plan to see your numbers again: Statiku has kept counting meanwhile."
         : "This team's free trial has ended. Its owner can choose a plan to open the reports again.");
@@ -944,6 +945,14 @@ export async function createDashboard(options: {
     if (action === "/live" && method === "GET") return json(res, 200, await live(pool, site, presence(site.id), streets));
     if (action === "/match" && method === "GET") return json(res, 200, await matchSummary(pool, site, presence(site.id)));
     if (action === "/momentum" && method === "GET") return json(res, 200, await momentum(pool, site));
+    if (action === "/insights" && method === "GET") {
+      const url = new URL(req.url ?? "/", "http://x");
+      const range = url.searchParams.get("range") ?? "d30";
+      const b = await bounds(pool, site.id, site.timezone, RANGE_IDS.includes(range) ? range : "d30", { from: url.searchParams.get("from"), to: url.searchParams.get("to") });
+      const helped = await assists(pool, site, b.from, b.to, goalsOf(site));
+      const rated = await ratings(pool, site, b.from, b.to, new Map(helped.pages.map((p) => [p.label, p.v])), helped.goals);
+      return json(res, 200, { range: b, assists: { ...helped, pages: helped.pages.slice(0, 12) }, ratings: rated });
+    }
     if (action === "/stream" && method === "GET") return liveStream(r, site.id);
     throw new HttpError(404, "Not found.");
   }

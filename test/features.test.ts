@@ -232,3 +232,55 @@ test("the match view: today's scoreboard, goals, takings, commentary and momentu
   assert.equal((await as(`/api/sites/${key}/match/link`, { method: "DELETE" })).status, 200);
   assert.equal((await fetch(`${base}/api/match/${token}`)).status, 404);
 });
+
+// Visits written as they'd have been over a morning, which the service can't be made to wait for: a visitor's second
+// visit needs half an hour's gap.
+async function morning(projectId: string, visits: { visitor: number; source: string; at: number; pages: [number, string][]; goal?: [number, string, number?] }[]) {
+  const dayStart = new Date(Date.now() - 3 * 3600_000);
+  dayStart.setUTCHours(0, 0, 0, 0);
+  const t = (min: number) => new Date(dayStart.getTime() + min * 60_000);
+  let id = 1000 + Math.floor(Math.random() * 1e6);
+  for (const v of visits) {
+    const session = ++id;
+    const last = Math.max(...v.pages.map(([m]) => m), v.goal?.[0] ?? 0);
+    await pool.query(
+      `insert into sessions (project_id, id, visitor, started_at, last_seen, entry_path, exit_path, pageviews, events, source)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [projectId, session, v.visitor, t(v.at), t(last + 1), v.pages[0][1], v.pages.at(-1)![1], v.pages.length, v.pages.length + (v.goal ? 1 : 0), v.source],
+    );
+    for (const [m, path] of v.pages) {
+      await pool.query("insert into events (project_id, ts, name, session_id, visitor, path, source) values ($1, $2, 'pageview', $3, $4, $5, $6)", [projectId, t(m), session, v.visitor, path, v.source]);
+    }
+    if (v.goal) {
+      await pool.query("insert into events (project_id, ts, name, session_id, visitor, path, source, revenue_minor, currency) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        [projectId, t(v.goal[0]), v.goal[1], session, v.visitor, v.pages.at(-1)![1], v.source, v.goal[2] ?? null, v.goal[2] ? "EUR" : null]);
+    }
+  }
+}
+
+test("assists and player ratings: which pages and visits led to each goal, and how each page played", { skip }, async () => {
+  const { as, key, id } = await siteOf("assists.example");
+  await morning(id, [
+    // Found the site on Google, came back from Hacker News an hour later and signed up.
+    { visitor: 1, source: "Google", at: 10, pages: [[10, "/"], [12, "/features"]] },
+    { visitor: 1, source: "Hacker News", at: 70, pages: [[70, "/pricing"]], goal: [75, "signup"] },
+    // Bought in one visit from Google.
+    { visitor: 2, source: "Google", at: 20, pages: [[20, "/"], [23, "/pricing"]], goal: [26, "purchase", 1900] },
+    // Read one post and left.
+    { visitor: 3, source: "X", at: 30, pages: [[30, "/blog"]] },
+    { visitor: 4, source: "X", at: 40, pages: [[40, "/blog"]] },
+  ]);
+  const got = await as(`/api/sites/${key}/insights?range=d7`);
+  assert.equal(got.status, 200, JSON.stringify(got.data));
+  const a = got.data.assists;
+  assert.equal(a.goals, 2);
+  assert.equal(a.multiVisit, 1);
+  assert.deepEqual(Object.fromEntries(a.pages.map((p: any) => [p.label, p.v])), { "/": 2, "/pricing": 2, "/features": 1 });
+  assert.deepEqual(a.sources.map((s: any) => [s.label, s.scored, s.assisted, s.opened]), [["Google", 1, 1, 2], ["Hacker News", 1, 0, 0]]);
+  const r = got.data.ratings.pages;
+  const rating = (path: string) => r.find((p: any) => p.path === path).rating;
+  assert.ok(r.every((p: any) => p.rating >= 1 && p.rating <= 10));
+  assert.ok(rating("/pricing") > rating("/blog"), JSON.stringify(r));
+  assert.equal(r.find((p: any) => p.path === "/blog").exitRate, 100);
+  assert.equal(r.find((p: any) => p.path === "/pricing").assists, 2);
+});
