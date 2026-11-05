@@ -24,14 +24,27 @@
   if (!script) return;
   var attr = function (name) { return script.getAttribute("data-" + name); };
   var key = attr("project"), api = attr("api") || new URL("e", script.src).href, hashRoutes = attr("hash") != null, lite = attr("lite") != null;
+  // Shown behind a heatmap in Statiku: nothing is counted and links don't open, and the page tells Statiku how far it's
+  // scrolled and how tall it is, so the heat moves with it.
+  if (loc.hash.indexOf("statiku-heatmap") >= 0) {
+    var tell = function () {
+      var de = d.documentElement;
+      w.parent.postMessage({ statiku: "heatmap", y: Math.round(w.scrollY), h: de.scrollHeight, w: de.scrollWidth }, "*");
+    };
+    w.addEventListener("scroll", tell, { passive: true });
+    w.addEventListener("resize", tell);
+    w.addEventListener("load", tell);
+    setInterval(tell, 1000);
+    d.addEventListener("click", function (e) { e.preventDefault(); e.stopPropagation(); }, true);
+    tell();
+    return;
+  }
   var CHECKOUT = /^https:\/\/buy\.(polar\.sh|stripe\.com)\//;
   var FILE = /\.(dmg|pkg|zip|exe|msi|appimage|deb|rpm|apk)$/i;
 
-  // Not counted: local pages (unless data-local), automated browsers, the page shown behind a heatmap in Statiku, and
-  // the owner's own browser once they opt out.
+  // Not counted: local pages (unless data-local), automated browsers, and the owner's own browser once they opt out.
   function skip() {
     if ((/^(localhost|127\.|\[::1\])/.test(loc.hostname) && attr("local") == null) || loc.protocol == "file:" || nav.webdriver) return true;
-    if (loc.hash.indexOf("statiku-heatmap") >= 0) return true;
     try { return !!localStorage.statiku_ignore; } catch (e) { return false; }
   }
 

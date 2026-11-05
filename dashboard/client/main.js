@@ -2280,6 +2280,8 @@ async function numbersPage(key) {
 // Where a page's visitors click and how far down they read: the page itself (if it lets itself be shown in a frame)
 // with the clicks over it as heat, the links and buttons clicked most, and lines where each share of visits stopped.
 const DEVICE_WIDTHS = { Mobile: 390, Tablet: 820, Laptop: 1280, Desktop: 1536, Unknown: 1280 };
+// The height of each kind of screen: the window the page is shown in.
+const VIEW_HEIGHTS = { Mobile: 780, Tablet: 1100, Laptop: 800, Desktop: 900, Unknown: 800 };
 const HEAT_RANGES = [["today", "Today"], ["d7", "7 days"], ["d30", "30 days"], ["d90", "90 days"]];
 
 let heatPalette = null;
@@ -2328,6 +2330,15 @@ async function heatmapsPage(key) {
   let range = saved.heatRange ?? "d30", path = null, device = null, showPage = saved.heatPage !== false, data = null;
   const body = h("div", {}, h("p", { class: "muted", text: "Loading…" }));
   const tools = h("div", { class: "tools-row" });
+  // The page in the frame talks to this one (its Statiku script, in heatmap mode): how far it's scrolled, how tall.
+  let listen = () => {};
+  const heard = (e) => listen(e);
+  addEventListener("message", heard);
+  onLeave(() => removeEventListener("message", heard));
+  let fitNow = () => {};
+  const resized = () => fitNow();
+  addEventListener("resize", resized);
+  onLeave(() => removeEventListener("resize", resized));
 
   async function load() {
     const q = new URLSearchParams({ range });
@@ -2356,41 +2367,72 @@ async function heatmapsPage(key) {
           h("span", { class: "muted", text: "The tracking script notes where visitors click and how far down they read, without recording their screens. The first heatmap shows here once a page has some clicks." }))));
       return;
     }
-    const width = DEVICE_WIDTHS[d.device] ?? 1280;
-    const height = Math.min(8000, Math.max(d.height ?? 0, ...d.clicks.map((c) => c.y + 40), 900));
-    const frame = h("iframe", { src: `https://${domain}${d.path}${d.path.includes("#") ? "&" : "#"}statiku-heatmap`, title: `${d.path} on ${domain}`, sandbox: "allow-scripts allow-same-origin", style: { width: `${width}px`, height: `${height}px` }, hidden: !showPage, tabindex: "-1" });
+    const width = DEVICE_WIDTHS[d.device] ?? 1280, view = VIEW_HEIGHTS[d.device] ?? 800;
+    let pageHeight = Math.min(12000, Math.max(d.height ?? 0, ...d.clicks.map((c) => c.y + 40), view));
+    // Live: the page itself in a window of a screen's height, scrolled like a browser, with the heat following it.
+    // Blank: the whole page's height on a plain background, for pages that can't be shown or don't say where they are.
+    let live = showPage, synced = false;
+    const frame = h("iframe", { src: `https://${domain}${d.path}${d.path.includes("#") ? "&" : "#"}statiku-heatmap`, title: `${d.path} on ${domain}`, sandbox: "allow-scripts allow-same-origin", style: { width: `${width}px`, height: `${view}px` } });
     const canvas = h("canvas", { class: "heat-layer", role: "img", "aria-label": `Where visitors clicked on ${d.path}` });
-    const marks = h("div", { class: "scroll-marks" }, d.scroll.filter((s) => s.depth % 20 === 0 && s.depth < 100).map((s) =>
-      h("div", { class: "scroll-mark", style: { top: `${(s.depth / 100) * height}px` } }, h("span", { text: `${s.share}% read this far` }))));
-    const inner = h("div", { class: "heat-inner", style: { width: `${width}px`, height: `${height}px` } }, frame, canvas, marks);
-    const stage = h("div", { class: `heat-stage${showPage ? "" : " blank"}` }, inner);
-    const fit = () => {
-      const scale = Math.min(1, (stage.clientWidth || width) / width);
-      inner.style.transform = `scale(${scale})`;
-      stage.style.height = `${height * scale}px`;
+    const marks = h("div", { class: "scroll-marks" });
+    const layer = h("div", { class: "heat-page" }, canvas, marks);
+    const inner = h("div", { class: "heat-inner" }, frame, layer);
+    const stage = h("div", { class: "heat-stage" }, inner);
+    const note = h("p", { class: "help" });
+    const paintLayer = () => {
+      layer.style.width = `${width}px`;
+      layer.style.height = `${pageHeight}px`;
+      marks.replaceChildren(...d.scroll.filter((s) => s.depth % 20 === 0 && s.depth < 100).map((s) =>
+        h("div", { class: "scroll-mark", style: { top: `${(s.depth / 100) * pageHeight}px` } }, h("span", { text: `${s.share}% read this far` }))));
+      drawHeat(canvas, d.clicks, width, pageHeight);
     };
+    const fit = () => {
+      const tall = live ? view : pageHeight, scale = Math.min(1, (stage.clientWidth || width) / width);
+      inner.style.width = `${width}px`;
+      inner.style.height = `${tall}px`;
+      inner.style.transform = `scale(${scale})`;
+      stage.style.height = `${tall * scale}px`;
+    };
+    const mode = () => {
+      stage.classList.toggle("blank", !live);
+      frame.hidden = !live;
+      if (!live) layer.style.transform = "none";
+      note.textContent = live
+        ? "Scroll the page to see further down. Your own visit to it here isn't counted, and its links don't open."
+        : showPage ? "This page can't be shown here: it doesn't allow other sites to frame it, or doesn't run Statiku's script. The heat is where people clicked, on a blank page as tall as yours."
+          : "The heat is where people clicked, on a blank page as tall as yours.";
+      fit();
+    };
+    listen = (e) => {
+      if (e.source !== frame.contentWindow || e.data?.statiku !== "heatmap") return;
+      synced = true;
+      if (!live) return;
+      const h2 = Math.min(12000, Math.max(view, Number(e.data.h) || view));
+      if (Math.abs(h2 - pageHeight) > 4) {
+        pageHeight = h2;
+        paintLayer();
+      }
+      layer.style.transform = `translateY(${-(Number(e.data.y) || 0)}px)`;
+    };
+    // A page that hasn't said where it is within a few seconds can't be followed: shown blank instead.
+    if (live) setTimeout(() => { if (!synced && frame.isConnected) { live = false; mode(); } }, 7000);
     const toggle = h("label", { class: "check" }, h("input", { type: "checkbox", checked: showPage, onchange: (e) => { showPage = e.target.checked; saved.heatPage = showPage; remember(); draw(); } }), "Show the page behind");
     const total = d.clicks.reduce((a, c) => a + c.n, 0);
     body.replaceChildren(h("div", { class: "grid g-side heat-grid" },
       h("div", { class: "card" }, h("div", { class: "card-head" }, h("h2", {}, h("code", { text: d.path })), h("span", { class: "sub", text: `${int(total)} clicks · ${int(d.views)} views · ${d.device}` }), h("div", { class: "end" }, toggle)),
         h("div", { class: "card-body" }, stage,
-          h("div", { class: "heat-legend" }, h("span", { text: "Fewer clicks" }), h("i"), h("span", { text: "More clicks" })),
-          h("p", { class: "help", text: "If the page doesn't show, it doesn't allow other sites to frame it: the heat is still where people clicked. Your own visit to the page here isn't counted." }))),
+          h("div", { class: "heat-legend" }, h("span", { text: "Fewer clicks" }), h("i"), h("span", { text: "More clicks" })), note)),
       h("div", { class: "stack" },
         card("Clicked most", bars(d.targets, { head: ["Link or button", "Clicks"] })),
         card("How far down they read", d.scroll.length ? bars(d.scroll.map((s) => ({ label: `${s.depth}% of the page`, v: s.share })), { head: ["Reached", "Visits"], fmt: (v) => `${v}%` })
           : h("p", { class: "empty-note", text: "No visits have closed this page yet." }), { sub: d.scrolled ? `${int(d.scrolled)} visits` : null }))));
     fitNow = fit;
     queueMicrotask(() => {
-      fit();
-      drawHeat(canvas, d.clicks, width, height);
+      paintLayer();
+      mode();
     });
   }
 
-  let fitNow = () => {};
-  const resized = () => fitNow();
-  addEventListener("resize", resized);
-  onLeave(() => removeEventListener("resize", resized));
   queueMicrotask(load);
   return h("div", { class: "page" }, pageHead([icon("heat", 20), h("h1", { text: "Heatmaps" }), h("span", { class: "muted", text: domain })], [tools]), body);
 }

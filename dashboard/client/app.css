@@ -589,8 +589,9 @@ table.ratings tr.best td { background: #fffbea; }
 .heat-grid { align-items: start; }
 .heat-stage { position: relative; overflow: hidden; border-radius: 10px; border: 1px solid var(--border); background: #fff; }
 .heat-stage.blank { background: repeating-linear-gradient(0deg, #f6f6f6 0 1px, #fff 1px 48px); }
-.heat-inner { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
-.heat-inner iframe { position: absolute; inset: 0; border: 0; pointer-events: none; background: #fff; }
+.heat-inner { position: absolute; left: 0; top: 0; overflow: hidden; transform-origin: 0 0; }
+.heat-inner iframe { position: absolute; left: 0; top: 0; border: 0; background: #fff; }
+.heat-page { position: absolute; left: 0; top: 0; pointer-events: none; will-change: transform; }
 .heat-layer { position: absolute; inset: 0; pointer-events: none; }
 .scroll-marks { position: absolute; inset: 0; pointer-events: none; }
 .scroll-mark { position: absolute; left: 0; right: 0; border-top: 2px dashed rgba(0, 0, 0, .45); }
