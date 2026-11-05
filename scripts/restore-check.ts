@@ -2,6 +2,7 @@
 // newest event, beside the live database's. In the service's Shell on Render:
 //   npm run restore-check -- "<the restored database's internal URL>"
 import pg from "pg";
+import { dbConfig } from "../db/config.ts";
 
 const restored = process.argv[2];
 if (!process.env.DATABASE_URL || !restored) {
@@ -10,7 +11,7 @@ if (!process.env.DATABASE_URL || !restored) {
 }
 const TABLES = ["users", "workspaces", "projects", "memberships", "sessions", "events", "installs", "imports", "imported_days", "usage_daily"];
 async function look(url: string) {
-  const client = new pg.Client({ connectionString: url });
+  const client = new pg.Client(dbConfig(url));
   await client.connect();
   try {
     const counts: Record<string, string> = {};

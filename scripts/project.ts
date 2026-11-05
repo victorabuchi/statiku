@@ -6,6 +6,7 @@
 import { randomBytes } from "node:crypto";
 import { parseArgs } from "node:util";
 import pg from "pg";
+import { dbConfig } from "../db/config.ts";
 import { cleanDomain } from "../ingest/projects.ts";
 
 const ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789";
@@ -64,7 +65,7 @@ const snippet = (key: string) =>
 if (import.meta.main) {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: { timezone: { type: "string" } } });
   const [command, ...rest] = positionals;
-  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+  const pool = new pg.Pool(dbConfig(process.env.DATABASE_URL!));
   try {
     if (command === "create" && rest.length >= 2) {
       const [name, ...domains] = rest;

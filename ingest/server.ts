@@ -9,6 +9,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
 import pg from "pg";
+import { dbConfig } from "../db/config.ts";
 import type { Mailer } from "../dashboard/mail.ts";
 import type { Polar } from "../dashboard/billing.ts";
 import type { fetchIcon, Outbound } from "../dashboard/check.ts";
@@ -81,7 +82,7 @@ function send(res: ServerResponse, status: number, body: string, headers: Record
 }
 
 export async function createApp(options: Options) {
-  const pool = new pg.Pool({ connectionString: options.databaseUrl, max: 10 });
+  const pool = new pg.Pool(dbConfig(options.databaseUrl, { max: 10 }));
   pool.on("error", (e) => console.error("Postgres:", e.message));
   const sessions = new Sessions(pool);
   const writer = new Writer(pool, sessions);
@@ -143,7 +144,9 @@ export async function createApp(options: Options) {
       if (path === "/healthz") {
         if (!/[?&]deep=1\b/.test(req.url ?? "")) return send(res, 200, `ok, ${writer.queue.length} queued`);
         const answered = await Promise.race([pool.query("select 1").then(() => true, () => false), new Promise<boolean>((r) => setTimeout(() => r(false), 5000))]);
-        return send(res, answered ? 200 : 503, answered ? `ok, database answering, ${writer.queue.length} queued` : "the database isn't answering");
+        // The asker's own country, to check that TRUST_PROXY finds visitors' addresses behind this host's proxies.
+        const where = deps.geo.country(clientIp(req, options.trustProxy)) ?? "an unknown country";
+        return send(res, answered ? 200 : 503, `${answered ? "ok, database answering" : "the database isn't answering"}, ${writer.queue.length} queued; you're in ${where}`);
       }
       if (!dashboard) return send(res, 404, "not found");
       // Behind Render's proxy the connection to this process is plain HTTP; the proxy says what the browser used.

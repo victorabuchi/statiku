@@ -1,6 +1,7 @@
 // A plain-text report for one project, until the dashboard exists.
 //   npm run stats -- <key> [days, default 7]
 import pg from "pg";
+import { dbConfig } from "../db/config.ts";
 
 function table(title: string, rows: Record<string, unknown>[]): string {
   if (!rows.length) return `${title}\n  (none)\n`;
@@ -59,7 +60,7 @@ if (import.meta.main) {
     console.log("Usage: npm run stats -- <project key> [days]");
     process.exit(1);
   }
-  const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+  const pool = new pg.Pool(dbConfig(process.env.DATABASE_URL!));
   console.log(await report(pool, key, Number(days ?? 7)));
   await pool.end();
 }

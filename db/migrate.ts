@@ -1,6 +1,7 @@
 // Applies db/migrations/*.sql in order, once each. Run: npm run migrate
 import { readdirSync, readFileSync } from "node:fs";
 import pg from "pg";
+import { dbConfig } from "./config.ts";
 
 // A database that was just created or restarted refuses connections for a while; a deploy waits for it, up to five
 // minutes, rather than failing.
@@ -9,7 +10,7 @@ const NOT_READY = ["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "ENOTFOUND", "EAI_
 async function connect(connectionString: string, log: (...args: unknown[]) => void) {
   const deadline = Date.now() + 5 * 60_000;
   for (;;) {
-    const client = new pg.Client({ connectionString, connectionTimeoutMillis: 20_000 });
+    const client = new pg.Client(dbConfig(connectionString, { connectionTimeoutMillis: 20_000 }));
     try {
       await client.connect();
       return client;

@@ -948,10 +948,26 @@ test("alerts: a site gone quiet (down, its code gone, or just quiet), visits com
   assert.equal(mailbox.length, 1);
 });
 
-test("the deep health check asks the database", { skip }, async () => {
-  const res = await fetch(`${base}/healthz?deep=1`);
+test("the deep health check asks the database, and says where it thinks the asker is", { skip }, async () => {
+  const res = await fetch(`${base}/healthz?deep=1`, { headers: { "x-forwarded-for": "91.152.40.1" } });
   assert.equal(res.status, 200);
-  assert.match(await res.text(), /database answering/);
+  assert.match(await res.text(), /database answering, \d+ queued; you're in FI$/);
+});
+
+test("a database certificate (DATABASE_CA) makes the connection encrypted and checked against it", async () => {
+  const { dbConfig } = await import("../db/config.ts");
+  const was = process.env.DATABASE_CA;
+  try {
+    delete process.env.DATABASE_CA;
+    assert.deepEqual(dbConfig("postgres://u:p@db.example:5432/x?sslmode=require", { max: 2 }), { connectionString: "postgres://u:p@db.example:5432/x?sslmode=require", max: 2 });
+    process.env.DATABASE_CA = "-----BEGIN CERTIFICATE-----\\nMIIB\\n-----END CERTIFICATE-----";
+    const config = dbConfig("postgres://u:p@db.example:5432/x?sslmode=require");
+    assert.equal(config.connectionString, "postgres://u:p@db.example:5432/x");
+    assert.deepEqual(config.ssl, { ca: "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----", rejectUnauthorized: true });
+  } finally {
+    if (was === undefined) delete process.env.DATABASE_CA;
+    else process.env.DATABASE_CA = was;
+  }
 });
 
 test("Statiku's own pages: the landing page for anyone not signed in, the app for everyone who is", { skip }, async () => {
