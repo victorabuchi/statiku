@@ -101,3 +101,64 @@ export async function ratings(pool: pg.Pool, site: Pick<Site, "id">, from: Date,
   const rated = pages.filter((p) => p.visitors >= Math.max(2, top * 0.01)).sort((a, b) => b.rating - a.rating || b.visitors - a.visitors);
   return { pages: rated, best: best?.path ?? null };
 }
+
+// Heatmap of one page on one kind of device: where clicks landed (on a grid a two-hundredth of the width across and
+// eight pixels down), the links and buttons clicked most, and the share of visits that read down to each tenth of
+// the page. The page asked for is the most clicked one unless another is named.
+export async function heatmap(pool: pg.Pool, site: Pick<Site, "id">, from: Date, to: Date, path: string | null, device: string | null) {
+  const pages = await q(pool, `select path, count(*)::int as clicks from clicks where project_id = $1 and ts >= $2 and ts < $3
+                                group by 1 order by 2 desc, 1 limit 40`, [site.id, from, to]);
+  const page = path ?? pages[0]?.path ?? null;
+  if (!page) return { pages, path: null, device: null, devices: [], clicks: [], height: null, targets: [], scroll: [], views: 0 };
+  const devices = await q(pool, `select coalesce(device, 'Unknown') as device, count(*)::int as clicks from clicks
+                                  where project_id = $1 and ts >= $2 and ts < $3 and path = $4 group by 1 order by 2 desc`, [site.id, from, to, page]);
+  const kind = device ?? devices[0]?.device ?? "Desktop";
+  const p = [site.id, from, to, page, kind];
+  const [grid, [size], targets, [scroll], [views]] = await Promise.all([
+    q(pool, `select round(x * 200) / 200 as x, (round(y / 8.0) * 8)::int as y, count(*)::int as n from clicks
+              where project_id = $1 and ts >= $2 and ts < $3 and path = $4 and coalesce(device, 'Unknown') = $5 group by 1, 2 limit 20000`, p),
+    q(pool, `select percentile_cont(0.5) within group (order by page_h)::int as height from clicks
+              where project_id = $1 and ts >= $2 and ts < $3 and path = $4 and coalesce(device, 'Unknown') = $5 and page_h > 0`, p),
+    q(pool, `select target as label, count(*)::int as v from clicks
+              where project_id = $1 and ts >= $2 and ts < $3 and path = $4 and coalesce(device, 'Unknown') = $5 and target is not null
+              group by 1 order by 2 desc, 1 limit 12`, p),
+    q(pool, `select count(*)::int as n, array[${[10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((d) => `count(*) filter (where depth >= ${d})`).join(", ")}]::int[] as reached
+               from scrolls where project_id = $1 and ts >= $2 and ts < $3 and path = $4 and coalesce(device, 'Unknown') = $5`, p),
+    q(pool, `select count(*)::int as n from events where project_id = $1 and ts >= $2 and ts < $3 and name = 'pageview' and path = $4 and coalesce(device, 'Unknown') = $5`, p),
+  ]);
+  return {
+    pages, path: page, device: kind, devices,
+    clicks: grid.map((g) => ({ x: Number(g.x), y: g.y as number, n: g.n as number })),
+    height: size?.height ?? null,
+    targets,
+    scroll: scroll.n ? scroll.reached.map((r: number, i: number) => ({ depth: (i + 1) * 10, share: Math.round((100 * r) / scroll.n) })) : [],
+    scrolled: scroll.n as number,
+    views: views.n as number,
+  };
+}
+
+// Injuries: page speed as visitors got it (the 75th percentile, as Google judges it), the slowest pages, the script
+// errors visitors hit most, and pages that answered with an error.
+export async function injuries(pool: pg.Pool, site: Pick<Site, "id">, from: Date, to: Date) {
+  const p = [site.id, from, to];
+  const P75 = (c: string) => `percentile_cont(0.75) within group (order by ${c})`;
+  const [[overall], slow, errors, broken] = await Promise.all([
+    q(pool, `select ${P75("lcp")} as lcp, ${P75("inp")} as inp, ${P75("cls")} as cls, ${P75("ttfb")} as ttfb, count(*)::int as n
+               from vitals where project_id = $1 and ts >= $2 and ts < $3`, p),
+    q(pool, `select path, ${P75("lcp")} as lcp, ${P75("inp")} as inp, ${P75("cls")} as cls, count(*)::int as n
+               from vitals where project_id = $1 and ts >= $2 and ts < $3 group by 1 having count(*) >= 3
+              order by 2 desc nulls last limit 10`, p),
+    q(pool, `select message, source, max(line)::int as line, count(*)::int as n, count(distinct path)::int as pages, max(ts) as last,
+                    (array_agg(path order by ts desc))[1] as path, array_remove(array_agg(distinct browser), null) as browsers
+               from page_errors where project_id = $1 and ts >= $2 and ts < $3 group by 1, 2 order by 4 desc, 6 desc limit 15`, p),
+    q(pool, `select path, status, count(*)::int as n from vitals where project_id = $1 and ts >= $2 and ts < $3 and status >= 400
+              group by 1, 2 order by 3 desc, 1 limit 15`, p),
+  ]);
+  const round = (v: unknown, d = 0) => (v == null ? null : Math.round(Number(v) * 10 ** d) / 10 ** d);
+  return {
+    vitals: { lcp: round(overall.lcp), inp: round(overall.inp), cls: round(overall.cls, 3), ttfb: round(overall.ttfb), samples: overall.n as number },
+    slow: slow.map((s) => ({ path: s.path as string, lcp: round(s.lcp), inp: round(s.inp), cls: round(s.cls, 3), n: s.n as number })),
+    errors,
+    broken,
+  };
+}

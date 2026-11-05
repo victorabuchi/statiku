@@ -175,10 +175,16 @@ export async function createApp(options: Options) {
   const dropMarks = () =>
     pool.query("delete from download_marks where ts < now() - interval '48 hours'").catch((e) => console.error("Marks:", e.message));
 
+  // Heatmaps and injuries look back three months at most; older clicks, scroll depths, speeds and errors go.
+  const dropMeasures = () =>
+    Promise.all(["clicks", "scrolls", "vitals", "page_errors"].map((t) => pool.query(`delete from ${t} where ts < now() - interval '92 days'`)))
+      .catch((e) => console.error("Measures:", e.message));
+
   const timers = [
     setInterval(() => sessions.sweep(new Date()), 60_000),
     setInterval(ensurePartitions, 6 * 3600_000),
     setInterval(dropMarks, 3600_000),
+    setInterval(dropMeasures, 6 * 3600_000),
   ];
   writer.start(options.flushMs ?? 1000);
 

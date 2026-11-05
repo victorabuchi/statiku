@@ -582,3 +582,28 @@ details.more .card-body { padding-top: 0; display: grid; gap: 12px; }
 .rating.r-low { background: #d9534f; }
 table.ratings td.path { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12.5px; }
 table.ratings tr.best td { background: #fffbea; }
+
+/* ---------- Heatmaps ---------- */
+.tools-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tools-row select.input { width: auto; max-width: 320px; }
+.heat-grid { align-items: start; }
+.heat-stage { position: relative; overflow: hidden; border-radius: 10px; border: 1px solid var(--border); background: #fff; }
+.heat-stage.blank { background: repeating-linear-gradient(0deg, #f6f6f6 0 1px, #fff 1px 48px); }
+.heat-inner { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.heat-inner iframe { position: absolute; inset: 0; border: 0; pointer-events: none; background: #fff; }
+.heat-layer { position: absolute; inset: 0; pointer-events: none; }
+.scroll-marks { position: absolute; inset: 0; pointer-events: none; }
+.scroll-mark { position: absolute; left: 0; right: 0; border-top: 2px dashed rgba(0, 0, 0, .45); }
+.scroll-mark span { position: absolute; right: 12px; top: 6px; padding: 3px 10px; border-radius: 99px; background: rgba(0, 0, 0, .72); color: #fff; font-size: 22px; font-weight: 650; }
+.heat-legend { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12px; color: var(--text-2); }
+.heat-legend i { flex: 1; max-width: 220px; height: 8px; border-radius: 99px; background: linear-gradient(90deg, #3b5bff, #00d0ff, #3ddc84, #ffe03d, #ff3b30); }
+
+/* ---------- Injuries ---------- */
+.vital .grade { grid-column: 1 / -1; justify-self: start; }
+.grade { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.grade.good { background: #cdfee1; color: #0c5132; }
+.grade.fair { background: #fff1e3; color: #5e4200; }
+.grade.poor { background: #fee9e8; color: #8e1f0b; }
+h3.minor { font-size: 13px; font-weight: 650; margin: 0 0 6px; color: var(--text-2); }
+td.err { font-family: var(--mono); font-size: 12px; max-width: 360px; overflow-wrap: anywhere; }
+td.path { font-family: var(--mono); font-size: 12.5px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

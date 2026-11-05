@@ -5,6 +5,7 @@
 //     data-api="https://…/e"  send events elsewhere, such as through your own domain
 //     data-hash               count #/routes as pages
 //     data-local              count on localhost too
+//     data-lite               page views and events only: no heatmap clicks, scroll depth, page speed or errors
 //
 //   statiku("signup", { props: { plan: "pro" }, revenue: { amount: 9, currency: "EUR" } })
 //   <a data-track="download" data-track-os="mac" href="…">  sends "download" with { os: "mac" } on click
@@ -13,19 +14,24 @@
 // a reference added to the link, which the payment webhook brings back so the purchase is credited to its source.
 // While the page is in view it checks in every 30 seconds, and it says when the page closes, so the live view shows who
 // is there right now and a visit's length is the time spent on it; neither is stored as an event.
+// For heatmaps it notes where clicks land on the page (and the text of the link or button, unless it looks like an
+// address or a number) and how far down the page a visit read; for injuries, the page's speed (Core Web Vitals), the
+// status it came with, and its first few script errors. None of it is stored as an event.
 // A site can also ask its visitors to share their exact location for its live view: only if its owner turned that on,
 // and only with the visitor's say-so, twice over (a card, then the browser's own prompt).
 (function () {
-  var w = window, d = document, loc = location, nav = navigator, script = d.currentScript, last, beats = 0;
+  var w = window, d = document, loc = location, nav = navigator, script = d.currentScript, last, beats = 0, deepest = 0, clicks = 0, errors = 0, measured;
   if (!script) return;
   var attr = function (name) { return script.getAttribute("data-" + name); };
-  var key = attr("project"), api = attr("api") || new URL("e", script.src).href, hashRoutes = attr("hash") != null;
+  var key = attr("project"), api = attr("api") || new URL("e", script.src).href, hashRoutes = attr("hash") != null, lite = attr("lite") != null;
   var CHECKOUT = /^https:\/\/buy\.(polar\.sh|stripe\.com)\//;
   var FILE = /\.(dmg|pkg|zip|exe|msi|appimage|deb|rpm|apk)$/i;
 
-  // Not counted: local pages (unless data-local), automated browsers, and the owner's own browser once they opt out.
+  // Not counted: local pages (unless data-local), automated browsers, the page shown behind a heatmap in Statiku, and
+  // the owner's own browser once they opt out.
   function skip() {
     if ((/^(localhost|127\.|\[::1\])/.test(loc.hostname) && attr("local") == null) || loc.protocol == "file:" || nav.webdriver) return true;
+    if (loc.hash.indexOf("statiku-heatmap") >= 0) return true;
     try { return !!localStorage.statiku_ignore; } catch (e) { return false; }
   }
 
@@ -48,11 +54,32 @@
 
   function page() {
     var p = loc.pathname + (hashRoutes ? loc.hash : "");
-    if (p != last) { last = p; beats = 0; send("pageview"); }
+    if (p != last) {
+      // A single-page app's previous page: how far down it was read.
+      if (last && deepest && !lite) send("_d", { props: { d: deepest, path: last } });
+      last = p; beats = 0; deepest = 0; clicks = 0; scrolled();
+      send("pageview");
+    }
+  }
+
+  // How far down the page has been seen, in percent.
+  function scrolled() {
+    var de = d.documentElement, seen = Math.round(((w.scrollY || 0) + w.innerHeight) / Math.max(de.scrollHeight, 1) * 100);
+    if (seen > deepest) deepest = Math.min(seen, 100);
+  }
+
+  // Where a click landed, for heatmaps: across as a share of the page's width (pages reflow), down in pixels.
+  function spot(e) {
+    var de = d.documentElement, t = e.target.closest && e.target.closest("a,button,[role=button],summary,label,input[type=submit]");
+    var text = t ? (t.getAttribute("aria-label") || t.value || t.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60) : "";
+    if (/@|\d{5}/.test(text)) text = "";
+    send("_c", { props: { x: Math.round(e.pageX / Math.max(de.scrollWidth, 1) * 1000) / 1000, y: Math.round(e.pageY), h: de.scrollHeight, t: text } });
   }
 
   function click(e) {
     if (e.type == "auxclick" && e.button != 1) return;
+    // A real click (not Enter on a link), a few dozen a page at most.
+    if (e.type == "click" && e.detail > 0 && !lite && clicks++ < 40) spot(e);
     var t = e.target, el = t.closest("[data-track]"), a = t.closest("a[href]");
     var props = {}, name, i, at, url, param;
     if (el) {
@@ -93,7 +120,44 @@
   else page();
   // In view: a check-in every 30 seconds, for up to half an hour on one page. Closing the page: gone at once.
   setInterval(function () { d.hidden || beats++ > 59 || send("_p"); }, 3e4);
-  w.addEventListener("pagehide", function () { send("_l"); });
+  w.addEventListener("scroll", scrolled, { passive: true });
+  // Closing the page: how far it was read and, the first time, how fast it was (the vitals are final by then).
+  w.addEventListener("pagehide", function () {
+    var props = lite ? null : { d: deepest };
+    if (props && !measured) { measured = 1; for (var k in vitals) props[k] = vitals[k]; }
+    send("_l", { props: props });
+  });
+
+  // Page speed as visitors get it: the largest paint (lcp), the slowest response to a tap or key (inp), how much the
+  // page shifted as it loaded (cls), the first byte (ttfb), all in milliseconds but cls, and the page's HTTP status.
+  var vitals = {};
+  function watch(type, fn, extra) {
+    try { new PerformanceObserver(function (l) { l.getEntries().forEach(fn); }).observe(Object.assign({ type: type, buffered: true }, extra)); } catch (e) {}
+  }
+  if (!lite && w.PerformanceObserver) {
+    var nav0 = performance.getEntriesByType && performance.getEntriesByType("navigation")[0], shift = 0, windowStart = 0, windowLast = 0;
+    if (nav0) {
+      vitals.ttfb = Math.round(Math.max(0, nav0.responseStart - (nav0.activationStart || 0)));
+      if (nav0.responseStatus) vitals.st = nav0.responseStatus;
+    }
+    watch("largest-contentful-paint", function (e) { vitals.lcp = Math.round(e.startTime); });
+    watch("event", function (e) { if (e.interactionId && e.duration > (vitals.inp || 0)) vitals.inp = Math.round(e.duration); }, { durationThreshold: 16 });
+    // Layout shifts in bursts (at most a second apart, five seconds long); the worst burst counts.
+    watch("layout-shift", function (e) {
+      if (e.hadRecentInput) return;
+      if (e.startTime - windowLast > 1000 || e.startTime - windowStart > 5000) { windowStart = e.startTime; shift = 0; }
+      windowLast = e.startTime;
+      shift += e.value;
+      if (shift > (vitals.cls || 0)) vitals.cls = Math.round(shift * 1000) / 1000;
+    });
+  }
+  // The page's own script errors, the first five, for injuries.
+  function failed(message, source, line) {
+    if (lite || errors++ > 4 || !message) return;
+    send("_e", { props: { m: String(message).slice(0, 300), s: String(source || "").split("?")[0].slice(0, 300), l: line || 0 } });
+  }
+  w.addEventListener("error", function (e) { if (e.message) failed(e.message, e.filename, e.lineno); });
+  w.addEventListener("unhandledrejection", function (e) { var r = e.reason; failed(r && r.message ? r.message : r, r && r.stack ? (r.stack.match(/https?:\/\/[^\s)]+/) || [""])[0].replace(/:\d+:\d+$/, "") : ""); });
 
   // Exact location, on sites that ask for it. Someone who already allowed it shares it without being asked again;
   // someone the browser has been told to refuse is never asked; anyone else sees a card a few seconds in, and only

@@ -35,6 +35,10 @@ const ICONS = {
   chart: '<path d="M4 16.5v-4M8 16.5v-8M12 16.5v-6M16 16.5V4"/>',
   live: '<circle cx="10" cy="10" r="1.8"/><path d="M6.8 13.2a4.5 4.5 0 0 1 0-6.4M13.2 6.8a4.5 4.5 0 0 1 0 6.4M4.3 15.7a8 8 0 0 1 0-11.4M15.7 4.3a8 8 0 0 1 0 11.4"/>',
   code: '<path d="m7 6-4 4 4 4M13 6l4 4-4 4"/>',
+  // A flame: heatmaps.
+  heat: '<path d="M10 17c3 0 5-2.1 5-5 0-3.4-2.6-5.2-3.4-8.5-1.7 1.1-2.6 2.7-2.6 4.6-.8-.6-1.4-1.5-1.6-2.6C5.9 7.2 5 9.3 5 12c0 2.9 2 5 5 5Z"/><path d="M10 17c-1.3 0-2.2-1-2.2-2.3 0-1.5 1.2-2.2 2.2-3.7 1 1.5 2.2 2.2 2.2 3.7 0 1.3-.9 2.3-2.2 2.3Z"/>',
+  // A plaster: injuries.
+  injury: '<rect x="2.6" y="7.2" width="14.8" height="5.6" rx="2.8" transform="rotate(-40 10 10)"/><path d="M8.6 9.2h.01M11.4 9.2h.01M8.6 10.8h.01M11.4 10.8h.01" stroke-width="2"/>',
   // A football: the match view.
   ball: '<circle cx="10" cy="10" r="7"/><path d="m10 7 2.9 2.1-1.1 3.4H8.2L7.1 9.1Z"/><path d="M10 3v4M12.9 9.1l3.6-1.3M11.8 12.5l2.3 3.1M8.2 12.5l-2.3 3.1M7.1 9.1 3.5 7.8"/>',
   // A number sign: anything a site counts beyond its visits.
@@ -356,6 +360,7 @@ function shell(site, active, content) {
           h("span", { class: "count", id: "nav-live", hidden: !site.live }, h("i", { class: "dot pulse" }), h("span", { text: String(site.live) }))),
         navItem(`/sites/${site.key}/match`, "ball", "Match view", false),
         navItem(`/sites/${site.key}/numbers`, "hash", "Numbers", active === "numbers"),
+        navItem(`/sites/${site.key}/heatmaps`, "heat", "Heatmaps", active === "heatmaps"),
         navItem(`/sites/${site.key}/setup`, "code", "Setup", active === "setup"),
         navItem(`/sites/${site.key}/import`, "history", "Import history", active === "import"),
       ] : null),
@@ -1269,7 +1274,44 @@ function insightCards(x, key) {
       h("p", { class: "help", text: "Out of ten: how many visitors a page reaches, how long they stay on it, the goals it sets up, and how few visits end there." }))
     : h("p", { class: "empty-note", text: "No page views in this period." }),
   { sub: "How each page played" });
-  return [h("div", { class: "grid g2" }, assistsCard, ratingsCard)];
+  return [h("div", { class: "grid g2" }, assistsCard, ratingsCard), injuriesCard(x.injuries)];
+}
+
+// Injuries: page speed as Google judges it (the 75th percentile of visits), the slowest pages, script errors and
+// pages that answered with an error.
+const VITALS = [
+  ["lcp", "Largest paint", "How long until the page's main content shows", 2500, 4000, (v) => `${(v / 1000).toFixed(1)}s`],
+  ["inp", "Response to taps", "The slowest reaction to a click, tap or key", 200, 500, (v) => `${int(v)} ms`],
+  ["cls", "Layout shift", "How much the page jumps as it loads", 0.1, 0.25, (v) => v.toFixed(2)],
+  ["ttfb", "First byte", "How long the server takes to answer", 800, 1800, (v) => `${int(v)} ms`],
+];
+const grade = (v, good, poor) => (v == null ? null : v <= good ? ["good", "Good"] : v <= poor ? ["fair", "Needs work"] : ["poor", "Poor"]);
+function injuriesCard(x) {
+  if (!x.vitals.samples && !x.errors.length && !x.broken.length) {
+    return card("Injuries", h("p", { class: "empty-note", text: "Nothing measured in this period. The tracking script measures each page's speed as visitors leave it, and notes script errors and broken pages." }), { sub: "Speed, errors and broken pages" });
+  }
+  const tiles = h("div", { class: "grid g4" }, VITALS.map(([id, label, hint, good, poor, fmt]) => {
+    const v = x.vitals[id], g = grade(v, good, poor);
+    return h("div", { class: "card kpi vital", title: hint }, h("span", { class: "label", text: label }), h("span", { class: "value", text: v == null ? "–" : fmt(v) }),
+      g ? h("span", { class: `grade ${g[0]}`, text: g[1] }) : h("span", { class: "delta", text: "Not measured" }));
+  }));
+  const table = (head, rows) => h("div", { class: "table-wrap" }, h("table", {}, h("thead", {}, h("tr", {}, head.map((t) => h("th", { text: t })))), h("tbody", {}, rows)));
+  const cellGrade = (v, i) => {
+    const [, , , good, poor, fmt] = VITALS[i], g = grade(v, good, poor);
+    return h("td", {}, v == null ? "–" : h("span", { class: `grade ${g[0]}`, text: fmt(v) }));
+  };
+  return card("Injuries", h("div", { class: "stack" },
+    tiles,
+    x.slow.length ? h("div", {}, h("h3", { class: "minor", text: "Slowest pages" }),
+      table(["Page", "Largest paint", "Response", "Shift", "Visits measured"], x.slow.map((s) => h("tr", {}, h("td", { class: "path", text: s.path }), cellGrade(s.lcp, 0), cellGrade(s.inp, 1), cellGrade(s.cls, 2), h("td", { text: int(s.n) }))))) : null,
+    x.errors.length ? h("div", {}, h("h3", { class: "minor", text: "Script errors" }),
+      table(["Error", "Where", "Times", "Pages", "Last"], x.errors.map((e) => h("tr", {}, h("td", { class: "err", text: e.message }),
+        h("td", { class: "muted", text: e.source ? `${e.source.replace(/^https?:\/\/[^/]+/, "")}${e.line ? `:${e.line}` : ""}` : e.path ?? "–" }),
+        h("td", { text: int(e.n) }), h("td", { text: int(e.pages) }), h("td", { class: "muted", text: ago(e.last) }))))) : null,
+    x.broken.length ? h("div", {}, h("h3", { class: "minor", text: "Broken pages" }),
+      table(["Page", "Answered with", "Visits"], x.broken.map((b) => h("tr", {}, h("td", { class: "path", text: b.path }), h("td", {}, h("span", { class: "grade poor", text: String(b.status) })), h("td", { text: int(b.n) }))))) : null,
+    h("p", { class: "help", text: `From ${int(x.vitals.samples)} page ${x.vitals.samples === 1 ? "view" : "views"} measured on visitors' own devices. Speed is the 75th percentile: three visits in four were at least this fast.` })),
+  { sub: "Speed, errors and broken pages" });
 }
 
 // Downloads of the GitHub repository's releases, counted by GitHub: all time, in this period, and by release.
@@ -2127,6 +2169,125 @@ async function numbersPage(key) {
   return h("div", { class: "page" }, pageHead([icon("hash", 20), h("h1", { text: "Numbers" }), h("span", { class: "muted", text: site?.domains[0] })], [rangeTabs]), body);
 }
 
+// ---------- Heatmaps ----------
+// Where a page's visitors click and how far down they read: the page itself (if it lets itself be shown in a frame)
+// with the clicks over it as heat, the links and buttons clicked most, and lines where each share of visits stopped.
+const DEVICE_WIDTHS = { Mobile: 390, Tablet: 820, Laptop: 1280, Desktop: 1536, Unknown: 1280 };
+const HEAT_RANGES = [["today", "Today"], ["d7", "7 days"], ["d30", "30 days"], ["d90", "90 days"]];
+
+let heatPalette = null;
+function drawHeat(canvas, clicks, width, height) {
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!clicks.length) return;
+  const radius = Math.max(16, width / 36), most = Math.max(...clicks.map((c) => c.n));
+  for (const c of clicks) {
+    const x = c.x * width, y = c.y;
+    if (y > height + radius) continue;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    g.addColorStop(0, `rgba(0,0,0,${Math.min(1, 0.18 + (0.82 * c.n) / most)})`);
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  }
+  // Each shade of grey becomes its colour: blue where few clicked, through green and yellow, to red where most did.
+  if (!heatPalette) {
+    const p = document.createElement("canvas");
+    p.width = 256;
+    p.height = 1;
+    const pc = p.getContext("2d");
+    const lg = pc.createLinearGradient(0, 0, 256, 0);
+    [[0, "#3b5bff"], [0.35, "#00d0ff"], [0.55, "#3ddc84"], [0.75, "#ffe03d"], [1, "#ff3b30"]].forEach(([o, c]) => lg.addColorStop(o, c));
+    pc.fillStyle = lg;
+    pc.fillRect(0, 0, 256, 1);
+    heatPalette = pc.getImageData(0, 0, 256, 1).data;
+  }
+  const img = ctx.getImageData(0, 0, width, height), d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const a = d[i + 3];
+    if (!a) continue;
+    d[i] = heatPalette[a * 4];
+    d[i + 1] = heatPalette[a * 4 + 1];
+    d[i + 2] = heatPalette[a * 4 + 2];
+    d[i + 3] = Math.min(225, 60 + a);
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+async function heatmapsPage(key) {
+  const site = state.sites.find((s) => s.key === key);
+  const domain = site?.domains[0];
+  let range = saved.heatRange ?? "d30", path = null, device = null, showPage = saved.heatPage !== false, data = null;
+  const body = h("div", {}, h("p", { class: "muted", text: "Loading…" }));
+  const tools = h("div", { class: "tools-row" });
+
+  async function load() {
+    const q = new URLSearchParams({ range });
+    if (path) q.set("path", path);
+    if (device) q.set("device", device);
+    try {
+      data = await api(`/api/sites/${key}/heatmap?${q}`);
+      path = data.path;
+      device = data.device;
+      draw();
+    } catch (err) {
+      if (!(err instanceof SignedOut)) body.replaceChildren(failure(err));
+    }
+  }
+
+  function draw() {
+    const d = data;
+    const pagePick = h("select", { class: "input", "aria-label": "Page", onchange: (e) => { path = e.target.value; device = null; load(); } },
+      d.pages.map((p) => h("option", { value: p.path, selected: p.path === d.path ? true : null, text: `${p.path} (${int(p.clicks)} clicks)` })));
+    tools.replaceChildren(...[d.pages.length ? pagePick : null,
+      d.devices.length > 1 ? tabs(d.devices.map((x) => [x.device, x.device]), d.device, (id) => { device = id; load(); }) : null,
+      tabs(HEAT_RANGES, range, (id) => { range = id; saved.heatRange = id; remember(); path = null; device = null; load(); })].filter(Boolean));
+    if (!d.path) {
+      body.replaceChildren(h("div", { class: "card status-card" }, h("span", { class: "icon wait" }, icon("heat", 20)),
+        h("div", { class: "what" }, h("b", { text: "No clicks in this period yet" }),
+          h("span", { class: "muted", text: "The tracking script notes where visitors click and how far down they read, without recording their screens. The first heatmap shows here once a page has some clicks." }))));
+      return;
+    }
+    const width = DEVICE_WIDTHS[d.device] ?? 1280;
+    const height = Math.min(8000, Math.max(d.height ?? 0, ...d.clicks.map((c) => c.y + 40), 900));
+    const frame = h("iframe", { src: `https://${domain}${d.path}${d.path.includes("#") ? "&" : "#"}statiku-heatmap`, title: `${d.path} on ${domain}`, sandbox: "allow-scripts allow-same-origin", style: { width: `${width}px`, height: `${height}px` }, hidden: !showPage, tabindex: "-1" });
+    const canvas = h("canvas", { class: "heat-layer", role: "img", "aria-label": `Where visitors clicked on ${d.path}` });
+    const marks = h("div", { class: "scroll-marks" }, d.scroll.filter((s) => s.depth % 20 === 0 && s.depth < 100).map((s) =>
+      h("div", { class: "scroll-mark", style: { top: `${(s.depth / 100) * height}px` } }, h("span", { text: `${s.share}% read this far` }))));
+    const inner = h("div", { class: "heat-inner", style: { width: `${width}px`, height: `${height}px` } }, frame, canvas, marks);
+    const stage = h("div", { class: `heat-stage${showPage ? "" : " blank"}` }, inner);
+    const fit = () => {
+      const scale = Math.min(1, (stage.clientWidth || width) / width);
+      inner.style.transform = `scale(${scale})`;
+      stage.style.height = `${height * scale}px`;
+    };
+    const toggle = h("label", { class: "check" }, h("input", { type: "checkbox", checked: showPage, onchange: (e) => { showPage = e.target.checked; saved.heatPage = showPage; remember(); draw(); } }), "Show the page behind");
+    const total = d.clicks.reduce((a, c) => a + c.n, 0);
+    body.replaceChildren(h("div", { class: "grid g-side heat-grid" },
+      h("div", { class: "card" }, h("div", { class: "card-head" }, h("h2", {}, h("code", { text: d.path })), h("span", { class: "sub", text: `${int(total)} clicks · ${int(d.views)} views · ${d.device}` }), h("div", { class: "end" }, toggle)),
+        h("div", { class: "card-body" }, stage,
+          h("div", { class: "heat-legend" }, h("span", { text: "Fewer clicks" }), h("i"), h("span", { text: "More clicks" })),
+          h("p", { class: "help", text: "If the page doesn't show, it doesn't allow other sites to frame it: the heat is still where people clicked. Your own visit to the page here isn't counted." }))),
+      h("div", { class: "stack" },
+        card("Clicked most", bars(d.targets, { head: ["Link or button", "Clicks"] })),
+        card("How far down they read", d.scroll.length ? bars(d.scroll.map((s) => ({ label: `${s.depth}% of the page`, v: s.share })), { head: ["Reached", "Visits"], fmt: (v) => `${v}%` })
+          : h("p", { class: "empty-note", text: "No visits have closed this page yet." }), { sub: d.scrolled ? `${int(d.scrolled)} visits` : null }))));
+    fitNow = fit;
+    queueMicrotask(() => {
+      fit();
+      drawHeat(canvas, d.clicks, width, height);
+    });
+  }
+
+  let fitNow = () => {};
+  const resized = () => fitNow();
+  addEventListener("resize", resized);
+  onLeave(() => removeEventListener("resize", resized));
+  queueMicrotask(load);
+  return h("div", { class: "page" }, pageHead([icon("heat", 20), h("h1", { text: "Heatmaps" }), h("span", { class: "muted", text: domain })], [tools]), body);
+}
+
 // ---------- Match view ----------
 // A site's day as a live scoreboard: for a TV, a launch day, or a link to share.
 const money = (minor, currency) => {
@@ -2361,8 +2522,9 @@ const ROUTES = [
   [/^\/sites\/(p_[a-z0-9]+)\/settings$/, (k) => ["settings", k, siteSettingsPage(k)]],
   [/^\/sites\/(p_[a-z0-9]+)\/import$/, (k) => ["import", k, importPage(k)]],
   [/^\/sites\/(p_[a-z0-9]+)\/numbers$/, (k) => ["numbers", k, numbersPage(k)]],
+  [/^\/sites\/(p_[a-z0-9]+)\/heatmaps$/, (k) => ["heatmaps", k, heatmapsPage(k)]],
 ];
-const TITLES = { home: "Websites", account: "Settings", plan: "Plan", add: "Add a website", analytics: "Analytics", live: "Live view", setup: "Setup", settings: "Site settings", import: "Import history", numbers: "Numbers" };
+const TITLES = { home: "Websites", account: "Settings", plan: "Plan", add: "Add a website", analytics: "Analytics", live: "Live view", setup: "Setup", settings: "Site settings", import: "Import history", numbers: "Numbers", heatmaps: "Heatmaps" };
 
 let rendering = 0;
 async function render() {

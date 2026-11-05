@@ -30,6 +30,13 @@ export type Deps = { projects: Projects; salts: Salts; sessions: Sessions; insta
 const BEAT = "_p", GONE = "_l";
 // On sites that ask, the point a visitor chose to share, or their "not now". Never stored as events either.
 const SHARED = "_loc", DECLINED = "_noloc";
+// For heatmaps, a click's place on the page and a single-page app's page's scroll depth; for injuries, a script error.
+const CLICK = "_c", DEPTH = "_d", ERROR = "_e";
+const between = (v: unknown, min: number, max: number) => (typeof v === "number" && Number.isFinite(v) && v >= min && v <= max ? v : null);
+const whole = (v: unknown, min: number, max: number) => {
+  const n = between(v, min, max);
+  return n === null ? null : Math.round(n);
+};
 const round4 = (n: number) => Math.round(n * 10_000) / 10_000;
 
 // What the script needs to know about its site: whether it asks visitors for their location, and whether to ask this
@@ -100,6 +107,17 @@ export function parseHit(body: string): Hit | string {
   return { key, name, url, referrer: text(data.r, 2048) || null, width, props: cleanProps(data.p), revenue: cleanRevenue(data.$) };
 }
 
+// A page's scroll depth (d, percent) and its speed: lcp, inp and ttfb in milliseconds, cls as a score, st its status.
+function measures(deps: Deps, projectId: string, path: string, device: string, props: Record<string, unknown>, now: Date) {
+  const depth = whole(props.d, 0, 100);
+  if (depth !== null && depth > 0) deps.writer.addRow("scrolls", { project_id: projectId, ts: now, path, device, depth });
+  const lcp = whole(props.lcp, 0, 120_000), inp = whole(props.inp, 0, 120_000), ttfb = whole(props.ttfb, 0, 120_000);
+  const cls = between(props.cls, 0, 100), status = whole(props.st, 100, 599);
+  if (lcp !== null || inp !== null || cls !== null || ttfb !== null || status !== null) {
+    deps.writer.addRow("vitals", { project_id: projectId, ts: now, path, device, lcp, inp, cls, ttfb, status });
+  }
+}
+
 export async function collect(deps: Deps, body: string, ua: string, ip: string, now = new Date()): Promise<Outcome> {
   const hit = parseHit(body);
   if (typeof hit === "string") return { status: 400, message: hit };
@@ -124,17 +142,42 @@ export async function collect(deps: Deps, body: string, ua: string, ip: string, 
     }
     return { status: 202, message: "ok" };
   }
+  const pagePath = (hit.url.pathname + hit.url.hash).slice(0, 512);
   if (hit.name === BEAT || hit.name === GONE) {
     const beating = await deps.sessions.beat(project.id, visitor, now, hit.name === GONE);
     if (beating) {
       if (beating.place === undefined) beating.place = deps.geo.place(ip);
       deps.hub.publish(project.id, { t: "presence" });
     }
+    // Leaving a page: how far down it was read and, the first time, how fast it was.
+    if (hit.name === GONE && hit.props) measures(deps, project.id, pagePath, agentOf(ua, hit.width).device, hit.props, now);
+    return { status: 202, message: "ok" };
+  }
+  if (hit.name === CLICK || hit.name === DEPTH || hit.name === ERROR) {
+    const props = hit.props ?? {};
+    const agent = agentOf(ua, hit.width);
+    if (hit.name === CLICK) {
+      const x = between(props.x, 0, 1), y = whole(props.y, 0, 1_000_000);
+      if (x !== null && y !== null) {
+        const target = text(props.t, 60);
+        deps.writer.addRow("clicks", { project_id: project.id, ts: now, path: pagePath, device: agent.device, x, y, page_h: whole(props.h, 0, 1_000_000), target: target || null });
+      }
+    } else if (hit.name === DEPTH) {
+      const path = text(props.path, 512);
+      if (path.startsWith("/")) measures(deps, project.id, path, agent.device, { d: props.d }, now);
+    } else {
+      const message = text(props.m, 300);
+      if (message) {
+        deps.writer.addRow("page_errors", {
+          project_id: project.id, ts: now, path: pagePath, message, source: text(props.s, 300) || null, line: whole(props.l, 0, 10_000_000), browser: agent.browser,
+        });
+      }
+    }
     return { status: 202, message: "ok" };
   }
   const country = deps.geo.country(ip);
   const agent = agentOf(ua, hit.width);
-  const path = (hit.url.pathname + hit.url.hash).slice(0, 512);
+  const path = pagePath;
   const pageview = hit.name === "pageview";
   const session = await deps.sessions.touch(project.id, visitor, now, path, pageview, () => ({
     ...sourceOf(hit.url, hit.referrer),

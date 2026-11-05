@@ -284,3 +284,45 @@ test("assists and player ratings: which pages and visits led to each goal, and h
   assert.equal(r.find((p: any) => p.path === "/blog").exitRate, 100);
   assert.equal(r.find((p: any) => p.path === "/pricing").assists, 2);
 });
+
+test("heatmaps and injuries: clicks, scroll depth, page speed, errors and broken pages, never stored as events", { skip }, async () => {
+  const { as, key, id } = await siteOf("heat.example");
+  const ip = "198.51.100.20";
+  assert.equal(await hit(key, ip, "pageview", "https://heat.example/pricing"), 202);
+  for (const [x, y, t] of [[0.5, 400, "Start free"], [0.502, 402, "Start free"], [0.2, 1210, "Yearly"], [0.8, 90, ""]] as const) {
+    assert.equal(await hit(key, ip, "_c", "https://heat.example/pricing", { p: { x, y, h: 2400, t } }), 202);
+  }
+  // Out of range, or not a number: ignored.
+  await hit(key, ip, "_c", "https://heat.example/pricing", { p: { x: 4, y: 10 } });
+  await hit(key, ip, "_l", "https://heat.example/pricing", { p: { d: 80, lcp: 2100, inp: 120, cls: 0.05, ttfb: 300, st: 200 } });
+  await hit(key, "198.51.100.21", "_l", "https://heat.example/pricing", { p: { d: 30, lcp: 4800, inp: 600, cls: 0.3, ttfb: 900, st: 200 } });
+  await hit(key, "198.51.100.21", "_l", "https://heat.example/pricing", { p: { d: 50, lcp: 2500 } });
+  await hit(key, ip, "_l", "https://heat.example/gone", { p: { d: 100, st: 404 } });
+  await hit(key, ip, "_d", "https://heat.example/next", { p: { d: 55, path: "/docs" } });
+  await hit(key, ip, "_e", "https://heat.example/pricing", { p: { m: "TypeError: plans is undefined", s: "https://heat.example/app.js", l: 12 } });
+  await hit(key, "198.51.100.21", "_e", "https://heat.example/pricing", { p: { m: "TypeError: plans is undefined", s: "https://heat.example/app.js", l: 12 } });
+  await app.writer.flush();
+
+  const { rows: [stored] } = await pool.query("select count(*)::int as n from events where project_id = $1 and name like '\\_%'", [id]);
+  assert.equal(stored.n, 0);
+  const map = await as(`/api/sites/${key}/heatmap?range=today`);
+  assert.equal(map.status, 200, JSON.stringify(map.data));
+  assert.equal(map.data.path, "/pricing");
+  assert.equal(map.data.device, "Desktop");
+  assert.equal(map.data.clicks.reduce((a: number, c: any) => a + c.n, 0), 4);
+  // The two clicks on the button fall in the same cell.
+  assert.ok(map.data.clicks.some((c: any) => c.n === 2 && c.x === 0.5 && c.y === 400), JSON.stringify(map.data.clicks));
+  assert.deepEqual(map.data.targets, [{ label: "Start free", v: 2 }, { label: "Yearly", v: 1 }]);
+  assert.equal(map.data.height, 2400);
+  assert.equal(map.data.views, 1);
+  // Three visits read the pricing page: to 80%, 30% and 50%.
+  assert.deepEqual(map.data.scroll.slice(0, 8).map((s: any) => s.share), [100, 100, 100, 67, 67, 33, 33, 33]);
+  assert.equal((await as(`/api/sites/${key}/heatmap?range=today&path=${encodeURIComponent("/docs")}`)).data.scrolled, 1);
+
+  const hurt = (await as(`/api/sites/${key}/insights?range=today`)).data.injuries;
+  assert.equal(hurt.vitals.samples, 4);
+  assert.ok(hurt.vitals.lcp > 2500 && hurt.vitals.lcp <= 4800, String(hurt.vitals.lcp));
+  assert.equal(hurt.slow[0].path, "/pricing");
+  assert.deepEqual(hurt.errors.map((e: any) => [e.message, e.n, e.line, e.browsers]), [["TypeError: plans is undefined", 2, 12, ["Safari"]]]);
+  assert.deepEqual(hurt.broken, [{ path: "/gone", status: 404, n: 1 }]);
+});

@@ -82,6 +82,11 @@ webhook brings back. For anything else:
 
 To leave your own visits out, run `localStorage.statiku_ignore = "1"` in your browser's console on your site.
 
+The script also notes, for the site's **Heatmaps**, where clicks land on a page and how far down each visit read, and
+for its **Injuries**, how fast each page loaded for the visitor (Core Web Vitals), the status the page came with, and
+its first few script errors. Nothing records the screen, and none of it counts as an event. `data-lite` on the script
+tag turns these off and keeps page views and events only.
+
 ## Add it to an app
 
 The Swift package is in `sdk/swift` (macOS 12, iOS 15 and later). Until it has its own repository, add it to an
