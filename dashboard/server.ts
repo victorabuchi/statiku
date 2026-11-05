@@ -2,7 +2,8 @@
 // numbers. The pages are one app (client/), bundled when the service starts; everything it shows comes from /api.
 // Statiku's own pages (site/) are served here too: the landing page at / for anyone not signed in, and the legal pages.
 //   GET    /  /login  /signup  /join/…  /settings  /sites/…    the app
-//   GET    /  /pricing  /terms  /privacy  /dpa  /site/…        Statiku's own pages (/ only when not signed in)
+//   GET    /  /pricing  /docs  /terms  /privacy  /dpa  /site/…   Statiku's own pages (/ only when not signed in); any address
+//          that's neither one of them nor the app's gets the 404 page
 //   POST   /api/signup  /api/login  /api/logout
 //   POST   /api/password/forgot { email }    GET /api/password/reset/:token   POST { password }
 //   GET    /api/me              PATCH { name?, email? }   DELETE { password }
@@ -82,6 +83,9 @@ const HEADERS = {
 };
 // Images that came from elsewhere (a site's icon may be SVG) can't run anything, even opened on their own.
 const IMAGE_HEADERS = { "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox", "x-content-type-options": "nosniff" };
+
+// The addresses the app answers at (main.js works out each one).
+const APP_PAGES = /^\/(?:|login|signup|forgot|settings|plan|reset\/[\w-]+|join\/[\w-]+|m\/[\w-]+|sites(?:\/[^/]+(?:\/[a-z]+)?)?|trackers(?:\/new|\/p_[a-z0-9]+\/[^/]+)?)$/;
 
 const text = (value: unknown, max: number) => (typeof value === "string" ? value.replace(/\u0000/g, "").trim().slice(0, max) : "");
 const hashToken = (token: string) => createHash("sha256").update(token).digest();
@@ -213,7 +217,12 @@ function siteBundle(asset: (body: string | Uint8Array, type: string) => Asset, f
     "/site/site.js": asset(read("site.js"), "text/javascript; charset=utf-8"),
     "/site/film.js": asset(read("film.js"), "text/javascript; charset=utf-8"),
     "/site/film-scenes.js": asset(read("film-scenes.js"), "text/javascript; charset=utf-8"),
+    "/site/notchlight.png": asset(readFileSync(new URL("notchlight.png", dir)), "image/png"),
   };
+  // The picture a link to Statiku shows where it's shared (scripts/og.ts makes it).
+  if (existsSync(new URL("og.png", dir))) files["/site/og.png"] = asset(readFileSync(new URL("og.png", dir)), "image/png");
+  // Statiku's own address, for the examples in the docs.
+  const ORIGIN = (process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? "https://statiku.victorabuchi.com").replace(/\/$/, "");
   // The film's pictures share film.json's version, so a new set of pictures gets new addresses.
   const filmDir = new URL("film/", dir);
   // Without its pictures (scripts/shots.ts makes them) the film is empty, and everything else still works.
@@ -240,8 +249,8 @@ function siteBundle(asset: (body: string | Uint8Array, type: string) => Asset, f
     .replaceAll("{{V_FILMDATA}}", filmData.hash).replaceAll("{{FONT}}", `/fonts/latin.woff2?v=${fonts["/fonts/latin.woff2"].hash}`)
     .replace("{{BUILDERS}}", builders).replace("{{SOURCES}}", sources).replace("{{PLANS}}", plans).replace("{{YEAR}}", String(new Date().getFullYear()))
     // The logo by its version too, so browsers show a new one at once rather than the one they kept.
-    .replaceAll('"/favicon.svg"', `"/favicon.svg?v=${iconHash}"`);
-  const pages = Object.fromEntries((["index", "pricing", "terms", "privacy", "dpa"] as const).map((name) => [name, asset(fill(read(`${name}.html`)), "text/html; charset=utf-8")]));
+    .replaceAll('"/favicon.svg"', `"/favicon.svg?v=${iconHash}"`).replaceAll("{{ORIGIN}}", ORIGIN);
+  const pages = Object.fromEntries((["index", "pricing", "docs", "terms", "privacy", "dpa", "404"] as const).map((name) => [name, asset(fill(read(`${name}.html`)), "text/html; charset=utf-8")]));
   return { files, pages };
 }
 
@@ -277,12 +286,12 @@ export async function createDashboard(options: {
   const questions = new Attempts(30, 60 * 60_000);
   const resetsTo = new Attempts(3, 60 * 60_000);
 
-  function sendAsset(r: Request, asset: Asset, cache: string) {
+  function sendAsset(r: Request, asset: Asset, cache: string, status = 200) {
     const gzip = /\bgzip\b/.test(r.req.headers["accept-encoding"] ?? "");
     // Asked for by another build's name: during a deploy the old and new versions both answer for a moment, and a
     // browser must not keep this build's file under the other's name for a year. It gets this one, uncached.
     const wanted = new URL(r.req.url ?? "/", "http://x").searchParams.get("v");
-    r.res.writeHead(200, {
+    r.res.writeHead(status, {
       "content-type": asset.type, "cache-control": wanted && wanted !== asset.hash ? "no-store" : cache, vary: "accept-encoding", ...HEADERS,
       ...(gzip ? { "content-encoding": "gzip" } : {}),
     });
@@ -1097,11 +1106,12 @@ export async function createDashboard(options: {
       if (path === "/geo/countries-50m.json") return sendAsset(r, assets.map, "public, max-age=604800");
       if (Object.hasOwn(assets.fonts, path)) return sendAsset(r, assets.fonts[path as keyof typeof assets.fonts], "public, max-age=31536000, immutable");
       if (Object.hasOwn(assets.site.files, path)) return sendAsset(r, assets.site.files[path], "public, max-age=31536000, immutable");
-      const own = path.match(/^\/(pricing|terms|privacy|dpa)$/);
+      const own = path.match(/^\/(pricing|docs|terms|privacy|dpa)$/);
       if (own) return sendAsset(r, assets.site.pages[own[1]], "no-cache");
       // The landing page for anyone not signed in; the app for everyone who is.
       if (path === "/" && !(await userOf(pool, req))) return sendAsset(r, assets.site.pages.index, "no-cache");
-      // Every other address is a page of the app, which works out what to show.
+      // The app's own addresses are its pages, which work out what to show; any other address isn't a page at all.
+      if (!APP_PAGES.test(path)) return sendAsset(r, assets.site.pages["404"], "no-cache", 404);
       return sendAsset(r, assets.html, "no-cache");
     } catch (e) {
       if (e instanceof HttpError) return json(res, e.status, { error: e.message });

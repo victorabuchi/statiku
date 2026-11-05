@@ -191,6 +191,9 @@ Caddy in Docker (`deploy/oracle/`), rebuilt after each push to main; migrations 
 Google sign-in for imports and Polar for payments, and covers alerts, backups and the monthly restore drill.
 `render.yaml` is the Render Blueprint it ran on until October 2026.
 
+The public docs are at `/docs` (`site/docs.html`), with Statiku's own address in their examples. The picture links
+to Statiku show where they're shared is `site/og.png`; make it again after the film with `node scripts/og.ts`.
+
 The film on the landing page plays real screens on demo data. After a change to the dashboard, take its pictures
 again with `DATABASE_URL=postgres://localhost/statiku_demo node scripts/shots.ts` (it needs Chrome). A project made in the service's Shell before accounts
 existed goes into an account with `npm run project -- move <key> <email>`, after that person signs up.

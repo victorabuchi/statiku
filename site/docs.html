@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Docs · Statiku</title>
+<meta name="description" content="How to add Statiku to a website or an app, count events and sales, and track anything with one call: the tracking code, trackers, the Swift SDK and payment webhooks.">
+<meta property="og:title" content="Statiku docs">
+<meta property="og:description" content="Add Statiku to a website or an app, count events and sales, and track anything with one call.">
+<meta property="og:image" content="{{ORIGIN}}/site/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#08110f">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="{{FONT}}" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site/site.css?v={{V_CSS}}">
+</head>
+<body>
+{{NAV}}
+
+<section class="page-hero short"><div class="aurora" aria-hidden="true"></div><div class="wrap">
+  <p class="eyebrow">Docs</p>
+  <h1>Everything you need to set Statiku up.</h1>
+  <p class="lede">One line on your website, a small SDK in your app, and one call to track anything else.</p>
+</div></section>
+
+<div class="docs wrap">
+  <nav class="docs-toc" aria-label="On this page">
+    <a href="#website">Add it to a website</a>
+    <a href="#options">The script's options</a>
+    <a href="#events">Events and clicks</a>
+    <a href="#revenue">Revenue and sales</a>
+    <a href="#trackers">Trackers</a>
+    <a href="#apps">Apps (Swift)</a>
+    <a href="#tv">TV view and sharing</a>
+    <a href="#reports">Alerts and reports</a>
+    <a href="#imports">Importing history</a>
+    <a href="#data">Your visitors' data</a>
+  </nav>
+
+  <article class="docs-body">
+    <section id="website">
+      <h2>Add it to a website</h2>
+      <p>Add your site in Statiku, then paste its line into every page you want to count, just before <code>&lt;/head&gt;</code>. Each site has its own key (<code>p_…</code>); Statiku shows yours, with steps for WordPress, Shopify, Wix, Squarespace, Webflow, Framer and Google Tag Manager.</p>
+      <pre><code>&lt;script defer data-project="p_…" src="{{ORIGIN}}/s.js"&gt;&lt;/script&gt;</code></pre>
+      <p>Page views count on their own, including the pages of a single-page app. The live view shows a visitor the moment they arrive, and the site's card turns green with its first visit. The script is under 10 KB.</p>
+    </section>
+
+    <section id="options">
+      <h2>The script's options</h2>
+      <table>
+        <thead><tr><th>Attribute</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td><code>data-project</code></td><td>The site's key. Required.</td></tr>
+          <tr><td><code>data-api</code></td><td>Send events to another address, such as a path on your own domain that forwards to <code>{{ORIGIN}}/e</code>.</td></tr>
+          <tr><td><code>data-hash</code></td><td>Count <code>#/routes</code> as pages, for apps that route with the hash.</td></tr>
+          <tr><td><code>data-local</code></td><td>Count visits on <code>localhost</code> too, while you try it out.</td></tr>
+          <tr><td><code>data-lite</code></td><td>Page views and events only: no heatmap clicks, scroll depth, page speed or script errors.</td></tr>
+        </tbody>
+      </table>
+      <p>To leave your own visits out, run <code>localStorage.statiku_ignore = "1"</code> in your browser's console on your site.</p>
+    </section>
+
+    <section id="events">
+      <h2>Events and clicks</h2>
+      <p>Anything a visitor does can be an event, with up to 30 properties:</p>
+      <pre><code>&lt;script&gt;
+  window.statiku = window.statiku || function () { (statiku.q = statiku.q || []).push(arguments) };
+  statiku("signup", { props: { plan: "pro" } });
+&lt;/script&gt;</code></pre>
+      <p>Or without writing code, on any link or button:</p>
+      <pre><code>&lt;a href="/pricing" data-track="pricing" data-track-from="hero"&gt;Pricing&lt;/a&gt;</code></pre>
+      <p>Some clicks count by themselves: a click on a file (.dmg, .pkg, .zip, .exe, .msi, .apk and the like) sends <code>download</code>, and a click on a Stripe or Polar checkout link (<code>buy.stripe.com</code>, <code>buy.polar.sh</code>) sends <code>checkout</code>, with a reference added to the link so the payment can be credited to the visit.</p>
+      <p>Which events count as goals (conversions) is up to you, in the site's settings. Without a list of your own, sign-ups, trials, purchases, orders, checkouts, downloads and installs do, and so does anything that earned money.</p>
+    </section>
+
+    <section id="revenue">
+      <h2>Revenue and sales</h2>
+      <p>An event can carry what it earned, in any currency:</p>
+      <pre><code>statiku("purchase", { revenue: { amount: 29, currency: "EUR" } });</code></pre>
+      <p>Or let your payment provider tell Statiku: in the site's settings, under Payments, connect Stripe (<code>checkout.session.completed</code>) or Polar (<code>order.paid</code>) with the webhook address and signing secret shown there. Each payment is then counted once, as a purchase from the source, campaign and page of the visit whose checkout click carried its reference. Payments without one still count, as "Not matched".</p>
+    </section>
+
+    <section id="trackers">
+      <h2>Trackers</h2>
+      <p>A tracker follows anything else: installs, sales, a score, a sensor's reading, a server's status. Each value is a number, a word or a yes/no, sent from a script, a server or a device with the site's secret key, from <b>Add tracker</b> in Statiku:</p>
+      <pre><code>curl {{ORIGIN}}/v1/track \
+  -H "Authorization: Bearer sn_…" \
+  -d '{"name": "Sales", "value": 29, "op": "add", "labels": {"plan": "pro"}}'</code></pre>
+      <table>
+        <thead><tr><th>Field</th><th>What it is</th></tr></thead>
+        <tbody>
+          <tr><td><code>name</code></td><td>The tracker. A new name starts a new tracker.</td></tr>
+          <tr><td><code>value</code></td><td>A number, a word (<code>"Online"</code>) or a yes/no (<code>true</code>).</td></tr>
+          <tr><td><code>op</code></td><td><code>"add"</code> for a number that counts up (each value is added to its total). Anything else keeps its latest value.</td></tr>
+          <tr><td><code>ts</code></td><td>When it happened, as ISO time or Unix seconds. Leave it out for now.</td></tr>
+          <tr><td><code>labels</code></td><td>Up to ten labels (<code>{"plan": "pro", "country": "FI"}</code>) to split the tracker by.</td></tr>
+        </tbody>
+      </table>
+      <p>A call can send up to 100 values as <code>{"values": [...]}</code>, and a site up to 1,200 a minute. A device that can only open an address can use <code>{{ORIGIN}}/v1/track?key=sn_…&amp;name=Temperature&amp;value=21.5</code>. Values also come in CSV files: a row each with <code>time</code>, <code>name</code> and <code>value</code> columns (any other column is a label), or a <code>time</code> column and a column for each tracker.</p>
+      <p>Keep the key on servers and devices: on a web page anyone could read it, and for what visitors do there are events. Each tracker has a page of its own: a line, an area, bars, a pie or a table, by the hour, day, week or month, as a total, an average, the lowest, the highest or the latest, against the period before and split by any label; for words, how often and how long each value was.</p>
+    </section>
+
+    <section id="apps">
+      <h2>Apps (Swift)</h2>
+      <p>The Swift package (macOS 12 and iOS 15 or later) follows each install from the download that led to it to the trial and the licence:</p>
+      <pre><code>import Statiku
+
+Statiku.start(project: "p_…")      // when the app launches
+Statiku.setState(.trial)            // .trial, .expired, .licensed or .free
+Statiku.track("export", ["format": "png"])
+NSWorkspace.shared.open(Statiku.checkoutURL(buyURL))   // so a purchase is credited to the install's source
+Statiku.isOptedOut = true           // an opt-out in your app's settings</code></pre>
+      <p>The first launch sends <code>install</code>, each day the app runs sends <code>active</code>, and a new version sends <code>update</code>. An install is matched to the website visit whose download came from the same network in the day before; that match is an estimate.</p>
+    </section>
+
+    <section id="tv">
+      <h2>TV view and sharing</h2>
+      <p>Each site's TV view is a live board for a screen on the wall or a launch day: who's on the site now and on which page, today's visitors, conversions and takings, your trackers, momentum, and a running commentary, with a moment for every sale. Share it at a link of its own (Share, in the TV view): anyone with the link sees the board and nothing else, and you can turn the link off at any time.</p>
+    </section>
+
+    <section id="reports">
+      <h2>Alerts and reports</h2>
+      <p>Statiku emails a site's owners when it goes quiet (and says whether it's down, lost its tracking code or just has no visitors), when visits come back, and when a rush arrives. Every Monday morning a weekly report compares last week with the week before, by email and, with an incoming webhook from Slack, in a channel. Each can be turned off in the site's settings.</p>
+    </section>
+
+    <section id="imports">
+      <h2>Importing history</h2>
+      <p>On a site's Import history page: sign in with Google to bring Google Analytics 4, use a Plausible Stats API key, follow a GitHub repository's release downloads, or drop in CSV or ZIP files from Fathom, Matomo, Umami, Simple Analytics and other tools. Imported days fill in your reports for the time before Statiku started counting.</p>
+    </section>
+
+    <section id="data">
+      <h2>Your visitors' data</h2>
+      <p>The data is kept in the EU. What Statiku collects about visitors, how long it keeps it and who else is involved are in the <a href="/privacy">privacy policy</a>; the terms you and Statiku agree to as your processor are in the <a href="/dpa">data processing agreement</a>. Questions: <a href="mailto:contact@victorabuchi.com">contact@victorabuchi.com</a>.</p>
+    </section>
+  </article>
+</div>
+
+{{FOOTER}}
+<script src="/site/site.js?v={{V_JS}}"></script>
+</body>
+</html>

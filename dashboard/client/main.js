@@ -242,6 +242,12 @@ const saved = (() => {
     return {};
   }
 })();
+// Light or dark, as chosen in Settings; by the system's setting unless one is chosen.
+const applyTheme = (theme) => {
+  if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+};
+applyTheme(saved.theme);
 const NO_FILTERS = { source: null, country: null, device: null, browser: null, os: null, page: null };
 const state = {
   user: undefined, sites: null, range: saved.range ?? "d30", from: saved.from ?? null, to: saved.to ?? null,
@@ -249,7 +255,9 @@ const state = {
 };
 const remember = () => {
   try {
-    localStorage.setItem("statiku", JSON.stringify({ range: state.range, from: state.from, to: state.to }));
+    // The report's period, and every other choice kept here (the theme, a chart's kind, a page's period).
+    Object.assign(saved, { range: state.range, from: state.from, to: state.to });
+    localStorage.setItem("statiku", JSON.stringify(saved));
   } catch {}
 };
 
@@ -659,9 +667,37 @@ async function homePage() {
         howItWorks());
       return;
     }
-    list.replaceChildren(h("div", { class: "sites" }, state.sites.map(siteCard),
-      h("a", { class: "add-card", href: "/sites/new" }, icon("plus", 22), "Add another website")));
+    list.replaceChildren(...[checklist(), h("div", { class: "sites" }, state.sites.map(siteCard),
+      h("a", { class: "add-card", href: "/sites/new" }, icon("plus", 22), "Add another website"))].filter(Boolean));
   };
+  // Getting started: the steps that make Statiku useful, each ticked when it's done. Hidden once all are, or on Hide.
+  let extra = { trackers: false, team: false };
+  const checklist = () => {
+    if (saved.checklistHidden) return null;
+    const mine = state.sites.filter((s) => s.role === "owner");
+    if (!mine.length) return null;
+    const first = mine.find((s) => !s.lastEventAt) ?? mine[0];
+    const steps = [
+      ["Add your website", true, "/sites/new", "Add one"],
+      ["Paste the tracking code on it", mine.some((s) => s.lastEventAt), `/sites/${first.key}/setup`, "See how"],
+      ["Watch your visitors live", !!saved.seenLive, `/sites/${first.key}/live`, "Open the live view"],
+      ["Add a tracker for anything else", extra.trackers, "/trackers/new", "Add a tracker"],
+      ["Invite your team", extra.team, "/settings#team", "Invite"],
+    ];
+    const done = steps.filter(([, ok]) => ok).length;
+    if (done === steps.length) return null;
+    return h("div", { class: "card checklist" },
+      h("div", { class: "card-head" }, h("h2", { text: "Get started" }), h("span", { class: "sub", text: `${done} of ${steps.length} done` }),
+        h("div", { class: "end" }, h("button", { class: "btn plain", type: "button", text: "Hide", onclick: () => { saved.checklistHidden = true; remember(); draw(); } }))),
+      h("div", { class: "card-body" }, h("div", { class: "meter-bar" }, h("i", { style: { width: `${(100 * done) / steps.length}%` } })),
+        h("ol", { class: "steps-done" }, steps.map(([label, ok, href, action]) => h("li", { class: ok ? "ok" : "" },
+          h("span", { class: "tick" }, ok ? icon("check", 14) : null), h("span", { class: "what", text: label }), ok ? null : h("a", { class: "btn", href, text: action }))))));
+  };
+  // Whether there are trackers yet, and anyone else on the team.
+  Promise.all([api("/api/numbers?range=all").catch(() => null), api("/api/team").catch(() => null)]).then(([numbers, team]) => {
+    extra = { trackers: !!numbers?.sites.some((s) => s.numbers.length), team: (team?.members?.length ?? 0) > 1 || (team?.invites?.length ?? 0) > 0 };
+    draw();
+  });
   draw();
   every(15_000, async () => {
     await loadSites(true);
@@ -1463,6 +1499,10 @@ function describe(e) {
 }
 
 async function livePage(key) {
+  if (!saved.seenLive) {
+    saved.seenLive = true;
+    remember();
+  }
   const site = state.sites.find((s) => s.key === key);
   const connection = h("span", { class: "badge wait" }, h("i", { class: "dot idle" }), "Connecting");
   const updated = h("span", { class: "muted" });
@@ -2134,6 +2174,14 @@ async function accountPage() {
       card("Profile", profileHost),
       card("Websites", websites, { sub: `${sites.length} ${sites.length === 1 ? "site" : "sites"}`, id: "websites" }),
       card("Team", team, { id: "team" }),
+      card("Appearance", h("div", { class: "form" },
+        h("p", { class: "muted", text: "Light, dark, or as your device is set." }),
+        tabs([["system", "As my device"], ["light", "Light"], ["dark", "Dark"]], saved.theme ?? "system", (id) => {
+          saved.theme = id;
+          remember();
+          applyTheme(id);
+          render();
+        }))),
       card("Password", password),
       h("div", { class: "card", style: { borderColor: "#fbd5d0" } }, h("div", { class: "card-head" }, h("h2", { text: "Delete account" })), h("div", { class: "card-body" }, close))));
 }

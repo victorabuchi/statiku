@@ -241,3 +241,47 @@ footer.foot::before { content: ""; position: absolute; inset: -40% -10% auto; he
 @media (max-width: 760px) { .foot-top { grid-template-columns: 1fr; gap: 32px; } .foot-cols { grid-template-columns: repeat(2, 1fr); } .legalbody { padding: 22px; } }
 @media (max-width: 440px) { .nav .wrap { gap: 8px; } .nav .btn-ghost { padding: 8px 12px; } .nav .nav-start { display: none; } .logo { font-size: 19px; } .sources { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .film-cursor, .film-frames img, .card { transition: none; } .sources .src { animation: none; } }
+
+/* ---------------- docs ---------------- */
+.page-hero.short { padding: 64px 0 84px; }
+.docs { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; padding: 56px 0 96px; align-items: start; }
+.docs-toc { position: sticky; top: 24px; display: grid; gap: 2px; }
+.docs-toc a { padding: 7px 12px; border-radius: 9px; color: var(--muted); font-size: 14.5px; font-weight: 600; text-decoration: none; }
+.docs-toc a:hover { background: var(--bg); color: var(--ink); }
+.docs-body { min-width: 0; }
+.docs-body section { padding-bottom: 36px; margin-bottom: 36px; border-bottom: 1px solid var(--line); scroll-margin-top: 24px; }
+.docs-body section:last-child { border-bottom: 0; }
+.docs-body h2 { margin: 0 0 12px; font-size: 26px; letter-spacing: -.03em; }
+.docs-body p { margin: 0 0 14px; color: var(--ink2); max-width: 72ch; }
+.docs-body a { color: var(--brand); }
+.docs-body code { padding: 1px 6px; border-radius: 6px; background: var(--bg); font: 13.5px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--ink); }
+.docs-body pre { margin: 0 0 16px; padding: 16px 18px; overflow-x: auto; border-radius: 12px; background: var(--night); }
+.docs-body pre code { padding: 0; background: none; color: #e8f1ed; font-size: 13px; line-height: 1.65; white-space: pre; }
+.docs-body table { width: 100%; margin: 0 0 16px; border-collapse: collapse; font-size: 14.5px; }
+.docs-body th, .docs-body td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.docs-body th { color: var(--muted); font-size: 13px; font-weight: 650; }
+.docs-body td:first-child { white-space: nowrap; }
+@media (max-width: 860px) { .docs { grid-template-columns: 1fr; gap: 20px; padding-top: 32px; } .docs-toc { position: static; display: flex; flex-wrap: wrap; } }
+
+/* ---------------- 404 ---------------- */
+.page-hero.lost { min-height: 62vh; display: grid; align-items: center; }
+.lost-dots { position: relative; height: 40px; margin: 34px auto 0; width: 220px; }
+.lost-dots i { position: absolute; top: 14px; width: 12px; height: 12px; border-radius: 50%; background: var(--live); opacity: .25; animation: lost 3.6s ease-in-out infinite; }
+.lost-dots i:nth-child(1) { left: 10%; } .lost-dots i:nth-child(2) { left: 30%; animation-delay: .4s; } .lost-dots i:nth-child(3) { left: 50%; animation-delay: .8s; }
+.lost-dots i:nth-child(4) { left: 70%; animation-delay: 1.2s; } .lost-dots i:nth-child(5) { left: 90%; animation-delay: 1.6s; }
+@keyframes lost { 0%, 100% { transform: translateY(0); opacity: .2; } 50% { transform: translateY(-10px); opacity: .8; } }
+@media (prefers-reduced-motion: reduce) { .lost-dots i { animation: none; } }
+
+/* ---------------- who uses it, and one place instead of five tools ---------------- */
+.used-by { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; color: rgba(255, 255, 255, .62); font-size: 15px; }
+.used-by a { display: inline-flex; align-items: center; gap: 7px; color: #fff; font-weight: 700; text-decoration: none; }
+.used-by img { border-radius: 6px; }
+.compare-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 18px; background: #fff; }
+.compare { width: 100%; min-width: 640px; border-collapse: collapse; font-size: 15.5px; }
+.compare th, .compare td { padding: 16px 20px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+.compare tr:last-child td { border-bottom: 0; }
+.compare th { color: var(--muted); font-size: 13px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; background: var(--bg); }
+.compare td:first-child { color: var(--ink); font-weight: 600; width: 46%; }
+.compare td:last-child { color: var(--muted); }
+.compare td.yes { color: var(--brand); font-weight: 750; white-space: nowrap; }
+.compare td.yes::before { content: "✓"; display: inline-grid; place-items: center; width: 22px; height: 22px; margin-right: 8px; border-radius: 50%; background: color-mix(in srgb, var(--brand) 14%, #fff); font-size: 13px; }

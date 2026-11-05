@@ -30,6 +30,10 @@ const app = await createApp({
   geocode: async () => ({ street: "Kuopio Market Square", number: null, numberMetres: null, area: "Multimäki", city: "Kuopio", region: "North Savo", country: "FI" }),
 });
 await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve));
+// "Today" in the pictures is a full day whatever the hour they're taken: the demo site is put in a time zone where
+// it's mid-afternoon now.
+const offset = ((15 - new Date().getUTCHours() + 36) % 24) - 12;
+await app.pool.query("update projects set timezone = $2 where key = $1", [siteKey, offset === 0 ? "UTC" : `Etc/GMT${offset > 0 ? "-" : "+"}${Math.abs(offset)}`]);
 const BASE = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
 
 // Addresses that the city database places around the world, found by trying random ones.

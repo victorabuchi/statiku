@@ -7,7 +7,10 @@
 <meta name="description" content="See who's on your site right now, where they came from, and which visits become customers. Live globe, every source to the sale, your history imported, and trackers for anything else.">
 <meta property="og:title" content="Statiku: see who's on your site right now">
 <meta property="og:description" content="Live analytics for websites, SaaS and apps, from the first visit to the sale.">
-<meta property="og:image" content="/site/film/d-live-world.webp">
+<meta property="og:image" content="{{ORIGIN}}/site/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#08110f">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="preload" href="{{FONT}}" as="font" type="font/woff2" crossorigin>
@@ -24,6 +27,7 @@
   <p class="note">Free for 30 days. No card needed.</p>
   <div class="showcase" id="showcase"><div class="film" id="film" data-film data-scenes="main" data-v="{{V_FILMDATA}}"></div></div>
   <p class="demo-note">Real screens, with demo data.</p>
+  <p class="used-by">Used by <a href="https://notchlight.com" rel="noopener"><img src="/site/notchlight.png" alt="" width="22" height="22">Notchlight</a> to follow every visit, from the first page to the licence.</p>
 </div></section>
 
 <section class="strip" aria-label="Works with"><div class="wrap">
@@ -35,6 +39,23 @@
   <div class="center"><span class="kicker">Beyond the visit</span><h2>Watch your site at work, live.</h2>
     <p class="sub">A scoreboard for launch day, every visitor moving through your pages, a score for every page, heatmaps, page speed and errors, and any number you want to follow.</p></div>
   <div class="showcase"><div class="film" data-film data-scenes="more" data-v="{{V_FILMDATA}}"></div></div>
+</div></section>
+
+<section class="section" id="compare"><div class="wrap">
+  <div class="center"><span class="kicker">One place</span><h2>Instead of five tools.</h2>
+    <p class="sub">What a site usually needs several products for, in one, on every plan.</p></div>
+  <div class="compare-wrap"><table class="compare">
+    <thead><tr><th>What you see</th><th>In Statiku</th><th>What it usually takes</th></tr></thead>
+    <tbody>
+      <tr><td>Who's on your site right now, on a globe and moving through your pages</td><td class="yes">Included</td><td>A realtime analytics tool</td></tr>
+      <tr><td>Visitors, sources, pages, countries, devices and campaigns, for any period</td><td class="yes">Included</td><td>A web analytics tool</td></tr>
+      <tr><td>Where people click and how far down they read</td><td class="yes">Included</td><td>A heatmap tool</td></tr>
+      <tr><td>Page speed for real visitors, script errors and broken pages</td><td class="yes">Included</td><td>A performance monitor and an error tracker</td></tr>
+      <tr><td>Revenue by source, campaign and page, from Stripe or Polar</td><td class="yes">Included</td><td>A spreadsheet and your payment provider's reports</td></tr>
+      <tr><td>Anything else you want to follow, charted any way you like</td><td class="yes">Included</td><td>A metrics service</td></tr>
+      <tr><td>A live board for the TV, and a weekly report by email or Slack</td><td class="yes">Included</td><td>A dashboard tool, and someone to write the report</td></tr>
+    </tbody>
+  </table></div>
 </div></section>
 
 <section class="section alt" id="how"><div class="wrap">
@@ -57,6 +78,10 @@
 <section class="section alt" id="faq"><div class="wrap narrow">
   <div class="center"><span class="kicker">Questions</span><h2>Good to know.</h2></div>
   <details><summary>Can I bring my data from Google Analytics?</summary><p>Yes. Sign in with Google and pick your property, or download a CSV from Google Analytics and add it. Plausible, GitHub releases and files from most other tools work too.</p></details>
+  <details><summary>What can I track besides my website?</summary><p>Anything you can send from a script, a server or a device: installs, sales, a score, a sensor's reading, a server's status. Each value is a number, a word or a yes/no, with labels to split it by, and each tracker is charted as a line, bars, a pie or a table. See <a href="/docs#trackers">the docs</a>.</p></details>
+  <details><summary>Do heatmaps record my visitors' screens?</summary><p>No. Statiku notes where on a page a click landed (and the text of the link or button) and how far down the page a visit read, and draws the heat over your real page. Nothing records the screen or what anyone types.</p></details>
+  <details><summary>Can I ask questions about my numbers?</summary><p>Yes. "What changed?" explains any period against the one before: the sources, pages, countries and devices behind the change, and the busiest and quietest days. Questions in your own words are answered from the same numbers.</p></details>
+  <details><summary>Can I show it on a TV, or share it?</summary><p>Every site has a TV view: who's on it now and where, today's conversions and takings, and a moment for every sale. Share it at a link of its own for a launch day or a team channel, and turn the link off whenever you like.</p></details>
   <details><summary>How exact is the location?</summary><p>Every visitor is placed in their approximate city, from their IP address, while they're on your site; the city is never stored. If you turn it on, visitors can also choose to share their exact location, and then show on their street. It's off unless you turn it on, and they're always asked first.</p></details>
   <details><summary>Where is my data kept?</summary><p>In the EU, in Stockholm, Sweden. See the <a href="/privacy">privacy policy</a> and the <a href="/dpa">data processing agreement</a>.</p></details>
   <details><summary>What happens when my trial ends?</summary><p>Choose a plan to keep seeing your reports. If you don't, Statiku keeps counting for you, and everything is there when you do.</p></details>

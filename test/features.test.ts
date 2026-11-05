@@ -589,3 +589,17 @@ test("a tracker's analytics: by the hour, total or average, split by a label, an
   assert.ok(seconds.Online >= 44 && seconds.Online <= 46 && seconds.Offline === 5, JSON.stringify(seconds));
   assert.equal((await as(`/api/sites/${key}/trackers/Nope?range=today`)).status, 404);
 });
+
+test("Statiku's own pages: the docs with this server's address, a 404 for an address that's no page, and the app's own", { skip }, async () => {
+  const docs = await fetch(`${base}/docs`);
+  assert.equal(docs.status, 200);
+  const text = await docs.text();
+  assert.match(text, /\/v1\/track/);
+  assert.doesNotMatch(text, /\{\{ORIGIN\}\}/);
+  const lost = await fetch(`${base}/no-such-page`);
+  assert.equal(lost.status, 404);
+  assert.match(await lost.text(), /No one's on this page/);
+  for (const path of ["/", "/login", "/trackers", "/trackers/new", "/sites/new", "/sites/p_abcdefghij/live", "/trackers/p_abcdefghij/Home%20goals"]) {
+    assert.equal((await fetch(`${base}${path}`)).status, 200, path);
+  }
+});
