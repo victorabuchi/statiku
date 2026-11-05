@@ -25,15 +25,19 @@ say "Opening ports 80 and 443"
 # Oracle's Ubuntu lets in only SSH; HTTP and HTTPS too, first, ahead of its final REJECT rule (other hosts' Ubuntu
 # lets everything in, and this changes nothing there). The network's security list or firewall has to allow them as
 # well (see docs/OPERATIONS.md).
-for port in 443 80; do
-  iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport "$port" -j ACCEPT
-done
-if command -v netfilter-persistent >/dev/null; then netfilter-persistent save; fi
+# A minimal image may have no iptables at all, and then nothing to open.
+if command -v iptables >/dev/null; then
+  for port in 443 80; do
+    iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -p tcp --dport "$port" -j ACCEPT
+  done
+  if command -v netfilter-persistent >/dev/null; then netfilter-persistent save; fi
+fi
 
 say "Installing Docker"
+# Named in full, as a minimal image may lack the smaller ones (Ubuntu 24.04 or 26.04, Minimal or not).
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y docker.io docker-compose-v2 docker-buildx git
+apt-get install -y docker.io docker-compose-v2 docker-buildx git openssh-client openssl ca-certificates
 systemctl enable --now docker
 
 say "Fetching Statiku"
