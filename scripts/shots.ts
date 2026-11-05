@@ -148,7 +148,7 @@ async function capture(set: "desktop" | "phone") {
   const click = (expr: string) => page.evaluate(`(${expr})?.click()`);
   // A page, once what it shows has arrived (a report can take a few seconds on a cold database).
   const READY: [RegExp, string][] = [
-    [/^\/$/, ".site-card"], [/\/live$/, "button.bar-row"], [/\/match$/, ".board"], [/\/heatmaps$/, ".heat-stage"], [/\/numbers$/, ".number-tile"], [/\/import$/, ".import-source"],
+    [/^\/$/, ".site-card"], [/\/live$/, "button.bar-row"], [/\/tv$/, ".board"], [/\/heatmaps$/, ".heat-stage"], [/\/numbers$/, ".number-tile"], [/\/import$/, ".import-source"],
     [/\/settings$/, "#alerts"], [/\/setup$/, ".status-card"], [/\/new$/, "#f-address"], [/./, "button.kpi"],
   ];
   const open = async (path: string, settle = 1200) => {
@@ -177,7 +177,7 @@ async function capture(set: "desktop" | "phone") {
   await shot("live-street");
 
   // The match view: today's scoreboard, then a sale landing as a goal.
-  await open(`/sites/${siteKey}/match`, 2500);
+  await open(`/sites/${siteKey}/tv`, 2500);
   await rect("matchNow", `document.querySelector(".board .stat.now b")`);
   await rect("matchGoals", `document.querySelectorAll(".board .stat b")[2]`);
   await rect("shareButton", byText(".match-top button", "Share"));
@@ -330,14 +330,14 @@ async function capture(set: "desktop" | "phone") {
   await shot("email");
   // And the weekly match report, each Monday.
   const report = letter({
-    heading: `${DEMO.domain}: you beat last week 3–1`,
+    heading: `${DEMO.domain}: a better week, 3 of 4 up`,
     lines: [
-      "Visitors: 2,184, up 12% on the week before.", "Visits: 2,611, up 9% on the week before.", "Goals: 318, down 4% on the week before.",
-      "Revenue: €1,486.00, up 21% on the week before.", "Star player: /pricing, rated 8.4 out of 10.", "Top scorer: Google, with 96 goals.",
-      "Assist of the week: /, seen before 204 of the goals.", "Injuries: 46 script errors, most often \"TypeError: Cannot read properties of undefined (reading 'version')\".",
+      "Visitors: 2,184, up 12% on the week before.", "Visits: 2,611, up 9% on the week before.", "Conversions: 318, down 4% on the week before.",
+      "Revenue: €1,486.00, up 21% on the week before.", "Top page: /pricing, scored 8.4 out of 10.", "Top source: Google, with 96 conversions.",
+      "The page that helped most: /, seen before 204 of the conversions.", "Problems: 46 script errors, most often \"TypeError: Cannot read properties of undefined (reading 'version')\".",
     ],
     button: { label: "Open last week's report", url: `${BASE}/sites/${siteKey}` },
-    foot: "The weekly match report. Turn it off in the site's settings.",
+    foot: "The weekly report. Turn it off in the site's settings.",
   });
   await page.setContent(report.html, { waitUntil: "load" });
   await rect("reportButton", byText("a", "Open last week's report"));

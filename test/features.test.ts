@@ -444,16 +444,16 @@ test("the weekly match report: last week against the week before, by email and t
   assert.ok(sent >= 1);
   const mail = mailbox.find((m) => m.subject.startsWith("report.example"));
   assert.ok(mail, JSON.stringify(mailbox.map((m) => m.subject)));
-  assert.equal(mail.subject, "report.example: you beat last week 4–0");
+  assert.equal(mail.subject, "report.example: a better week, 4 of 4 up");
   assert.match(mail.text, /Visitors: 4, up 100% on the week before\./);
-  assert.match(mail.text, /Goals: 3, up 200% on the week before\./);
+  assert.match(mail.text, /Conversions: 3, up 200% on the week before\./);
   assert.match(mail.text, /Revenue: €49\.00, up 158% on the week before\./);
-  assert.match(mail.text, /Top scorer: Hacker News, with 2 goals\./);
-  assert.match(mail.text, /Assist of the week: \/pricing, seen before 3 of the goals\./);
-  assert.match(mail.text, /Star player: |Injuries: none\./);
+  assert.match(mail.text, /Top source: Hacker News, with 2 conversions\./);
+  assert.match(mail.text, /The page that helped most: \/pricing, seen before 3 of the conversions\./);
+  assert.match(mail.text, /Problems: none\./);
   const posted = slack.find((p) => p.url === hook);
   assert.ok(posted);
-  assert.match(posted.body.text, /^:soccer: \*report\.example: you beat last week 4–0\*/);
+  assert.match(posted.body.text, /^:bar_chart: \*report\.example: a better week, 4 of 4 up\*/);
   // Once a week.
   const again = await app.jobs!.sendReports(new Date(w.due.getTime() + 3600_000));
   assert.equal(again, 0);

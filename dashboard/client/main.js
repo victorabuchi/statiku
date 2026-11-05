@@ -45,8 +45,8 @@ const ICONS = {
   heat: '<path d="M10 17c3 0 5-2.1 5-5 0-3.4-2.6-5.2-3.4-8.5-1.7 1.1-2.6 2.7-2.6 4.6-.8-.6-1.4-1.5-1.6-2.6C5.9 7.2 5 9.3 5 12c0 2.9 2 5 5 5Z"/><path d="M10 17c-1.3 0-2.2-1-2.2-2.3 0-1.5 1.2-2.2 2.2-3.7 1 1.5 2.2 2.2 2.2 3.7 0 1.3-.9 2.3-2.2 2.3Z"/>',
   // A plaster: injuries.
   injury: '<rect x="2.6" y="7.2" width="14.8" height="5.6" rx="2.8" transform="rotate(-40 10 10)"/><path d="M8.6 9.2h.01M11.4 9.2h.01M8.6 10.8h.01M11.4 10.8h.01" stroke-width="2"/>',
-  // A football: the match view.
-  ball: '<circle cx="10" cy="10" r="7"/><path d="m10 7 2.9 2.1-1.1 3.4H8.2L7.1 9.1Z"/><path d="M10 3v4M12.9 9.1l3.6-1.3M11.8 12.5l2.3 3.1M8.2 12.5l-2.3 3.1M7.1 9.1 3.5 7.8"/>',
+  // A flat-screen television: the TV view.
+  tv: '<rect x="2.4" y="3.4" width="15.2" height="10.6" rx="2.2" fill="currentColor" fill-opacity=".22" stroke-width="2"/><path d="M7.2 16.8h5.6" stroke-width="2.3"/>',
   // A pulse: a tracker, anything a site sends.
   track: '<path d="M2.5 10.5h3.2l2-5.2 3.4 9.4 2.1-5.6h4.3"/>',
   // A number sign.
@@ -376,7 +376,7 @@ function shell(site, active, content) {
         navItem(`/sites/${site.key}`, "chart", "Analytics", active === "analytics"),
         navItem(`/sites/${site.key}/live`, "live", "Live view", active === "live",
           h("span", { class: "count", id: "nav-live", hidden: !site.live }, h("i", { class: "dot pulse" }), h("span", { text: String(site.live) }))),
-        navItem(`/sites/${site.key}/match`, "ball", "Match view", false),
+        navItem(`/sites/${site.key}/tv`, "tv", "TV view", false),
         navItem(`/sites/${site.key}/heatmaps`, "heat", "Heatmaps", active === "heatmaps"),
         navItem(`/sites/${site.key}/setup`, "code", "Setup", active === "setup"),
         navItem(`/sites/${site.key}/import`, "history", "Import history", active === "import"),
@@ -540,7 +540,7 @@ function authLayout(...kids) {
   return h("div", { class: "auth" }, h("div", { class: "box" },
     // Back to the landing page, loaded whole: the server shows it to whoever isn't signed in.
     h("a", { class: "logo", href: "/", "data-external": true, "aria-label": "Statiku home" }, h("img", { src: LOGO, alt: "" }), h("span", { text: "Statiku" })), kids,
-    h("p", { class: "promise" }, h("span", { text: "No cookies on your visitors" }), h("span", { text: "No IP addresses stored" }), h("span", { text: "Data kept in the EU" }))));
+    h("p", { class: "promise" }, h("span", { text: "Live, from the first visit" }), h("span", { text: "Every source, to the sale" }), h("span", { text: "Track anything" }))));
 }
 
 function authPage(mode) {
@@ -868,7 +868,7 @@ async function setupPage(key) {
   };
   drawPlatform();
   const mail = `mailto:?subject=${encodeURIComponent(`Add Statiku analytics to ${domain}`)}&body=${encodeURIComponent(
-    `Hi,\n\nCould you add Statiku analytics to ${domain}? It's one line, to paste just before </head> on every page:\n\n${snippet}\n\nIt sets no cookies and is under 10 KB, so it won't slow the site down.\n\nThanks!`)}`;
+    `Hi,\n\nCould you add Statiku analytics to ${domain}? It's one line, to paste just before </head> on every page:\n\n${snippet}\n\nIt's under 10 KB, so it won't slow the site down.\n\nThanks!`)}`;
 
   const result = h("div", { role: "status" });
   const checkButton = h("button", {
@@ -895,7 +895,7 @@ async function setupPage(key) {
         h("div", { class: "card-head" }, h("h2", { text: "1. Copy your tracking code" })),
         h("div", { class: "card-body", style: { display: "grid", gap: "10px" } },
           h("div", { class: "code-block" }, snippet, copyButton),
-          h("p", { class: "muted", text: "It's under 10 KB, sets no cookies and needs no consent banner. Add it to every page you want to count." }))),
+          h("p", { class: "muted", text: "It's under 10 KB. Add it to every page you want to count." }))),
       h("div", { class: "card" },
         h("div", { class: "card-head" }, h("h2", { text: "2. Add it to your website" }), h("span", { class: "sub", text: "Pick what your site is built with." })),
         h("div", { class: "card-body", style: { display: "grid", gap: "16px" } }, pills, steps,
@@ -1295,14 +1295,14 @@ function insightCards(x, key) {
     body.replaceChildren(tab === "pages"
       ? bars(a.pages, { head: ["Page", "Goals it set up"] })
       : rows.length ? h("div", { class: "table-wrap" }, h("table", {},
-        h("thead", {}, h("tr", {}, [tab === "sources" ? "Source" : "Campaign", "Scored", "Assisted", "Started"].map((t) => h("th", { text: t })))),
+        h("thead", {}, h("tr", {}, [tab === "sources" ? "Source" : "Campaign", "Converted", "Helped", "First visit"].map((t) => h("th", { text: t })))),
         h("tbody", {}, rows.map((s) => h("tr", {}, h("td", { text: s.label }), h("td", { text: int(s.scored) }), h("td", { text: int(s.assisted) }), h("td", { text: int(s.opened) }))))))
         : h("p", { class: "empty-note", text: tab === "sources" ? "No goals in this period." : "None of this period's goals came from a tagged campaign." }));
   };
   show();
   const assistsCard = card("Assists", a.goals
     ? h("div", { class: "stack tight" }, body,
-      h("p", { class: "help", text: "Scored: the goal came in a visit from it. Assisted: an earlier visit that day came from it. Started: the day's first visit did. Pages: those seen that day before the goal." }))
+      h("p", { class: "help", text: "Converted: the goal came in a visit from it. Helped: an earlier visit that day came from it. First visit: the day's first visit did. Pages: those seen that day before the goal." }))
     : h("p", { class: "empty-note" }, "No goals in this period. Goals are sign-ups, sales and the events you choose in ", h("a", { href: `/sites/${key}/settings#goals`, text: "Settings" }), "."),
   { sub: a.goals ? `${int(a.goals)} ${a.goals === 1 ? "goal" : "goals"}${a.multiVisit ? `, ${int(a.multiVisit)} after more than one visit that day` : ""}` : null, end: a.goals ? tabsHost : null });
 
@@ -1645,7 +1645,7 @@ async function livePage(key) {
 
   return h("div", { class: "page" },
     pageHead([icon("live", 20), h("h1", { text: "Live view" }), connection, h("span", { class: "muted", text: site?.domains[0] }), updated],
-      [h("a", { class: "btn", href: `/sites/${key}/match` }, icon("ball", 16), "Match view"), h("a", { class: "btn", href: `/sites/${key}` }, icon("chart", 16), "Analytics")]),
+      [h("a", { class: "btn", href: `/sites/${key}/tv` }, icon("tv", 16), "TV view"), h("a", { class: "btn", href: `/sites/${key}` }, icon("chart", 16), "Analytics")]),
     kpis,
     h("div", { class: "grid g-globe" }, globeCard,
       h("div", { class: "stack" },
@@ -1656,7 +1656,7 @@ async function livePage(key) {
       card("Sources right now", sources),
       card("Recent activity", feed, { sub: "Last 30 minutes" })),
     card("On the move", field.el, { sub: "Each visitor on the page they're on, live, as they go from page to page and click" }),
-    card("Momentum", momentumHost, { sub: "Who's attacking: the last two hours against the same time last week" }),
+    card("Momentum", momentumHost, { sub: "Which sources are rising: the last two hours against the same time last week" }),
     h("p", { class: "faint", style: { fontSize: "12px", marginTop: "4px" } },
       "Locations are approximate, from each visitor's IP address (",
       h("a", { href: "https://db-ip.com", target: "_blank", rel: "noopener", "data-external": "", text: "IP Geolocation by DB-IP" }),
@@ -1856,8 +1856,8 @@ async function siteSettingsPage(key) {
         now.disabled = false;
       }
     } });
-    return card("Weekly match report", h("div", { class: "form" },
-      h("p", { class: "muted", text: "Every Monday morning, last week against the week before, read like a result: visitors, visits, goals and revenue each won or lost (\"you beat last week 3–1\"), the star player, the top scorer, the assist of the week, the injuries and your numbers." }),
+    return card("Weekly report", h("div", { class: "form" },
+      h("p", { class: "muted", text: "Every Monday morning, last week against the week before: visitors, visits, conversions and revenue, the top page, the top source, the page that helped most, any problems, and your trackers." }),
       h("label", { class: "check", for: "s-report" }, weekly, h("span", {}, h("b", { text: "Email it to the site's owners." }))),
       h("div", { class: "field" }, h("label", { for: "s-slack", text: "Post it to Slack too" }), hook,
         h("span", { class: "help" }, "An incoming webhook for the channel: in Slack, ", h("code", { text: "Apps → Incoming Webhooks → Add to Slack" }), ", pick the channel, and paste its address here.")),
@@ -1869,7 +1869,7 @@ async function siteSettingsPage(key) {
     const goals = h("input", { class: "input", id: "s-goals", value: (site.goals ?? []).join(", "), placeholder: site.defaultGoals.join(", "), disabled: !owner });
     const save = h("button", { class: "btn primary", type: "button", text: "Save", hidden: !owner, onclick: () => saveSite({ goals: goals.value.trim() ? goals.value : null }, save, "Goals saved") });
     return card("Goals", h("div", { class: "form" },
-      h("p", { class: "muted", text: "The events that count as a goal: the match view cheers them, assists credit the pages and sources that led to them, and the weekly match report counts them. Anything that earns money counts too." }),
+      h("p", { class: "muted", text: "The events that count as a goal (a conversion): the TV view celebrates them, assists credit the pages and sources that led to them, and the weekly report counts them. Anything that earns money counts too." }),
       h("div", { class: "field" }, h("label", { for: "s-goals", text: "Events, separated by commas" }), goals,
         h("span", { class: "help", text: site.goals ? "Leave it empty for the usual ones." : `Empty: the usual ones, ${site.defaultGoals.slice(0, 6).join(", ")} and the like.` })),
       owner ? h("div", {}, save) : null), { id: "goals" });
@@ -2517,7 +2517,7 @@ const WALKER_COLOURS = ["#29c46b", "#2fb3eb", "#f5a524", "#e8590c", "#8b7cf6", "
 function pitch({ dark = false } = {}) {
   const zonesHost = h("div", { class: "pitch-zones" }), dotsHost = h("div", { class: "pitch-dots" }), legend = h("div", { class: "pitch-legend" });
   const empty = h("p", { class: "pitch-empty", text: "No one's on the site right now. Visitors appear here the moment they arrive." });
-  const field = h("div", { class: `pitch${dark ? " dark" : ""}` }, h("div", { class: "pitch-lines", "aria-hidden": "true" }, h("i"), h("b")), zonesHost, dotsHost, empty);
+  const field = h("div", { class: `pitch${dark ? " dark" : ""}` }, zonesHost, dotsHost, empty);
   const zones = [], walkers = new Map(), colours = new Map();
   const MAX = 8, OTHER = "\u0000other";
   const hash = (text) => { let x = 7; for (const c of text) x = (x * 31 + c.charCodeAt(0)) >>> 0; return x; };
@@ -2680,7 +2680,7 @@ function momentumView(m, { dark = false } = {}) {
     : h("p", { class: dark ? "quiet" : "empty-note", text: "No one has arrived in the last hour." });
   return h("div", { class: "momentum" }, svg,
     h("div", { class: "wave-legend" }, h("span", { text: "2 hours ago" }), h("span", { text: "Above the line: more visits than the same time last week" }), h("span", { text: "Now" })),
-    h("div", { class: "attackers-head" }, h("span", { text: "Attacking now" }), h("span", { text: "Last 30 min" })), attackers);
+    h("div", { class: "attackers-head" }, h("span", { text: "Rising now" }), h("span", { text: "Last 30 min" })), attackers);
 }
 
 // The sound of a goal, made on the spot: a short rising horn over a swell of noise. Only after "Sound on".
@@ -2748,7 +2748,7 @@ async function matchPage({ key = null, token = null }) {
   const line = (c) => h("li", { class: c.goal ? "goal" : c.kind === "number" ? "number" : "" },
     h("time", { text: clock(new Date(c.ts)).slice(0, 5) }),
     h("span", { class: "what" },
-      c.goal ? h("b", { text: `GOAL · ${eventName(c.name)}` })
+      c.goal ? h("b", { text: eventName(c.name) })
         : c.kind === "visit" ? h("span", { text: "New visitor" })
         : c.kind === "number" ? h("b", { text: `${c.name}: ${num(c.value)}` })
         : h("span", { text: eventName(c.name) }),
@@ -2756,8 +2756,8 @@ async function matchPage({ key = null, token = null }) {
     c.revenue ? h("span", { class: "money", text: money(c.revenue.minor, c.revenue.currency) }) : null);
 
   function celebrate(c) {
-    overlay.replaceChildren(h("div", { class: "goal-card" }, h("span", { class: "ball", text: "⚽" }), h("b", { text: "GOAL!" }),
-      h("span", { text: `${eventName(c.name)}${c.revenue ? ` · ${money(c.revenue.minor, c.revenue.currency)}` : ""}` }), h("span", { class: "where", text: fromWhere(c) })),
+    overlay.replaceChildren(h("div", { class: "goal-card" }, h("b", { text: `New ${eventName(c.name).toLowerCase()}` }),
+      c.revenue ? h("span", { class: "amount", text: money(c.revenue.minor, c.revenue.currency) }) : null, h("span", { class: "where", text: fromWhere(c) })),
       ...Array.from({ length: 36 }, (_, i) => h("i", { class: "confetti", style: { "--a": `${(i * 360) / 36}deg`, "--d": `${120 + ((i * 37) % 140)}px`, "--c": ["#29c46b", "#fff", "#ffd60a", "#4cc9f0"][i % 4] } })));
     overlay.hidden = false;
     overlay.classList.remove("play");
@@ -2803,10 +2803,10 @@ async function matchPage({ key = null, token = null }) {
       h("section", { class: "board" },
         h("div", { class: "stat now" }, h("span", { text: "On the site now" }), nowEl),
         h("div", { class: "stat" }, h("span", { text: "Visitors today" }), visitorsEl),
-        h("div", { class: "stat" }, h("span", { text: "Goals today" }), goalsEl),
+        h("div", { class: "stat" }, h("span", { text: "Conversions today" }), goalsEl),
         h("div", { class: "stat" }, h("span", { text: "Takings today" }), takingsEl)),
       numbers,
-      h("section", { class: "panel pitch-panel" }, h("h2", { text: "On the pitch: who's where, right now" }), field.el),
+      h("section", { class: "panel pitch-panel" }, h("h2", { text: "Who's where, right now" }), field.el),
       h("section", { class: "match-main" },
         h("div", { class: "panel" }, h("h2", { text: "Momentum" }), momentumView(d.momentum, { dark: true })),
         h("div", { class: "panel" }, h("h2", { text: "Commentary" }), feed)),
@@ -2898,7 +2898,7 @@ async function render() {
   const join = path.match(/^\/join\/([\w-]{20,80})$/);
   const reset = path.match(/^\/reset\/([\w-]{20,80})$/);
   const sharedMatch = path.match(/^\/m\/([\w-]{20,40})$/);
-  const ownMatch = path.match(/^\/sites\/(p_[a-z0-9]+)\/match$/);
+  const ownMatch = path.match(/^\/sites\/(p_[a-z0-9]+)\/(?:tv|match)$/);
   try {
     if (sharedMatch) {
       const content = await matchPage({ token: sharedMatch[1] });
@@ -2937,7 +2937,7 @@ async function render() {
       if (!site) return go("/", true);
       const content = await matchPage({ key: site.key });
       if (run === rendering) root.replaceChildren(content);
-      document.title = `Match view · ${site.name} · Statiku`;
+      document.title = `TV view · ${site.name} · Statiku`;
       return;
     }
     const route = ROUTES.find(([re]) => re.test(path));

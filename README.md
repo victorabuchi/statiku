@@ -1,8 +1,8 @@
 # Statiku
 
 Live analytics for websites, SaaS and apps. Statiku shows who is on your site right now, where they came from, and
-which sources bring the visits, the sign-ups, the downloads, the installs and the sales. It sets no cookies, so it
-needs no cookie banner, and the data is kept in the EU. Exact location only for visitors who opt in.
+which sources bring the visits, the sign-ups, the downloads, the installs and the sales, and it tracks anything else
+a site sends, charted any way you like. The data is kept in the EU. Exact location only for visitors who opt in.
 
 ```
 visit  →  download  →  install  →  trial  →  purchase
@@ -118,7 +118,7 @@ An install is matched to the website by its network: when the app first starts, 
 from the same network in the day before, and gets that visit's source. Installs with no download before them (Homebrew,
 another network, a link passed on) show as not matched. The match is an estimate, and the dashboard says so.
 
-## Send any number
+## Trackers: track anything
 
 Anything a site measures beyond its visits (match scores, installs, sales, sensor readings) can be sent from a script,
 a server or a device, with the secret key from the site's **Numbers** page, and shows there as a live tile:

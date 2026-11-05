@@ -1,7 +1,6 @@
-// The weekly match report: each Monday from 08:00 in the site's time zone, last week against the week before, read
-// like a result. Visitors, visits, goals and revenue are each won, lost or drawn ("you beat last week 3–1"), with
-// the star player (the best rated page), the top scorer (the source with the most goals), the assist of the week, the
-// injuries and the site's numbers. By email to the site's owners, and to Slack if the site has an incoming webhook.
+// The weekly report: each Monday from 08:00 in the site's time zone, last week against the week before: visitors,
+// visits, conversions and revenue, each up or down ("3 of 4 up"), with the top page (the best scored), the top source
+// (the most conversions), the page that helped most, any problems, and the site's trackers. By email to the site's owners, and to Slack if the site has an incoming webhook.
 import type pg from "pg";
 import { letter, type Mailer } from "./mail.ts";
 import { goalsOf } from "./match.ts";
@@ -63,12 +62,12 @@ export async function weekReport(pool: pg.Pool, site: ReportSite, origin: string
   const games: [string, number, number, (n: number) => string][] = [
     ["Visitors", now7.visitors, before7.visitors, int],
     ["Visits", now7.visits, before7.visits, int],
-    ["Goals", now7.goals, before7.goals, int],
+    ["Conversions", now7.goals, before7.goals, int],
     ...(cur ? [["Revenue", takings(earned.totals), takings(earned.previous), (n: number) => money(n, cur)] as [string, number, number, (n: number) => string]] : []),
   ];
   const won = games.filter(([, a, b]) => a > b).length, lost = games.filter(([, a, b]) => a < b).length;
   const domain = site.domains[0];
-  const heading = won > lost ? `${domain}: you beat last week ${won}–${lost}` : won < lost ? `${domain}: the week before won ${lost}–${won}` : `${domain}: a ${won}–${lost} draw with the week before`;
+  const heading = won > lost ? `${domain}: a better week, ${won} of ${games.length} up` : won < lost ? `${domain}: a quieter week, ${lost} of ${games.length} down` : `${domain}: a week much like the one before`;
 
   const best = rated.pages.find((p) => p.path === rated.best);
   const scorer = helped.sources[0];
@@ -80,10 +79,10 @@ export async function weekReport(pool: pg.Pool, site: ReportSite, origin: string
   ].filter(Boolean);
   const lines = [
     ...games.map(([name, a, b, fmt]) => `${name}: ${fmt(a)}, ${change(a, b)}.`),
-    best ? `Star player: ${best.path}, rated ${best.rating.toFixed(1)} out of 10.` : null,
-    scorer?.scored ? `Top scorer: ${scorer.label}, with ${int(scorer.scored)} ${scorer.scored === 1 ? "goal" : "goals"}.` : null,
-    assist?.v ? `Assist of the week: ${assist.label}, seen before ${int(assist.v)} of the goals.` : null,
-    sore.length ? `Injuries: ${sore.join("; ")}.` : "Injuries: none.",
+    best ? `Top page: ${best.path}, scored ${best.rating.toFixed(1)} out of 10.` : null,
+    scorer?.scored ? `Top source: ${scorer.label}, with ${int(scorer.scored)} ${scorer.scored === 1 ? "conversion" : "conversions"}.` : null,
+    assist?.v ? `The page that helped most: ${assist.label}, seen before ${int(assist.v)} of the conversions.` : null,
+    sore.length ? `Problems: ${sore.join("; ")}.` : "Problems: none.",
     numbers.length ? `Trackers: ${numbers.map((n) => `${n.name} ${n.kind === "text" ? n.value : Number(n.value).toLocaleString("en-US", { maximumFractionDigits: 2 })}`).join(", ")}.` : null,
   ].filter((l): l is string => !!l);
   return { heading, lines, url: `${origin}/sites/${site.key}?range=custom&from=${w.firstDay}&to=${w.lastDay}`, score: [won, lost] };
@@ -108,11 +107,11 @@ export function createReports(o: { pool: pg.Pool; mailer: Mailer; origin: () => 
       [site.id],
     )).rows.map((r) => r.email) : []);
     for (const email of recipients) {
-      await mailer({ to: email, subject: report.heading, ...letter({ heading: report.heading, lines: report.lines, button: { label: "Open last week's report", url: report.url }, foot: "The weekly match report. Turn it off in the site's settings." }) })
+      await mailer({ to: email, subject: report.heading, ...letter({ heading: report.heading, lines: report.lines, button: { label: "Open last week's report", url: report.url }, foot: "The weekly report. Turn it off in the site's settings." }) })
         .catch((e) => console.error("Report email:", (e as Error).message));
     }
     if (site.slack_webhook) {
-      const text = `:soccer: *${report.heading}*\n${report.lines.map((l) => `• ${l}`).join("\n")}\n<${report.url}|Open last week's report>`;
+      const text = `:bar_chart: *${report.heading}*\n${report.lines.map((l) => `• ${l}`).join("\n")}\n<${report.url}|Open last week's report>`;
       await post(new URL(site.slack_webhook), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) })
         .catch((e) => console.error("Report to Slack:", (e as Error).message));
     }

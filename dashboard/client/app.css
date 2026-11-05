@@ -561,7 +561,7 @@ details.more .card-body { padding-top: 0; display: grid; gap: 12px; }
 .confetti { position: absolute; left: 50%; top: 50%; width: 10px; height: 10px; border-radius: 2px; background: var(--c); animation: confetti 1.6s ease-out forwards; }
 @keyframes confetti { from { transform: rotate(var(--a)) translateX(0); opacity: 1; } to { transform: rotate(var(--a)) translateX(calc(var(--d) * 2.4)) rotate(320deg); opacity: 0; } }
 @keyframes goal-pop { from { transform: scale(.4); opacity: 0; } }
-@keyframes goal-spin { from { transform: rotate(-360deg) scale(.3); } }
+.goal-card .amount { font-size: clamp(30px, 4.4vw, 60px); font-weight: 800; color: #f2f5f4; }
 @keyframes goal-fade { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
 .share-box { padding: 12px; }
 @media (max-width: 900px) { .board { grid-template-columns: 1fr 1fr; } .match-main { grid-template-columns: 1fr; } }
