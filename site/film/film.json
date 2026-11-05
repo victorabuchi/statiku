@@ -9,10 +9,24 @@
    "live-finland": "d-live-finland.webp",
    "live-kuopio": "d-live-kuopio.webp",
    "live-street": "d-live-street.webp",
+   "match": "d-match.webp",
+   "match-goal": "d-match-goal.webp",
+   "pitch-1": "d-pitch-1.webp",
+   "pitch-2": "d-pitch-2.webp",
+   "pitch-3": "d-pitch-3.webp",
    "an-30": "d-an-30.webp",
    "an-range": "d-an-range.webp",
    "an-90": "d-an-90.webp",
    "an-hn": "d-an-hn.webp",
+   "ratings": "d-ratings.webp",
+   "injuries": "d-injuries.webp",
+   "ask": "d-ask.webp",
+   "revenue": "d-revenue.webp",
+   "heat": "d-heat.webp",
+   "heat-read": "d-heat-read.webp",
+   "numbers": "d-numbers.webp",
+   "numbers-live": "d-numbers-live.webp",
+   "numbers-send": "d-numbers-send.webp",
    "conv": "d-conv.webp",
    "app": "d-app.webp",
    "import": "d-import.webp",
@@ -21,7 +35,8 @@
    "setup-wait": "d-setup-wait.webp",
    "setup-ok": "d-setup-ok.webp",
    "alerts": "d-alerts.webp",
-   "email": "d-email.webp"
+   "email": "d-email.webp",
+   "report": "d-report.webp"
   },
   "rects": {
    "liveCount": {
@@ -48,6 +63,42 @@
     "w": 285,
     "h": 30
    },
+   "matchNow": {
+    "x": 57,
+    "y": 141,
+    "w": 320,
+    "h": 97
+   },
+   "matchGoals": {
+    "x": 727,
+    "y": 141,
+    "w": 214,
+    "h": 58
+   },
+   "shareButton": {
+    "x": 1138,
+    "y": 32,
+    "w": 60,
+    "h": 32
+   },
+   "pitchZone": {
+    "x": 74,
+    "y": 160,
+    "w": 274,
+    "h": 167
+   },
+   "pitchMoved": {
+    "x": 646,
+    "y": 160,
+    "w": 274,
+    "h": 167
+   },
+   "kickLabel": {
+    "x": 711,
+    "y": 274,
+    "w": 92,
+    "h": 21
+   },
    "rangeButton": {
     "x": 885,
     "y": 76,
@@ -72,21 +123,81 @@
     "w": 179,
     "h": 30
    },
+   "motm": {
+    "x": 787,
+    "y": 117,
+    "w": 448,
+    "h": 44
+   },
+   "vital": {
+    "x": 526,
+    "y": 656,
+    "w": 229,
+    "h": 108
+   },
+   "askButton": {
+    "x": 1114,
+    "y": 120,
+    "w": 121,
+    "h": 32
+   },
+   "changes": {
+    "x": 285,
+    "y": 194,
+    "w": 950,
+    "h": 164
+   },
+   "callout": {
+    "x": 285,
+    "y": 158,
+    "w": 950,
+    "h": 40
+   },
+   "topClick": {
+    "x": 937,
+    "y": 209,
+    "w": 298,
+    "h": 30
+   },
+   "heatToggle": {
+    "x": 709,
+    "y": 145,
+    "w": 174,
+    "h": 24
+   },
+   "scrollMark": {
+    "x": 778,
+    "y": 702,
+    "w": 98,
+    "h": 12
+   },
+   "tileWidgets": {
+    "x": 1017,
+    "y": 431,
+    "w": 239,
+    "h": 134
+   },
+   "copyCurl": {
+    "x": 1149,
+    "y": 299,
+    "w": 76,
+    "h": 32
+   },
    "convHN": {
     "x": 285,
-    "y": 167,
+    "y": 235,
     "w": 604,
     "h": 39
    },
    "funnel": {
     "x": 285,
-    "y": 16,
+    "y": 84,
     "w": 144,
     "h": 20
    },
    "installs": {
     "x": 264,
-    "y": 60,
+    "y": 128,
     "w": 239,
     "h": 106
    },
@@ -137,6 +248,12 @@
     "y": 267,
     "w": 123,
     "h": 43
+   },
+   "reportButton": {
+    "x": 400,
+    "y": 455,
+    "w": 207,
+    "h": 43
    }
   }
  },
@@ -150,10 +267,24 @@
    "live-finland": "p-live-finland.webp",
    "live-kuopio": "p-live-kuopio.webp",
    "live-street": "p-live-street.webp",
+   "match": "p-match.webp",
+   "match-goal": "p-match-goal.webp",
+   "pitch-1": "p-pitch-1.webp",
+   "pitch-2": "p-pitch-2.webp",
+   "pitch-3": "p-pitch-3.webp",
    "an-30": "p-an-30.webp",
    "an-range": "p-an-range.webp",
    "an-90": "p-an-90.webp",
    "an-hn": "p-an-hn.webp",
+   "ratings": "p-ratings.webp",
+   "injuries": "p-injuries.webp",
+   "ask": "p-ask.webp",
+   "revenue": "p-revenue.webp",
+   "heat": "p-heat.webp",
+   "heat-read": "p-heat-read.webp",
+   "numbers": "p-numbers.webp",
+   "numbers-live": "p-numbers-live.webp",
+   "numbers-send": "p-numbers-send.webp",
    "conv": "p-conv.webp",
    "app": "p-app.webp",
    "import": "p-import.webp",
@@ -162,7 +293,8 @@
    "setup-wait": "p-setup-wait.webp",
    "setup-ok": "p-setup-ok.webp",
    "alerts": "p-alerts.webp",
-   "email": "p-email.webp"
+   "email": "p-email.webp",
+   "report": "p-report.webp"
   },
   "rects": {
    "liveCount": {
@@ -170,6 +302,42 @@
     "y": 215,
     "w": 133,
     "h": 34
+   },
+   "matchNow": {
+    "x": 29,
+    "y": 145,
+    "w": 146,
+    "h": 53
+   },
+   "matchGoals": {
+    "x": 29,
+    "y": 266,
+    "w": 146,
+    "h": 32
+   },
+   "shareButton": {
+    "x": 202,
+    "y": 58,
+    "w": 60,
+    "h": 32
+   },
+   "pitchZone": {
+    "x": 46,
+    "y": 150,
+    "w": 143,
+    "h": 107
+   },
+   "pitchMoved": {
+    "x": 46,
+    "y": 269,
+    "w": 143,
+    "h": 107
+   },
+   "kickLabel": {
+    "x": 84,
+    "y": 333,
+    "w": 92,
+    "h": 21
    },
    "rangeButton": {
     "x": 16,
@@ -195,23 +363,47 @@
     "w": 179,
     "h": 30
    },
-   "convHN": {
-    "x": 33,
-    "y": 167,
-    "w": 604,
-    "h": 39
+   "askButton": {
+    "x": 90,
+    "y": 190,
+    "w": 121,
+    "h": 32
    },
-   "funnel": {
+   "changes": {
     "x": 33,
-    "y": 16,
-    "w": 144,
-    "h": 20
+    "y": 344,
+    "w": 324,
+    "h": 244
    },
-   "installs": {
+   "topClick": {
+    "x": 33,
+    "y": 662,
+    "w": 324,
+    "h": 30
+   },
+   "heatToggle": {
+    "x": 183,
+    "y": 237,
+    "w": 174,
+    "h": 24
+   },
+   "scrollMark": {
+    "x": 300,
+    "y": 506,
+    "w": 53,
+    "h": 7
+   },
+   "tileWidgets": {
     "x": 16,
-    "y": 60,
+    "y": 548,
     "w": 173,
-    "h": 98
+    "h": 126
+   },
+   "copyCurl": {
+    "x": 271,
+    "y": 272,
+    "w": 76,
+    "h": 32
    },
    "googleButton": {
     "x": 33,
@@ -245,7 +437,7 @@
    },
    "surge": {
     "x": 33,
-    "y": 185,
+    "y": 253,
     "w": 324,
     "h": 80
    },
@@ -253,6 +445,12 @@
     "x": 45,
     "y": 313,
     "w": 123,
+    "h": 43
+   },
+   "reportButton": {
+    "x": 45,
+    "y": 551,
+    "w": 207,
     "h": 43
    }
   }
