@@ -1,6 +1,7 @@
 # Is Statiku up? Every half hour GitHub asks the service, which asks its database (/healthz?deep=1). When it doesn't
 # answer three times in a row, an issue labelled "down" is opened, which GitHub emails to whoever watches this
-# repository; the issue is closed when Statiku answers again. Every half hour, because this repository is private and
+# repository; the issue is closed when Statiku answers again, which is one more email. The run itself never fails:
+# GitHub would email about every failed run, every half hour for as long as an outage lasts. Every half hour, because this repository is private and
 # GitHub counts each run as a minute: about 1,500 of the 2,000 free minutes a month. Render emails about crashes too.
 # The address is the repository variable STATIKU_URL, or else Render's address.
 name: Uptime
@@ -35,4 +36,5 @@ jobs:
             gh label create down --color B60205 --description "Statiku isn't answering" 2>/dev/null || true
             gh issue create --label down --title "Statiku is down" --body "$URL/healthz?deep=1 didn't answer three times in a row. Last answer: $answer"
           fi
-          exit 1
+          echo "Statiku isn't answering: $answer"
+          exit 0
