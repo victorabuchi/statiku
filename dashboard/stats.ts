@@ -4,6 +4,7 @@
 import type pg from "pg";
 import type { Session } from "../ingest/sessions.ts";
 import { addressOf, type Street, type Streets } from "../ingest/streets.ts";
+import { walkersOf } from "../ingest/live.ts";
 import { BILLING_COLUMNS, type Billing } from "./billing.ts";
 
 export type Site = {
@@ -425,6 +426,8 @@ export async function live(pool: pg.Pool, site: Site, present: Session[], street
     pages: countBy(present, (s) => s.exitPath),
     sources: countBy(present, (s) => s.source),
     devices: countBy(present, (s) => s.device),
+    // Each visitor's dot on the pitch: its visit's tag and the page it's on.
+    walkers: walkersOf(present),
     today, perMinute, recent, at: new Date(),
   };
 }

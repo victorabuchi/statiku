@@ -19,6 +19,7 @@
 //   GET    /api/sites/:key/imports   POST { kind: ga4 | plausible | github, … }   POST …/imports/file (form data)
 //   DELETE /api/sites/:key/imports/:id   GET …/imports/google/start → Google → /api/imports/google/callback
 //   GET    /api/sites/:key/imports/google/properties?grant=
+//   GET    /api/numbers?range=   every site's numbers, for the Websites page
 //   GET    /api/sites/:key/numbers?range=   POST …/numbers/key (a new key)   POST …/numbers/upload (CSV)   DELETE …/numbers/:name
 //   GET    /api/sites/:key/match   the match view's scoreboard   POST|DELETE …/match/link   its public link
 //   GET    /api/match/:token   GET /api/match/:token/stream   the match view at its public link, and its live feed
@@ -866,6 +867,21 @@ export async function createDashboard(options: {
 
     // ---------- Sites ----------
     if (path === "/api/sites" && method === "GET") return json(res, 200, { sites: await overview(pool, user.id, presence, (s) => void refreshIcon(s)) });
+    if (path === "/api/numbers" && method === "GET") {
+      const range = new URL(req.url ?? "/", "http://x").searchParams.get("range") ?? "today";
+      const { rows } = await pool.query(
+        `select p.key from projects p join memberships m on m.workspace_id = p.workspace_id where m.user_id = $1 order by p.created_at`,
+        [user.id],
+      );
+      const sites = [];
+      for (const { key } of rows) {
+        const site = await siteFor(pool, user.id, key);
+        if (!site || access(site.billing) === "locked") continue;
+        const report = await numbersReport(pool, site, RANGE_IDS.includes(range) ? range : "today");
+        sites.push({ key: site.key, name: site.name, domain: site.domains[0], role: site.role, hasKey: report.hasKey, numbers: report.numbers });
+      }
+      return json(res, 200, { sites });
+    }
     if (path === "/api/sites" && method === "POST") {
       const body = await readJson(req);
       const domain = domainOf(body.address);
@@ -1044,7 +1060,7 @@ export async function createDashboard(options: {
     const stop = hub.subscribe(projectId, (message) => {
       if (shared && message.startsWith('{"t":"event"')) {
         const { t, e } = JSON.parse(message);
-        message = JSON.stringify({ t, e: { ts: e.ts, name: e.name, path: e.path, country: e.country, city: e.city, source: e.source, revenue: e.revenue, first: e.first, app: e.app } });
+        message = JSON.stringify({ t, e: { ts: e.ts, name: e.name, path: e.path, country: e.country, city: e.city, source: e.source, revenue: e.revenue, first: e.first, app: e.app, s: e.s } });
       }
       res.write(`data: ${message}\n\n`);
     });

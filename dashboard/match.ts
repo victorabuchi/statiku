@@ -4,6 +4,7 @@
 import { randomBytes } from "node:crypto";
 import type pg from "pg";
 import type { Session } from "../ingest/sessions.ts";
+import { walkersOf } from "../ingest/live.ts";
 import { numbersReport } from "./numbers.ts";
 import { momentum } from "./insights.ts";
 import { BILLING_COLUMNS } from "./billing.ts";
@@ -53,6 +54,7 @@ export async function matchSummary(pool: pg.Pool, site: Site & { goals?: string[
     })),
     numbers: numbers.numbers,
     momentum: wave,
+    walkers: walkersOf(present),
   };
 }
 

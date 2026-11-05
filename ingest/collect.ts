@@ -3,7 +3,7 @@
 import { agentOf, isBot } from "./agent.ts";
 import type { Geo } from "./geo.ts";
 import type { Installs } from "./installs.ts";
-import type { Hub } from "./live.ts";
+import { tagOf, type Hub } from "./live.ts";
 import type { Streets } from "./streets.ts";
 import { hostAllowed, type Projects } from "./projects.ts";
 import { hash63, networkOf, type Salts } from "./salts.ts";
@@ -147,7 +147,7 @@ export async function collect(deps: Deps, body: string, ua: string, ip: string, 
     const beating = await deps.sessions.beat(project.id, visitor, now, hit.name === GONE);
     if (beating) {
       if (beating.place === undefined) beating.place = deps.geo.place(ip);
-      deps.hub.publish(project.id, { t: "presence" });
+      deps.hub.publish(project.id, { t: "presence", s: tagOf(beating.id), gone: hit.name === GONE });
     }
     // Leaving a page: how far down it was read and, the first time, how fast it was.
     if (hit.name === GONE && hit.props) measures(deps, project.id, pagePath, agentOf(ua, hit.width).device, hit.props, now);
@@ -161,6 +161,9 @@ export async function collect(deps: Deps, body: string, ua: string, ip: string, 
       if (x !== null && y !== null) {
         const target = text(props.t, 60);
         deps.writer.addRow("clicks", { project_id: project.id, ts: now, path: pagePath, device: agent.device, x, y, page_h: whole(props.h, 0, 1_000_000), target: target || null });
+        // Live, for the visitor's dot on the pitch.
+        const session = deps.sessions.live.get(`${project.id}:${visitor}`);
+        if (session) deps.hub.publish(project.id, { t: "click", c: { s: tagOf(session.id), path: pagePath, target: target || null, ts: now } });
       }
     } else if (hit.name === DEPTH) {
       const path = text(props.path, 512);
@@ -215,7 +218,7 @@ export async function collect(deps: Deps, body: string, ua: string, ip: string, 
     t: "event",
     e: {
       ts: now, name: hit.name, path, country, source: session.source, device: agent.device, browser: agent.browser, os: agent.os, app: false,
-      city: session.place?.city ?? null, revenue: hit.revenue, first: session.events === 1,
+      city: session.place?.city ?? null, revenue: hit.revenue, first: session.events === 1, s: tagOf(session.id),
     },
   });
   if (hit.name === "download") {

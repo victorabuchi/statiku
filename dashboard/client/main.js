@@ -11,6 +11,12 @@ import { createGlobe } from "./globe.js";
 
 // ---------- Helpers ----------
 const $ = (id) => document.getElementById(id);
+// Nothing (null, false) puts nothing on the page, as with h(): never the word "null".
+const replaceChildren = Element.prototype.replaceChildren;
+Element.prototype.replaceChildren = function (...kids) {
+  return replaceChildren.apply(this, kids.flat().filter((k) => k != null && k !== false));
+};
+
 function h(tag, props, ...kids) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(props ?? {})) {
@@ -132,10 +138,18 @@ function siteIcon(site, size = 32) {
   return img;
 }
 // A person's photo, or an empty silhouette.
+// A person's photo, or until they add one their initials on a colour of their own (the same every time).
 function photo(user, size = 32) {
   const box = h("span", { class: "photo", style: { width: `${size}px`, height: `${size}px` } });
+  const initials = (user?.name || user?.email || "").split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
   if (user?.photo) box.append(h("img", { src: `/api/me/photo?v=${user.photo}`, alt: "" }));
-  else box.append(icon("person", Math.round(size * 0.62)));
+  else if (initials) {
+    let hue = 0;
+    for (const c of user.name || user.email) hue = (hue * 31 + c.charCodeAt(0)) % 360;
+    box.classList.add("initials");
+    Object.assign(box.style, { background: `hsl(${hue} 55% 90%)`, color: `hsl(${hue} 45% 28%)`, fontSize: `${Math.round(size * 0.4)}px` });
+    box.append(initials);
+  } else box.append(icon("person", Math.round(size * 0.62)));
   return box;
 }
 // `text` with code spans: "Paste it before `</head>`."
@@ -340,7 +354,7 @@ function shell(site, active, content) {
         go("/login", true);
       }),
     ], { align: "right", width: 280 }),
-  }, state.user.photo ? h("img", { src: `/api/me/photo?v=${state.user.photo}`, alt: "" }) : icon("person", 18));
+  }, photo(state.user, 30));
 
   const topbar = h("header", { class: "topbar" },
     h("button", { class: "menu-button", type: "button", "aria-label": "Menu", "aria-controls": "sidebar", onclick: () => toggleMenu(!sidebar.classList.contains("open")) }, icon("menu", 22)),
@@ -359,7 +373,6 @@ function shell(site, active, content) {
         navItem(`/sites/${site.key}/live`, "live", "Live view", active === "live",
           h("span", { class: "count", id: "nav-live", hidden: !site.live }, h("i", { class: "dot pulse" }), h("span", { text: String(site.live) }))),
         navItem(`/sites/${site.key}/match`, "ball", "Match view", false),
-        navItem(`/sites/${site.key}/numbers`, "hash", "Numbers", active === "numbers"),
         navItem(`/sites/${site.key}/heatmaps`, "heat", "Heatmaps", active === "heatmaps"),
         navItem(`/sites/${site.key}/setup`, "code", "Setup", active === "setup"),
         navItem(`/sites/${site.key}/import`, "history", "Import history", active === "import"),
@@ -659,7 +672,63 @@ async function homePage() {
   return h("div", { class: "page" },
     pageHead([icon("websites", 20), h("h1", { text: "Websites" }), sites.length ? h("span", { class: "muted", text: `${sites.length} ${sites.length === 1 ? "site" : "sites"}` }) : null],
       sites.length ? h("a", { class: "btn primary", href: "/sites/new" }, icon("plus", 16), "Add website") : null),
-    list);
+    list, sites.length ? homeNumbers() : null);
+}
+
+// Every site's numbers on the Websites page, live: a group of tiles for each site that has some, and where to send
+// them from (each site has its own key, on its Numbers page).
+function homeNumbers() {
+  let range = saved.homeNumbersRange ?? "today", data = null;
+  const tiles = new Map();
+  const rangeTabs = h("span");
+  const body = h("div", { class: "stack" });
+  const streams = [];
+  const load = async () => {
+    rangeTabs.replaceChildren(tabs(NUMBER_RANGES.slice(0, 4), range, (id) => { range = id; saved.homeNumbersRange = id; remember(); load(); }));
+    try {
+      data = await api(`/api/numbers?range=${range}`);
+      draw();
+    } catch (err) {
+      if (!(err instanceof SignedOut)) body.replaceChildren(failure(err));
+    }
+  };
+  const draw = () => {
+    tiles.clear();
+    const withNumbers = data.sites.filter((s) => s.numbers.length);
+    if (!withNumbers.length) {
+      const own = data.sites.find((s) => s.role === "owner") ?? data.sites[0];
+      body.replaceChildren(h("div", { class: "card status-card" }, h("span", { class: "icon wait" }, icon("hash", 20)),
+        h("div", { class: "what" }, h("b", { text: "Track any number" }),
+          h("span", { class: "muted", text: "Send any number from a script, a server or a device, or upload a file of them (match scores, installs, sales, sensor readings) and it shows here as a live tile." })),
+        own ? h("a", { class: "btn", href: `/sites/${own.key}/numbers` }, "Set it up") : null));
+      return;
+    }
+    body.replaceChildren(...withNumbers.map((s) => h("div", { class: "number-group" },
+      h("div", { class: "row-between" }, h("b", { text: s.name }), h("a", { class: "btn plain", href: `/sites/${s.key}/numbers`, text: s.role === "owner" ? "Send or upload numbers" : "All of them" })),
+      h("div", { class: "grid g4 numbers" }, s.numbers.slice(0, 8).map((n) => {
+        const tile = numberTile(n);
+        tiles.set(`${s.key}:${n.name}`, tile);
+        return tile;
+      })))));
+    // New values straight onto their tiles, for up to six sites at once.
+    if (!streams.length) {
+      for (const s of withNumbers.slice(0, 6)) {
+        const stream = new EventSource(`/api/sites/${s.key}/stream`);
+        stream.onmessage = (m) => {
+          const msg = JSON.parse(m.data);
+          if (msg.t !== "number") return;
+          const tile = tiles.get(`${s.key}:${msg.n.name}`);
+          if (tile) tile.update(msg.n.value, msg.n.ts);
+          else setTimeout(load, 1500);
+        };
+        streams.push(stream);
+      }
+    }
+  };
+  onLeave(() => streams.forEach((x) => x.close()));
+  every(60_000, load);
+  queueMicrotask(load);
+  return h("section", { class: "home-numbers" }, h("div", { class: "row-between section-head" }, h("h2", {}, icon("hash", 18), "Numbers"), rangeTabs), body);
 }
 
 function siteCard(s) {
@@ -1265,7 +1334,7 @@ function askCard(key, period) {
   return card("Ask your data", h("div", { class: "stack tight" }, form, answer), { sub: "In plain words, about the period shown" });
 }
 
-// Assists and player ratings for the period, for the whole site (filters don't narrow them).
+// Assists and page scores for the period, for the whole site (filters don't narrow them).
 const ratingClass = (r) => (r >= 8 ? "r-top" : r >= 7 ? "r-good" : r >= 6 ? "r-ok" : "r-low");
 const secs = (s) => (s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`);
 function insightCards(x, key) {
@@ -1290,9 +1359,9 @@ function insightCards(x, key) {
   { sub: a.goals ? `${int(a.goals)} ${a.goals === 1 ? "goal" : "goals"}${a.multiVisit ? `, ${int(a.multiVisit)} after more than one visit that day` : ""}` : null, end: a.goals ? tabsHost : null });
 
   const best = r.pages.find((p) => p.path === r.best);
-  const ratingsCard = card("Player ratings", r.pages.length
+  const ratingsCard = card("Page scores", r.pages.length
     ? h("div", { class: "stack tight" },
-      best ? h("div", { class: "motm" }, h("span", { class: "star", text: "★" }), h("span", {}, h("b", { text: "Man of the match: " }), h("code", { text: best.path })),
+      best ? h("div", { class: "motm" }, h("span", { class: "star", text: "★" }), h("span", {}, h("b", { text: "Top page: " }), h("code", { text: best.path })),
         h("span", { class: `rating ${ratingClass(best.rating)}`, text: best.rating.toFixed(1) })) : null,
       h("div", { class: "table-wrap" }, h("table", { class: "ratings" },
         h("thead", {}, h("tr", {}, ["Page", "Rating", "Visitors", "Time", "Exits", "Assists"].map((t) => h("th", { text: t })))),
@@ -1301,7 +1370,7 @@ function insightCards(x, key) {
           h("td", { text: int(p.visitors) }), h("td", { text: secs(p.secs) }), h("td", { text: `${p.exitRate}%` }), h("td", { text: int(p.assists) })))))),
       h("p", { class: "help", text: "Out of ten: how many visitors a page reaches, how long they stay on it, the goals it sets up, and how few visits end there." }))
     : h("p", { class: "empty-note", text: "No page views in this period." }),
-  { sub: "How each page played" });
+  { sub: "How each page did, out of ten" });
   return [revenueCard(x.revenue, key), h("div", { class: "grid g2" }, assistsCard, ratingsCard), injuriesCard(x.injuries)];
 }
 
@@ -1335,7 +1404,7 @@ function revenueCard(x, key) {
   { sub: "What each source earned", end: tabsHost });
 }
 
-// Injuries: page speed as Google judges it (the 75th percentile of visits), the slowest pages, script errors and
+// Speed and errors: page speed as Google judges it (the 75th percentile of visits), the slowest pages, script errors and
 // pages that answered with an error.
 const VITALS = [
   ["lcp", "Largest paint", "How long until the page's main content shows", 2500, 4000, (v) => `${(v / 1000).toFixed(1)}s`],
@@ -1346,7 +1415,7 @@ const VITALS = [
 const grade = (v, good, poor) => (v == null ? null : v <= good ? ["good", "Good"] : v <= poor ? ["fair", "Needs work"] : ["poor", "Poor"]);
 function injuriesCard(x) {
   if (!x.vitals.samples && !x.errors.length && !x.broken.length) {
-    return card("Injuries", h("p", { class: "empty-note", text: "Nothing measured in this period. The tracking script measures each page's speed as visitors leave it, and notes script errors and broken pages." }), { sub: "Speed, errors and broken pages" });
+    return card("Speed and errors", h("p", { class: "empty-note", text: "Nothing measured in this period. The tracking script measures each page's speed as visitors leave it, and notes script errors and broken pages." }), { sub: "How fast pages load for visitors, and what breaks" });
   }
   const tiles = h("div", { class: "grid g4" }, VITALS.map(([id, label, hint, good, poor, fmt]) => {
     const v = x.vitals[id], g = grade(v, good, poor);
@@ -1358,7 +1427,7 @@ function injuriesCard(x) {
     const [, , , good, poor, fmt] = VITALS[i], g = grade(v, good, poor);
     return h("td", {}, v == null ? "–" : h("span", { class: `grade ${g[0]}`, text: fmt(v) }));
   };
-  return card("Injuries", h("div", { class: "stack" },
+  return card("Speed and errors", h("div", { class: "stack" },
     tiles,
     x.slow.length ? h("div", {}, h("h3", { class: "minor", text: "Slowest pages" }),
       table(["Page", "Largest paint", "Response", "Shift", "Visits measured"], x.slow.map((s) => h("tr", {}, h("td", { class: "path", text: s.path }), cellGrade(s.lcp, 0), cellGrade(s.inp, 1), cellGrade(s.cls, 2), h("td", { text: int(s.n) }))))) : null,
@@ -1369,7 +1438,7 @@ function injuriesCard(x) {
     x.broken.length ? h("div", {}, h("h3", { class: "minor", text: "Broken pages" }),
       table(["Page", "Answered with", "Visits"], x.broken.map((b) => h("tr", {}, h("td", { class: "path", text: b.path }), h("td", {}, h("span", { class: "grade poor", text: String(b.status) })), h("td", { text: int(b.n) }))))) : null,
     h("p", { class: "help", text: `From ${int(x.vitals.samples)} page ${x.vitals.samples === 1 ? "view" : "views"} measured on visitors' own devices. Speed is the 75th percentile: three visits in four were at least this fast.` })),
-  { sub: "Speed, errors and broken pages" });
+  { sub: "How fast pages load for visitors, and what breaks" });
 }
 
 // Downloads of the GitHub repository's releases, counted by GitHub: all time, in this period, and by release.
@@ -1525,12 +1594,12 @@ async function livePage(key) {
     locationsSub.textContent = "Cities, approximately";
     // In a city, the streets of the visitors there who shared their location.
     const points = view.city ? d.exact.filter((p) => p.city === view.city && p.country === view.country) : [];
-    locations.replaceChildren(
+    locations.replaceChildren(...[
       rows.length ? bars(rows, { head: ["City", "Visitors"], label: (r) => (r.region && r.region !== r.label ? `${r.label} · ${r.region}` : r.label), onPick: (r) => globe.focusCity(r.city), canPick: (r) => !!r.city, active: view.city })
         : h("p", { class: "empty-note", text: "No one here right now." }),
       points.length ? h("div", { style: { marginTop: "14px" } }, bars(points.map((p) => ({ label: p.street ?? p.area ?? "Shared location", v: p.v, point: p })),
         { head: [`Shared locations in ${view.city}`, "Visitors"], onPick: (r) => globe.focusPoint(r.point), active: view.street })) : null,
-      h("button", { class: "btn plain", type: "button", style: { marginTop: "8px" }, onclick: () => globe.world() }, icon("back", 14), " All countries"));
+      h("button", { class: "btn plain", type: "button", style: { marginTop: "8px" }, onclick: () => globe.world() }, icon("back", 14), " All countries")].filter(Boolean));
   }
 
   async function load() {
@@ -1563,6 +1632,8 @@ async function livePage(key) {
   });
   stream.onmessage = (m) => {
     const message = JSON.parse(m.data);
+    onPitch(field, message);
+    if (message.t === "click") return;
     if (message.t === "event" && latest) {
       latest.recent.unshift(message.e);
       latest.recent.length = Math.min(latest.recent.length, 25);
@@ -1606,6 +1677,7 @@ async function livePage(key) {
       : "No one's on the site right now. New visitors appear the moment they arrive.";
     drawLocations();
     drawCrumbs();
+    field.sync(d.walkers ?? []);
     pages.replaceChildren(bars(d.pages, { head: ["Page", "Visitors"] }));
     sources.replaceChildren(bars(d.sources, { head: ["Source", "Visitors"] }));
     minuteBars(perMinute, d.perMinute, (v) => `${v} ${v === 1 ? "page view" : "page views"}`);
@@ -1615,6 +1687,8 @@ async function livePage(key) {
   // A safety net for anything the stream can't say, such as a laptop closed without a goodbye.
   every(10_000, load);
   queueMicrotask(load);
+  // Everyone on the site, moving from page to page as they go.
+  const field = pitch();
   // Momentum changes by the five minutes: asked for once a minute.
   const momentumHost = h("div", {}, h("p", { class: "muted", text: "Loading…" }));
   const loadMomentum = () => api(`/api/sites/${key}/momentum`).then((m) => momentumHost.replaceChildren(momentumView(m)), () => {});
@@ -1633,6 +1707,7 @@ async function livePage(key) {
       card("Page views per minute", perMinute, { sub: "Last 30 minutes" }),
       card("Sources right now", sources),
       card("Recent activity", feed, { sub: "Last 30 minutes" })),
+    card("On the move", field.el, { sub: "Each visitor on the page they're on, live, as they go from page to page and click" }),
     card("Momentum", momentumHost, { sub: "Who's attacking: the last two hours against the same time last week" }),
     h("p", { class: "faint", style: { fontSize: "12px", marginTop: "4px" } },
       "Locations are approximate, from each visitor's IP address (",
@@ -2034,7 +2109,7 @@ async function accountPage() {
     const copyLink = link ? h("button", { class: "btn", type: "button", onclick: () => copy(link, copyLink) }, icon("copy", 14), "Copy") : null;
     team.replaceChildren(
       h("p", { class: "muted", text: `People in your team see ${t.workspace.sites === 1 ? "your website and its numbers" : `all ${t.workspace.sites} of your websites and their numbers`}. Only you can add, change or delete websites.` }),
-      h("div", { style: { marginTop: "8px" } }, t.members.map((m) => h("div", { class: "person-row" }, photo(m.you ? state.user : null, 32),
+      h("div", { style: { marginTop: "8px" } }, t.members.map((m) => h("div", { class: "person-row" }, photo(m.you ? state.user : { name: m.name, email: m.email }, 32),
         h("div", { class: "who" }, h("b", { text: m.you ? `${m.name} (you)` : m.name }), h("span", { text: m.email })),
         h("div", { class: "end" }, h("span", { class: "badge", text: m.role === "owner" ? "Owner" : "Member" }),
           !m.you && m.role !== "owner" ? h("button", {
@@ -2437,6 +2512,140 @@ async function heatmapsPage(key) {
   return h("div", { class: "page" }, pageHead([icon("heat", 20), h("h1", { text: "Heatmaps" }), h("span", { class: "muted", text: domain })], [tools]), body);
 }
 
+// ---------- The pitch ----------
+// Everyone on the site right now, as a dot on the page they're on: a dot runs on when its visitor arrives, glides to
+// the next page as they go, ripples when they click a link or button (with its text), and fades when they leave. A
+// zone for each page they're on, the busiest first, and "other pages" once there are more than seven. Dots are the
+// colour of the source that brought them.
+const WALKER_COLOURS = ["#29c46b", "#2fb3eb", "#f5a524", "#e8590c", "#8b7cf6", "#e64980", "#12b886", "#4c6ef5"];
+function pitch({ dark = false } = {}) {
+  const zonesHost = h("div", { class: "pitch-zones" }), dotsHost = h("div", { class: "pitch-dots" }), legend = h("div", { class: "pitch-legend" });
+  const empty = h("p", { class: "pitch-empty", text: "No one's on the site right now. Visitors appear here the moment they arrive." });
+  const field = h("div", { class: `pitch${dark ? " dark" : ""}` }, h("div", { class: "pitch-lines", "aria-hidden": "true" }, h("i"), h("b")), zonesHost, dotsHost, empty);
+  const zones = [], walkers = new Map(), colours = new Map();
+  const MAX = 8, OTHER = "\u0000other";
+  const hash = (text) => { let x = 7; for (const c of text) x = (x * 31 + c.charCodeAt(0)) >>> 0; return x; };
+  const colourOf = (source) => {
+    if (!colours.has(source)) colours.set(source, WALKER_COLOURS[colours.size % WALKER_COLOURS.length]);
+    return colours.get(source);
+  };
+  const zoneFor = (path) => {
+    const known = zones.find((z) => z.path === path);
+    if (known) return known;
+    const open = zones.length < MAX - 1 || (zones.length < MAX && !zones.some((z) => z.path === OTHER));
+    if (!open) return zones.find((z) => z.path === OTHER) ?? addZone(OTHER);
+    return addZone(path);
+  };
+  function addZone(path) {
+    const count = h("b", { text: "0" });
+    const el = h("div", { class: "pitch-zone" }, h("span", { class: "name", text: path === OTHER ? "Other pages" : path === "/" ? "Home" : path }), count);
+    const zone = { path, el, count };
+    zones.push(zone);
+    zonesHost.append(el);
+    layout();
+    return zone;
+  }
+  // Zones in a grid of up to four across (two on a phone); each dot at its own spot in its zone, the same each time.
+  let across = 4;
+  new ResizeObserver(() => {
+    const fits = field.clientWidth && field.clientWidth < 520 ? 2 : 4;
+    if (fits !== across) {
+      across = fits;
+      layout();
+    }
+  }).observe(field);
+  function layout() {
+    if (!zones.length) return;
+    const cols = Math.min(across, zones.length), rows = Math.ceil(zones.length / cols);
+    zones.forEach((z, i) => {
+      const c = i % cols, r = Math.floor(i / cols), w = 100 / cols, hgt = 100 / rows;
+      Object.assign(z, { x: c * w, y: r * hgt, w, h: hgt });
+      Object.assign(z.el.style, { left: `calc(${z.x}% + 6px)`, top: `calc(${z.y}% + 6px)`, width: `calc(${w}% - 12px)`, height: `calc(${hgt}% - 12px)` });
+    });
+    for (const [s, walker] of walkers) place(s, walker);
+  }
+  function place(s, walker) {
+    const z = walker.zone, k = hash(s);
+    walker.x = z.x + z.w * (0.14 + 0.72 * ((k % 997) / 997));
+    walker.y = z.y + z.h * (0.42 + 0.44 * (((k >>> 10) % 991) / 991));
+    walker.el.style.left = `${walker.x}%`;
+    walker.el.style.top = `${walker.y}%`;
+  }
+  function counts() {
+    for (const z of zones) z.count.textContent = String([...walkers.values()].filter((w) => w.zone === z).length);
+    empty.hidden = walkers.size > 0;
+    const sources = [...new Set([...walkers.values()].map((w) => w.source))].slice(0, 6);
+    legend.replaceChildren(...sources.map((src) => h("span", {}, h("i", { style: { background: colourOf(src) } }), src)));
+  }
+  function arrive(s, w) {
+    const colour = colourOf(w.source ?? "Direct");
+    const el = h("i", { class: "walker", style: { background: colour, color: colour, left: "-3%", top: `${20 + (hash(s) % 60)}%` }, title: [w.source, w.city].filter(Boolean).join(" · ") });
+    dotsHost.append(el);
+    const walker = { el, source: w.source ?? "Direct", zone: zoneFor(w.path ?? "/"), seen: Date.now() };
+    walkers.set(s, walker);
+    // Placed on the next frame, so it runs on from the edge.
+    requestAnimationFrame(() => requestAnimationFrame(() => place(s, walker)));
+    return walker;
+  }
+  const api = {
+    el: h("div", { class: "pitch-wrap" }, field, legend),
+    // Who's there by the live view's latest count: the new run on, those who moved go, those gone a while leave.
+    sync(list) {
+      const here = new Set();
+      for (const w of list) {
+        here.add(w.s);
+        const known = walkers.get(w.s);
+        if (!known) arrive(w.s, w);
+        else if (known.zone.path !== w.path && zoneFor(w.path ?? "/") !== known.zone) api.move(w.s, w.path, w);
+        else known.seen = Date.now();
+      }
+      for (const [s, walker] of walkers) if (!here.has(s) && Date.now() - walker.seen > 30_000) api.leave(s);
+      counts();
+    },
+    move(s, path, info = {}) {
+      const walker = walkers.get(s);
+      if (!walker) arrive(s, { ...info, path });
+      else {
+        walker.zone = zoneFor(path ?? "/");
+        walker.seen = Date.now();
+        place(s, walker);
+      }
+      counts();
+    },
+    click(s, target) {
+      const walker = walkers.get(s);
+      if (!walker) return;
+      walker.seen = Date.now();
+      const kick = h("span", { class: "kick", style: { left: `${walker.x}%`, top: `${walker.y}%` } }, target ? h("em", { text: target.length > 26 ? `${target.slice(0, 25)}…` : target }) : null);
+      dotsHost.append(kick);
+      setTimeout(() => kick.remove(), 2400);
+    },
+    seen(s) {
+      const walker = walkers.get(s);
+      if (walker) walker.seen = Date.now();
+    },
+    leave(s) {
+      const walker = walkers.get(s);
+      if (!walker) return;
+      walkers.delete(s);
+      walker.el.classList.add("gone");
+      setTimeout(() => walker.el.remove(), 700);
+      counts();
+    },
+  };
+  // A visitor not heard from for a minute and a half has gone, as in the live count.
+  const sweep = setInterval(() => { for (const [s, w] of walkers) if (Date.now() - w.seen > 95_000) api.leave(s); }, 10_000);
+  onLeave(() => clearInterval(sweep));
+  counts();
+  return api;
+}
+// What a live message means for the pitch.
+function onPitch(p, msg) {
+  if (msg.t === "event" && msg.e.s && msg.e.name === "pageview") p.move(msg.e.s, msg.e.path, msg.e);
+  else if (msg.t === "click") p.click(msg.c.s, msg.c.target);
+  else if (msg.t === "presence" && msg.s) msg.gone ? p.leave(msg.s) : p.seen(msg.s);
+}
+
 // ---------- Match view ----------
 // A site's day as a live scoreboard: for a TV, a launch day, or a link to share.
 const money = (minor, currency) => {
@@ -2536,7 +2745,8 @@ async function matchPage({ key = null, token = null }) {
     pending = setTimeout(() => { pending = null; load(); }, Math.max(0, 10_000 - (Date.now() - last)));
   };
 
-  const goalsEl = h("b", { class: "big" }), nowEl = h("b", { class: "huge" }), visitorsEl = h("b", { class: "big" }), takingsEl = h("b", { class: "big" });
+  const goalsEl = h("b", { class: "big" }), nowEl = h("b", { class: "huge" }), visitorsEl = h("b", { class: "big" }), takingsEl = h("b", { class: "big money" });
+  const field = pitch({ dark: true });
   const feed = h("ol", { class: "feed" });
   const overlay = h("div", { class: "goal-overlay", hidden: true });
   const line = (c) => h("li", { class: c.goal ? "goal" : c.kind === "number" ? "number" : "" },
@@ -2573,6 +2783,7 @@ async function matchPage({ key = null, token = null }) {
   function draw() {
     const d = data;
     scoreboard();
+    field.sync(d.walkers ?? []);
     tiles.clear();
     const numbers = d.numbers.length ? h("div", { class: "match-numbers" }, d.numbers.slice(0, 8).map((n) => {
       const tile = numberTile(n, { big: true });
@@ -2599,6 +2810,7 @@ async function matchPage({ key = null, token = null }) {
         h("div", { class: "stat" }, h("span", { text: "Goals today" }), goalsEl),
         h("div", { class: "stat" }, h("span", { text: "Takings today" }), takingsEl)),
       numbers,
+      h("section", { class: "panel pitch-panel" }, h("h2", { text: "On the pitch: who's where, right now" }), field.el),
       h("section", { class: "match-main" },
         h("div", { class: "panel" }, h("h2", { text: "Momentum" }), momentumView(d.momentum, { dark: true })),
         h("div", { class: "panel" }, h("h2", { text: "Commentary" }), feed)),
@@ -2626,6 +2838,8 @@ async function matchPage({ key = null, token = null }) {
   stream.onmessage = (m) => {
     const msg = JSON.parse(m.data);
     if (!data) return;
+    onPitch(field, msg);
+    if (msg.t === "click") return;
     if (msg.t === "presence") return soon();
     if (msg.t === "number") {
       const tile = tiles.get(msg.n.name);

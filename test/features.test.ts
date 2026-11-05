@@ -496,3 +496,31 @@ test("ask your data: what changed in a period, and questions in plain words with
   // "What changed?" in words is the same as asking for it.
   assert.equal((await as(`/api/sites/${key}/ask`, { method: "POST", body: { range: "d7", question: "What changed?" } })).data.ai, false);
 });
+
+
+test("on the pitch: each visit's tag follows it from page to page, with its clicks, and the live views list who's where", { skip }, async () => {
+  const { as, key, id } = await siteOf("pitch.example");
+  const heard: any[] = [];
+  const stop = app.deps.hub.subscribe(id, (m) => heard.push(JSON.parse(m)));
+  await hit(key, "203.0.113.60", "pageview", "https://pitch.example/");
+  await hit(key, "203.0.113.60", "pageview", "https://pitch.example/pricing");
+  await hit(key, "203.0.113.60", "_c", "https://pitch.example/pricing", { p: { x: 0.5, y: 300, h: 2000, t: "Buy now" } });
+  await hit(key, "203.0.113.61", "pageview", "https://pitch.example/blog");
+  await hit(key, "203.0.113.60", "_l", "https://pitch.example/pricing", { p: { d: 60 } });
+  stop();
+  const views = heard.filter((m) => m.t === "event");
+  const [a, b, c] = views.map((m) => m.e.s);
+  assert.match(a, /^[\w-]{10}$/);
+  assert.equal(a, b);
+  assert.notEqual(a, c);
+  assert.deepEqual(heard.find((m) => m.t === "click").c, { s: a, path: "/pricing", target: "Buy now", ts: heard.find((m) => m.t === "click").c.ts });
+  assert.ok(heard.some((m) => m.t === "presence" && m.s === a && m.gone === true));
+  // The tag says nothing a visitor could be found by: it isn't the visit's id or the visitor's code.
+  const { rows: [visit] } = await pool.query("select id::text, visitor::text from sessions where project_id = $1 limit 1", [id]).catch(() => ({ rows: [{}] }));
+  assert.ok(!String(visit?.id ?? "").includes(a) && !String(visit?.visitor ?? "").includes(a));
+
+  const live = (await as(`/api/sites/${key}/live`)).data;
+  // The first visitor has left; the second is on the blog.
+  assert.deepEqual(live.walkers.map((w: any) => [w.s, w.path]), [[c, "/blog"]]);
+  assert.deepEqual((await as(`/api/sites/${key}/match`)).data.walkers.map((w: any) => w.path), ["/blog"]);
+});
