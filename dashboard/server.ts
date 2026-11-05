@@ -41,6 +41,7 @@ import {
 import type { Billing } from "./billing.ts";
 import { letter, smtpMailer, type Mailer } from "./mail.ts";
 import { createMonitor, type Probe } from "./monitor.ts";
+import { OWNER, ownerSetup } from "./owner.ts";
 import { access, applySubscription, BILLING_COLUMNS, checkoutUrl, planOf, PLANS, polarFromEnv, portalUrl, usage, verifyWebhook, type Polar } from "./billing.ts";
 import { checkInstall, fetchIcon, imageType, openRequest, publicRequest, type Outbound } from "./check.ts";
 import {
@@ -236,6 +237,9 @@ export async function createDashboard(options: {
 }) {
   const { pool, onSiteChanged, presence, hub, streets } = options;
   const mailer = options.mailer ?? smtpMailer();
+  // Statiku's own account and websites, on whatever database this is (owner.ts).
+  const setUpOwner = () => ownerSetup(pool).then((keys) => keys.forEach(onSiteChanged), (e) => console.error("Owner:", (e as Error).message));
+  await setUpOwner();
   const polar = options.polar ?? polarFromEnv();
   const polarRequest = options.polar?.request ?? openRequest;
   const assets = await bundle();
@@ -546,6 +550,7 @@ export async function createDashboard(options: {
       if (password.length < 8 || password.length > 200) throw new HttpError(400, "Use a password of at least 8 characters.");
       const user = await createUser(pool, name, email, password);
       if (!user) throw new HttpError(409, "There's already an account with this email. Sign in instead.");
+      if (email === OWNER) await setUpOwner();
       const joined = typeof body.invite === "string" ? await acceptInvite(body.invite, user.id).catch(() => null) : null;
       return json(res, 201, { user: me(user), joined }, { "set-cookie": loginCookie(await startLogin(pool, user.id), r.secure) });
     }

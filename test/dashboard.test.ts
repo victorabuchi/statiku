@@ -1012,3 +1012,12 @@ test("site icons: looked for again while missing, kept through a failed look, an
   await owner(`/api/sites/${key}`, { method: "PATCH", body: { domains: ["moved.example"] } });
   assert.equal(await until((icon) => icon === false), false);
 });
+
+test("Statiku's own account: unlimited, with its websites under the keys their pages carry, on any new database", { skip }, async () => {
+  const owner = await signUp("contact@victorabuchi.com");
+  const sites = (await owner("/api/sites")).data.sites.map((s: any) => [s.key, s.domains[0]]).sort();
+  assert.deepEqual(sites, [["p_babgy4em4p", "victorabuchi.com"], ["p_gzwvd7x7ta", "notchlight.com"], ["p_wpmmdvjkej", "knewler.com"]]);
+  assert.equal((await owner("/api/billing")).data.access, "comp");
+  // Its sites count at once.
+  assert.equal(await visit("p_wpmmdvjkej", "https://knewler.com/#/s/webprog", "91.152.40.80"), 202);
+});
