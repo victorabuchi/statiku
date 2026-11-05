@@ -22,7 +22,7 @@
   <p class="lede">Statiku shows every visitor the moment they arrive, on a live globe, and follows them from the first visit to the sign-up, the download and the sale. Bring your history from Google Analytics. No cookies, so no cookie banner.</p>
   <div class="cta"><a class="btn btn-primary" href="/signup">Start your 30-day trial</a><a class="btn btn-ghost" href="#showcase">See it work</a></div>
   <p class="note">Free for 30 days. No card needed.</p>
-  <div class="showcase" id="showcase"><div class="film" id="film" data-v="{{V_FILMDATA}}"></div></div>
+  <div class="showcase" id="showcase"><div class="film" id="film" data-film data-scenes="main" data-v="{{V_FILMDATA}}"></div></div>
   <p class="demo-note">Real screens, with demo data.</p>
 </div></section>
 
@@ -31,27 +31,10 @@
   <div class="logos">{{BUILDERS}}</div>
 </div></section>
 
-<section class="section" id="features"><div class="wrap">
-  <div class="center"><span class="kicker">What you get</span><h2>Analytics that show you people, not just numbers.</h2>
-    <p class="sub">Everything a busy team needs to see what's working: live, from the first visit to the sale, and kept simple.</p></div>
-  <div class="grid">
-    <article class="card" style="--c:#29c46b"><span class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9s1.3-6.3 3.8-9Z"/></svg></span>
-      <h3>A live globe</h3><p>Every visitor, the moment they arrive, from the world down to their city. Visitors who choose to share their location show on their street.</p></article>
-    <article class="card" style="--c:#f5a524"><span class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h18l-7 8.5V19l-4 2v-8.5L3 4Z"/></svg></span>
-      <h3>Every source, to the sale</h3><p>Which links bring sign-ups, downloads and purchases, not just visits. Hacker News may bring the crowd while one newsletter brings the buyers.</p></article>
-    <article class="card" style="--c:#2fb3eb"><span class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg></span>
-      <h3>Every number, any period</h3><p>Visitors, page views, bounce rate, time on site, pages, countries, devices and campaigns. By hour, day, week, month or year; filter by anything; export it.</p></article>
-    <article class="card" style="--c:#8b7cf6"><span class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 2.6-6.4L3 8.2M3 3.5v4.7h4.7M12 7.5V12l3 2"/></svg></span>
-      <h3>Your history, imported</h3><p>Google Analytics, Plausible, GitHub release downloads, or a file from Fathom, Matomo, Umami and the rest. Your charts start at your first visitor, not your first day here.</p></article>
-    <article class="card" style="--c:#eb6834"><span class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
-      <h3>Alerts that matter</h3><p>An email when your site goes quiet, saying whether it's down or lost its tracking code, and another when a rush arrives, while you can still answer the comments.</p></article>
-    <article class="card" style="--c:#0e9f7e"><span class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></span>
-      <h3>Apps too</h3><p>A small Swift SDK follows each visit through the download to the install, the trial and the licence, for the Mac and iOS apps you sell yourself.</p></article>
-    <article class="card" style="--c:#2a78d6"><span class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg></span>
-      <h3>No cookie banner</h3><p>Statiku stores nothing on your visitors' devices and keeps no IP addresses, and your data stays in the EU. Your visitors see your site, not a pop-up.</p></article>
-    <article class="card" style="--c:#c2255c"><span class="ico"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.7c1.6.7 2.6 2.4 3 5.3"/></svg></span>
-      <h3>Your whole team</h3><p>Invite people with a link. They see every site and every number; only you can change or delete them.</p></article>
-  </div>
+<section class="section film-more" id="more"><div class="wrap">
+  <div class="center"><span class="kicker">Beyond the visit</span><h2>Watch your site play, live.</h2>
+    <p class="sub">A scoreboard for launch day, every visitor moving through your pages, a score for every page, heatmaps, page speed and errors, and any number you want to follow.</p></div>
+  <div class="showcase"><div class="film" data-film data-scenes="more" data-v="{{V_FILMDATA}}"></div></div>
 </div></section>
 
 <section class="section alt" id="how"><div class="wrap">

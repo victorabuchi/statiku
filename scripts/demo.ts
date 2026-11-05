@@ -1,6 +1,8 @@
 // Demo data for screenshots and the landing page's film: an account (demo@statiku.app, password "statiku demo") with
-// Notchlight's website, about four months of visits, downloads, installs and sales, and older history imported from
-// Google Analytics and GitHub. Everything in it is made up. Only for a database named *demo* or *test*:
+// Notchlight's website, about four months of visits, downloads, installs and sales (with what they earned), page
+// speeds, scroll depths and script errors, a month of numbers sent from the app, and older history imported from
+// Google Analytics and GitHub. Everything in it is made up. (Heatmap clicks come from scripts/shots.ts, which places
+// them on the real page.) Only for a database named *demo* or *test*:
 //   DATABASE_URL=postgres://localhost/statiku_demo node scripts/demo.ts
 import pg from "pg";
 import { hashPassword } from "../dashboard/auth.ts";
@@ -50,6 +52,10 @@ export async function demo(databaseUrl: string, log = console.log) {
     await pool.query("select ensure_month_partitions('events', 6, 2), ensure_month_partitions('sessions', 6, 2)");
 
     const sessions: unknown[][] = [], events: unknown[][] = [], installs: unknown[][] = [];
+    const vitals: unknown[][] = [], scrolls: unknown[][] = [];
+    // How each page tends to load and how far down it's read: the download page is heavy, the blog is long.
+    const SPEED: Record<string, [number, number]> = { "/": [1700, 0.9], "/download": [3900, 1.4], "/pricing": [1500, 0.8], "/changelog": [1300, 0.6], "/blog/notch-widgets": [2300, 1.1], "/docs": [1400, 0.7], "/privacy": [900, 0.4] };
+    const READ: Record<string, number> = { "/": 62, "/download": 80, "/pricing": 74, "/changelog": 41, "/blog/notch-widgets": 48, "/docs": 55, "/privacy": 30 };
     const now = Date.now();
     for (let d = DAYS; d >= 0; d--) {
       const date = new Date(now - d * 86400_000);
@@ -78,6 +84,14 @@ export async function demo(databaseUrl: string, log = console.log) {
           }
           exit = path;
           events.push([site.id, new Date(at), "pageview", session, visitor, DEMO.domain, path, source, host, campaign ? "social" : null, campaign, country, device, browser, os, null, null]);
+          // A month of speeds and scroll depths, for one view in three.
+          if (d <= 30 && random() < 0.33) {
+            const [lcp, slow] = SPEED[path] ?? [1500, 1];
+            const mobile = device === "Mobile" ? 1.5 : 1;
+            vitals.push([site.id, new Date(at + 20_000), path, device, Math.round(lcp * mobile * (0.6 + random() * random() * 1.8)), Math.round((60 + random() * 180) * slow * mobile),
+              Math.round(random() * random() * 0.22 * slow * 1000) / 1000, Math.round((180 + random() * 420) * mobile), 200]);
+            scrolls.push([site.id, new Date(at + 20_000), path, device, Math.max(8, Math.min(100, Math.round((READ[path] ?? 50) + (random() - 0.5) * 70)))]);
+          }
         }
         const downloaded = (path === "/download" || pages > 2) && os === "macOS" && random() < 0.55;
         if (downloaded) {
@@ -95,6 +109,11 @@ export async function demo(databaseUrl: string, log = console.log) {
         if (path === "/pricing" && random() < 0.18) {
           at += 15000;
           events.push([site.id, new Date(at), "checkout", session, visitor, DEMO.domain, "/pricing", source, host, null, campaign, country, device, browser, os, null, null]);
+          // Most checkouts end in a sale: a year of Notchlight Pro, or a lifetime licence.
+          if (random() < 0.62) {
+            at += 90_000;
+            events.push([site.id, new Date(at), "purchase", session, visitor, DEMO.domain, "/pricing", source, host, null, campaign, country, device, browser, os, { via: "polar" }, random() < 0.7 ? 1900 : 4900]);
+          }
         }
         if (random() < 0.04) events.push([site.id, new Date(at + 5000), "newsletter_signup", session, visitor, DEMO.domain, path, source, host, null, campaign, country, device, browser, os, { form: "footer" }, null]);
         sessions.push([site.id, session, visitor, start, new Date(at + 30_000 * random()), entry, exit, pages, pages, source, host, campaign ? "social" : null, campaign, country, device, browser, os]);
@@ -111,8 +130,34 @@ export async function demo(databaseUrl: string, log = console.log) {
     };
     await insert("sessions", ["project_id", "id", "visitor", "started_at", "last_seen", "entry_path", "exit_path", "pageviews", "events", "source", "referrer_host", "utm_medium", "utm_campaign", "country", "device", "browser", "os"],
       ["uuid", "bigint", "bigint", "timestamptz", "timestamptz", "text", "text", "int", "int", "text", "text", "text", "text", "text", "text", "text", "text"], sessions);
-    await insert("events", ["project_id", "ts", "name", "session_id", "visitor", "hostname", "path", "source", "referrer_host", "utm_medium", "utm_campaign", "country", "device", "browser", "os", "props", "revenue_minor"],
-      ["uuid", "timestamptz", "text", "bigint", "bigint", "text", "text", "text", "text", "text", "text", "text", "text", "text", "text", "jsonb", "bigint"], events);
+    await insert("events", ["project_id", "ts", "name", "session_id", "visitor", "hostname", "path", "source", "referrer_host", "utm_medium", "utm_campaign", "country", "device", "browser", "os", "props", "revenue_minor", "currency"],
+      ["uuid", "timestamptz", "text", "bigint", "bigint", "text", "text", "text", "text", "text", "text", "text", "text", "text", "text", "jsonb", "bigint", "text"], events.map((e) => [...e, e[16] ? "EUR" : null]));
+    await insert("vitals", ["project_id", "ts", "path", "device", "lcp", "inp", "cls", "ttfb", "status"], ["uuid", "timestamptz", "text", "text", "int", "int", "real", "int", "smallint"], vitals);
+    await insert("scrolls", ["project_id", "ts", "path", "device", "depth"], ["uuid", "timestamptz", "text", "text", "smallint"], scrolls);
+    // Visits to an old post that has gone (it answers 404), and the scripts' errors visitors hit.
+    await insert("vitals", ["project_id", "ts", "path", "device", "lcp", "inp", "cls", "ttfb", "status"], ["uuid", "timestamptz", "text", "text", "int", "int", "real", "int", "smallint"],
+      Array.from({ length: 40 }, () => [site.id, new Date(now - random() * 30 * 86400_000), "/blog/notch-tips", "Laptop", 900, null, 0, 300, 404]));
+    const BUGS: [string, string, number, string, string, number][] = [
+      ["TypeError: Cannot read properties of undefined (reading 'version')", "https://notchlight.com/assets/download.js", 214, "/download", "Chrome", 46],
+      ["ResizeObserver loop completed with undelivered notifications.", "https://notchlight.com/assets/site.js", 88, "/", "Safari", 21],
+      ["Unhandled promise rejection: Failed to fetch", "https://notchlight.com/assets/pricing.js", 31, "/pricing", "Firefox", 7],
+    ];
+    await insert("page_errors", ["project_id", "ts", "path", "message", "source", "line", "browser"], ["uuid", "timestamptz", "text", "text", "text", "int", "text"],
+      BUGS.flatMap(([message, src, line, path, browser, n]) => Array.from({ length: n }, () => [site.id, new Date(now - random() * 30 * 86400_000), path, message, src, line, browser])));
+
+    // Numbers the app sends: Macs using Notchlight each day, widgets added, crash-free sessions, the App Store rating.
+    const points: unknown[][] = [];
+    for (let h = 30 * 24; h >= 0; h--) {
+      const at = new Date(now - h * 3600_000), day = 30 - h / 24;
+      if (h % 24 === 0) {
+        points.push(["Active Macs", at, Math.round(1240 + day * 31 + random() * 60)]);
+        points.push(["Crash-free sessions (%)", at, Math.round((99.2 + random() * 0.7) * 10) / 10]);
+        points.push(["App Store rating", at, Math.round((4.6 + day / 150 + random() * 0.05) * 10) / 10]);
+      }
+      points.push(["Widgets added", at, Math.round(6 + random() * 14 + (at.getUTCHours() > 7 && at.getUTCHours() < 22 ? 12 : 0))]);
+    }
+    await pool.query("insert into metrics (project_id, name, kind) values ($1, 'Active Macs', 'set'), ($1, 'Crash-free sessions (%)', 'set'), ($1, 'App Store rating', 'set'), ($1, 'Widgets added', 'add')", [site.id]);
+    await insert("metric_points", ["project_id", "name", "ts", "value"], ["uuid", "text", "timestamptz", "float8"], points.map((p) => [site.id, ...p]));
     await insert("installs", ["project_id", "id", "first_seen", "last_seen", "platform", "app_version", "build", "os_version", "state", "trial_at", "licensed_at", "country", "session_id", "source", "referrer_host", "utm_medium", "utm_campaign"],
       ["uuid", "uuid", "timestamptz", "timestamptz", "text", "text", "text", "text", "text", "timestamptz", "timestamptz", "text", "bigint", "text", "text", "text", "text"], installs);
     await pool.query(
