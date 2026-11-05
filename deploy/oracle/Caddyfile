@@ -1,0 +1,6 @@
+# HTTPS for Statiku's address, with a certificate Caddy gets and renews itself. Live streams are passed on at once.
+{$DOMAIN} {
+	reverse_proxy statiku:8080 {
+		flush_interval -1
+	}
+}

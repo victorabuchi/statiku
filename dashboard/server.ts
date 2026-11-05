@@ -159,7 +159,7 @@ async function bundle() {
   });
   const asset = (body: string | Uint8Array, type: string) => {
     const data = Buffer.from(body);
-    const hash = createHash("sha256").update(data).update(process.env.RENDER_GIT_COMMIT ?? "").digest("base64url").slice(0, 12);
+    const hash = createHash("sha256").update(data).update(process.env.GIT_COMMIT ?? process.env.RENDER_GIT_COMMIT ?? "").digest("base64url").slice(0, 12);
     return { data, gzip: gzipSync(data), type, hash };
   };
   const require = createRequire(import.meta.url);

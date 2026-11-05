@@ -1,4 +1,4 @@
-# Statiku as a container, for Koyeb or any host that builds a Dockerfile: the service with its location
+# Statiku as a container (deploy/oracle/compose.yaml runs it), or for any host that builds a Dockerfile: the service with its location
 # databases. Set DATABASE_URL (and DATABASE_CA), PUBLIC_URL and SECRET_KEY (see docs/OPERATIONS.md); migrations
 # run before it starts.
 FROM node:24-slim

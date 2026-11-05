@@ -1,0 +1,42 @@
+# Statiku on one server: the service (built from the repository's Dockerfile), its Postgres, and Caddy in front, which
+# gets the HTTPS certificate for DOMAIN by itself. Settings come from .env next to this file (first-boot.sh writes it).
+#   docker compose -f deploy/oracle/compose.yaml --env-file deploy/oracle/.env up -d --build
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: statiku
+      POSTGRES_DB: statiku
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db:/var/lib/postgresql/data
+    shm_size: 128mb
+  statiku:
+    build: ../..
+    restart: unless-stopped
+    depends_on:
+      - db
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://statiku:${DB_PASSWORD}@db:5432/statiku
+      PUBLIC_URL: https://${DOMAIN}
+      # Caddy is the one proxy in front.
+      TRUST_PROXY: "1"
+      GIT_COMMIT: ${GIT_COMMIT:-}
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - statiku
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+volumes:
+  db: {}
+  caddy: {}

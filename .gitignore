@@ -2,3 +2,6 @@ node_modules/
 .env
 data/
 tracker/dist/
+
+# The Oracle server's own settings (passwords), made on the server
+deploy/oracle/.env

@@ -1,45 +1,39 @@
 # Running Statiku
 
-What to set up once outside the code, and what to do when something goes wrong. Statiku runs on Koyeb, with its
-database on Aiven, at `statiku.victorabuchi.com`; every setting below goes in the Koyeb service's environment.
+What to set up once outside the code, and what to do when something goes wrong. Statiku runs on a free Oracle Cloud
+server at `statiku.victorabuchi.com`: the service, its Postgres and Caddy (for HTTPS) in Docker, set up by
+`deploy/oracle/first-boot.sh`. Extra settings (email, Google, Polar) go in `/opt/statiku/deploy/oracle/.env` on the
+server, followed by `sudo /opt/statiku/deploy/oracle/update.sh --force`.
 
-## Deploying: Koyeb and Aiven, both free
+## Deploying on Oracle Cloud's Always Free tier
 
-Statiku is one service, built from the `Dockerfile` in this repository, and one Postgres database. Koyeb's free web
-service runs the first and Aiven's free PostgreSQL the second, both in Europe. Koyeb's free service sleeps after an
-hour without any request; the uptime check (every half hour) and your sites' visitors keep it awake.
+1. **Sign up** at oracle.com/cloud/free, with a **home region in Europe** (Frankfurt, Amsterdam, Stockholm…); it can't
+   be changed later. Oracle checks a card. Then upgrade the account to **Pay As You Go**: it stays free while you use
+   only Always Free resources, and spares the server from being reclaimed as idle, which happens to free-only accounts.
+2. **Give the server read access to the code:** add the deploy key's public half to GitHub (`victorabuchi/statiku` →
+   Settings → Deploy keys → Add, read-only), or with `gh repo deploy-key add <key>.pub -R victorabuchi/statiku`.
+3. **Create the server:** Compute → Instances → Create instance.
+   - Image: **Canonical Ubuntu 24.04**.
+   - Shape: **VM.Standard.A1.Flex** (Ampere) with 1 OCPU and 6 GB; if Oracle says it's out of capacity, the
+     **VM.Standard.E2.1.Micro** (AMD, 1 GB) works too, a little slower.
+   - Networking: a new virtual cloud network with a public subnet, and a public IPv4 address.
+   - SSH keys: let Oracle make a pair and save the private key; it's how you log in later.
+   - Advanced options → Management → **cloud-init script**: paste `first-boot.sh` with the deploy key filled in.
+4. **Open the web ports:** Networking → Virtual cloud networks → your network → its default security list → Add
+   ingress rules: source `0.0.0.0/0`, TCP, destination port `80`; and the same for `443`.
+5. **Point the address at it:** in Cloudflare's DNS for victorabuchi.com, an **A** record `statiku` → the server's
+   public IP, with the proxy **off** (a grey cloud), so Caddy can get its certificate. If you turn the proxy on later,
+   set `TRUST_PROXY=2` in the server's `.env`.
+6. **Wait ten minutes or so** for the first build, then open `https://statiku.victorabuchi.com/healthz?deep=1`: it should
+   say the database is answering and name the country you're in. Progress is in `/var/log/statiku-setup.log` on the
+   server (`ssh -i <key> ubuntu@<ip>`).
+7. **Sign up** at `https://statiku.victorabuchi.com` with contact@victorabuchi.com: the account is unlimited at once,
+   with Notchlight, Knewler and victorabuchi.com already in it under the keys their pages carry.
 
-**The database, on Aiven**
-
-1. Sign up at aiven.io and create a **PostgreSQL** service on the **Free** plan, in a European region (Frankfurt or
-   Amsterdam).
-2. When it's running, copy its **Service URI** from the service's overview, and download its **CA certificate**
-   (`ca.pem`).
-
-**The service, on Koyeb**
-
-1. Sign up at koyeb.com (it may hold $1 on a card to check it, and cancels the hold at once).
-2. Create a **Web Service** from GitHub: the repository `victorabuchi/statiku`, branch `main`, built with the
-   **Dockerfile**. Choose the **Free** instance, in **Frankfurt**.
-3. Expose port `8080` over HTTP, and add a health check: HTTP on port 8080, path `/healthz`.
-4. Environment variables (the last two as secrets):
-   - `PUBLIC_URL`: `https://statiku.victorabuchi.com`
-   - `DATABASE_URL`: Aiven's Service URI
-   - `DATABASE_CA`: the whole text of `ca.pem`, from `-----BEGIN CERTIFICATE-----` to `-----END CERTIFICATE-----`
-   - `SECRET_KEY`: any long random text, made once, such as the output of `openssl rand -base64 32` in Terminal. Keep
-     it: it seals the tokens people give Statiku.
-   - `TRUST_PROXY` is already 1 in the Dockerfile. If the free instance runs out of memory, add `GEO_CITY_DB=off`:
-     Statiku then places live visitors by country only.
-5. Deploy. Migrations run before the service starts.
-6. Under **Domains**, add `statiku.victorabuchi.com`, and in Cloudflare's DNS for victorabuchi.com add the CNAME record
-   Koyeb shows, with the proxy **off** (a grey cloud). If you turn Cloudflare's proxy on later, set `TRUST_PROXY=2`.
-7. Open `https://statiku.victorabuchi.com/healthz?deep=1`: it should say the database is answering and name the
-   country you're in. Another country means `TRUST_PROXY` doesn't match Koyeb's proxies.
-8. Sign up at `https://statiku.victorabuchi.com` with contact@victorabuchi.com: the account is unlimited at once, with
-   Notchlight, Knewler and victorabuchi.com already in it under the keys their pages carry.
-
-Notchlight, Knewler, victorabuchi.com and the Swift SDK already point at `statiku.victorabuchi.com`, so moving to
-another host later is only a new CNAME record. The same `Dockerfile` runs on any host that builds one.
+From then on the server checks GitHub every five minutes and rebuilds Statiku after each push to main, and copies the
+database every night to `/opt/statiku-backups` (the last 14). Notchlight, Knewler, victorabuchi.com and the Swift SDK
+point at `statiku.victorabuchi.com`, so moving to another server later is only a new DNS record: the `Dockerfile` and
+`deploy/oracle/compose.yaml` run on any machine with Docker.
 
 ## Email
 
@@ -111,18 +105,20 @@ npm run billing -- show someone@example.com
 
 ## Backups
 
-Aiven backs up its databases; on the free plan, keep a copy of your own now and then too, with `pg_dump` and the
-Service URI, as a backup only counts once you've restored one.
+The server copies the database every night to `/opt/statiku-backups` (`deploy/oracle/backup.sh`, the last 14). A copy
+on the same server doesn't survive losing the server, so bring one home now and then:
+`scp -i <key> ubuntu@<ip>:/opt/statiku-backups/<file> .`
 
-Try a restore once a month:
+Try a restore once a month, so you know it works before you need it:
 
-1. Restore the latest backup or copy into a new database.
-2. In the service's shell, compare the copy with the live database:
-   `npm run restore-check -- "<the new database's connection string>"`.
-3. Every table should be there, with rows up to the backup. Then delete the new database.
+1. On your Mac, `createdb statiku_restore && pg_restore --no-owner -d statiku_restore <file>`.
+2. Compare it with the live database from the server, or just open it: every table should be there, with rows up to
+   the night of the copy. `npm run restore-check -- "<url>"` compares two databases side by side.
+3. Then `dropdb statiku_restore`.
 
-When you really need it: restore, check the copy the same way, then link the service's `DATABASE_URL` to the new
-database and redeploy.
+When you really need it: restore the copy into the server's database
+(`docker compose -f deploy/oracle/compose.yaml --env-file deploy/oracle/.env exec -T db pg_restore --clean --if-exists -U statiku -d statiku < <file>`)
+and restart Statiku.
 
 A host can suspend everything at once over a failed payment, as Render did in October 2026, so keep a card that works
 on file, and a recent copy of the database somewhere else.
