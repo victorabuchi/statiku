@@ -48,7 +48,8 @@ export async function weekReport(pool: pg.Pool, site: ReportSite, origin: string
     week(w.from, w.to), week(w.prevFrom, w.from),
     assists(pool, site, w.from, w.to, goals), injuries(pool, site, w.from, w.to), revenue(pool, site, w.from, w.to, w.prevFrom, w.from),
     pool.query(
-      `select m.name, m.kind, case when m.kind = 'add' then sum(p.value) else (array_agg(p.value order by p.ts desc))[1] end as value
+      `select m.name, m.kind, case when m.kind = 'add' then sum(p.value)::text when m.kind = 'set' then ((array_agg(p.value order by p.ts desc))[1])::text
+              else (array_agg(p.text_value order by p.ts desc))[1] end as value
          from metrics m join metric_points p on p.project_id = m.project_id and p.name = m.name and p.ts >= $2 and p.ts < $3
         where m.project_id = $1 group by 1, 2 order by max(p.ts) desc limit 4`,
       [site.id, w.from, w.to],
@@ -83,7 +84,7 @@ export async function weekReport(pool: pg.Pool, site: ReportSite, origin: string
     scorer?.scored ? `Top scorer: ${scorer.label}, with ${int(scorer.scored)} ${scorer.scored === 1 ? "goal" : "goals"}.` : null,
     assist?.v ? `Assist of the week: ${assist.label}, seen before ${int(assist.v)} of the goals.` : null,
     sore.length ? `Injuries: ${sore.join("; ")}.` : "Injuries: none.",
-    numbers.length ? `Numbers: ${numbers.map((n) => `${n.name} ${Number(n.value).toLocaleString("en-US", { maximumFractionDigits: 2 })}`).join(", ")}.` : null,
+    numbers.length ? `Trackers: ${numbers.map((n) => `${n.name} ${n.kind === "text" ? n.value : Number(n.value).toLocaleString("en-US", { maximumFractionDigits: 2 })}`).join(", ")}.` : null,
   ].filter((l): l is string => !!l);
   return { heading, lines, url: `${origin}/sites/${site.key}?range=custom&from=${w.firstDay}&to=${w.lastDay}`, score: [won, lost] };
 }

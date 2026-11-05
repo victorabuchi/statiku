@@ -97,13 +97,17 @@ const sendNumber = (body: unknown, key: string | null, query = "") =>
 
 test("numbers: parsing one, a list, and what isn't one", () => {
   const now = new Date("2026-11-05T12:00:00Z");
-  assert.deepEqual(parseNumbers('{"name": " Home  goals ", "value": "2"}', new URLSearchParams(), now), [{ name: "Home goals", value: 2, ts: now, op: null }]);
+  assert.deepEqual(parseNumbers('{"name": " Home  goals ", "value": "2"}', new URLSearchParams(), now), [{ name: "Home goals", value: 2, text: null, ts: now, op: null }]);
+  // Words and yes/no are values too.
+  assert.deepEqual(parseNumbers(JSON.stringify({ values: [{ name: "Status", value: "Online" }, { name: "Raining", value: true }] }), new URLSearchParams(), now),
+    [{ name: "Status", value: null, text: "Online", ts: now, op: null }, { name: "Raining", value: null, text: "Yes", ts: new Date(now.getTime() + 1), op: null }]);
+  assert.match(String(parseNumbers('{"name": "Sales", "value": "lots", "op": "add"}', new URLSearchParams(), now)), /counts up/);
   const list = parseNumbers(JSON.stringify({ numbers: [{ name: "Installs", value: 1, op: "add", ts: 1793872800 }, { name: "Temp", value: -3.5, ts: "2026-11-05T10:00:00Z" }] }), new URLSearchParams(), now);
   assert.ok(Array.isArray(list));
   assert.equal(list[0].ts.toISOString(), "2026-11-05T10:00:00.000Z");
   assert.equal(list[0].op, "add");
-  assert.deepEqual(parseNumbers("", new URLSearchParams("name=Score&value=3"), now), [{ name: "Score", value: 3, ts: now, op: null }]);
-  assert.match(String(parseNumbers('{"name": "x"}', new URLSearchParams(), now)), /needs a number/);
+  assert.deepEqual(parseNumbers("", new URLSearchParams("name=Score&value=3"), now), [{ name: "Score", value: 3, text: null, ts: now, op: null }]);
+  assert.match(String(parseNumbers('{"name": "x"}', new URLSearchParams(), now)), /needs a value/);
   assert.match(String(parseNumbers('{"value": 1}', new URLSearchParams(), now)), /missing name/);
   assert.match(String(parseNumbers('{"name": "x", "value": 1, "ts": "2030-01-01"}', new URLSearchParams(), now)), /future/);
   assert.match(String(parseNumbers("nope", new URLSearchParams(), now)), /not JSON/);
@@ -523,4 +527,31 @@ test("on the pitch: each visit's tag follows it from page to page, with its clic
   // The first visitor has left; the second is on the blog.
   assert.deepEqual(live.walkers.map((w: any) => [w.s, w.path]), [[c, "/blog"]]);
   assert.deepEqual((await as(`/api/sites/${key}/match`)).data.walkers.map((w: any) => w.path), ["/blog"]);
+});
+
+
+test("trackers of words: the latest word and the few before it, live, from a file, and numbers kept apart", { skip }, async () => {
+  const { as, key } = await siteOf("words.example");
+  const secret = (await as(`/api/sites/${key}/numbers/key`, { method: "POST" })).data.key;
+  const track = (body: unknown) => fetch(`${base}/v1/track`, { method: "POST", headers: { authorization: `Bearer ${secret}` }, body: JSON.stringify(body) }).then((r) => r.status);
+  assert.equal(await track({ name: "Status", value: "Offline" }), 202);
+  assert.equal(await track({ name: "Status", value: "Online" }), 202);
+  assert.equal(await track({ name: "Score", value: 3 }), 202);
+  // A tracker of numbers doesn't take a word.
+  assert.equal(await track({ name: "Score", value: "three" }), 400);
+  const form = new FormData();
+  form.append("file", new Blob(["time,name,value\n2026-11-01,Weather,Sunny\n2026-11-02,Weather,Rain\n"]), "weather.csv");
+  assert.equal((await as(`/api/sites/${key}/numbers/upload`, { method: "POST", form })).status, 200);
+  await app.writer.flush();
+  const all = (await as(`/api/sites/${key}/numbers?range=all`)).data.numbers;
+  const by = Object.fromEntries(all.map((n: any) => [n.name, n]));
+  assert.equal(by.Status.kind, "text");
+  assert.equal(by.Status.value, "Online");
+  assert.deepEqual(by.Status.recent.map((r: any) => r.text), ["Online", "Offline"]);
+  assert.equal(by.Score.value, 3);
+  assert.equal(by.Weather.value, "Rain");
+  assert.equal(by.Weather.last.value, "Rain");
+  // Every site's trackers at once, for the Trackers page.
+  const page = (await as("/api/numbers?range=all")).data.sites.find((s: any) => s.key === key);
+  assert.deepEqual(page.numbers.map((n: any) => n.name).sort(), ["Score", "Status", "Weather"]);
 });

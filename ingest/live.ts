@@ -20,7 +20,7 @@ export type LiveMessage =
   // A click on the site: the page, and the text of the link or button.
   | { t: "click"; c: { s: string; path: string; target: string | null; ts: Date } }
   // A number sent with the site's key: for an "add" number, the value is what it went up by.
-  | { t: "number"; n: { name: string; value: number; ts: Date; kind: "set" | "add" } };
+  | { t: "number"; n: { name: string; value: number | string; ts: Date; kind: "set" | "add" | "text" } };
 
 export class Hub {
   subscribers = new Map<string, Set<(message: string) => void>>();

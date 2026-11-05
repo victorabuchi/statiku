@@ -102,7 +102,7 @@ const SESSION_COLUMNS: [string, string, (s: Session) => unknown][] = [
 // The tables beside events, written in the same batches: numbers sent with a site's key, clicks and scroll depths for
 // heatmaps, and page speed and errors. Rows are keyed by column name. Only numbers count towards a site's events.
 export const EXTRA = {
-  metric_points: { project_id: "uuid", name: "text", ts: "timestamptz", value: "float8" },
+  metric_points: { project_id: "uuid", name: "text", ts: "timestamptz", value: "float8", text_value: "text" },
   clicks: { project_id: "uuid", ts: "timestamptz", path: "text", device: "text", x: "real", y: "integer", page_h: "integer", target: "text" },
   scrolls: { project_id: "uuid", ts: "timestamptz", path: "text", device: "text", depth: "smallint" },
   vitals: { project_id: "uuid", ts: "timestamptz", path: "text", device: "text", lcp: "integer", inp: "integer", cls: "real", ttfb: "integer", status: "smallint" },

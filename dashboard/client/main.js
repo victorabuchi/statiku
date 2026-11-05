@@ -47,7 +47,9 @@ const ICONS = {
   injury: '<rect x="2.6" y="7.2" width="14.8" height="5.6" rx="2.8" transform="rotate(-40 10 10)"/><path d="M8.6 9.2h.01M11.4 9.2h.01M8.6 10.8h.01M11.4 10.8h.01" stroke-width="2"/>',
   // A football: the match view.
   ball: '<circle cx="10" cy="10" r="7"/><path d="m10 7 2.9 2.1-1.1 3.4H8.2L7.1 9.1Z"/><path d="M10 3v4M12.9 9.1l3.6-1.3M11.8 12.5l2.3 3.1M8.2 12.5l-2.3 3.1M7.1 9.1 3.5 7.8"/>',
-  // A number sign: anything a site counts beyond its visits.
+  // A pulse: a tracker, anything a site sends.
+  track: '<path d="M2.5 10.5h3.2l2-5.2 3.4 9.4 2.1-5.6h4.3"/>',
+  // A number sign.
   hash: '<path d="M8 3.5 6.5 16.5M13.5 3.5 12 16.5M4 7.5h12.5M3.5 12.5H16"/>',
   // A cog (after Feather's, MIT), drawn on a 24 grid and scaled to this one.
   settings: '<g transform="scale(0.8333)" stroke-width="1.9"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></g>',
@@ -367,6 +369,8 @@ function shell(site, active, content) {
     h("nav", { "aria-label": "Main" },
       navItem("/", "websites", "Websites", active === "home"),
       navItem("/sites/new", "plus", "Add website", active === "add"),
+      navItem("/trackers", "track", "Trackers", active === "trackers"),
+      navItem("/trackers/new", "plus", "Add tracker", active === "addTracker"),
       site ? [
         h("div", { class: "nav-label" }, siteIcon(site, 16), h("span", { text: site.domains[0] })),
         navItem(`/sites/${site.key}`, "chart", "Analytics", active === "analytics"),
@@ -672,63 +676,7 @@ async function homePage() {
   return h("div", { class: "page" },
     pageHead([icon("websites", 20), h("h1", { text: "Websites" }), sites.length ? h("span", { class: "muted", text: `${sites.length} ${sites.length === 1 ? "site" : "sites"}` }) : null],
       sites.length ? h("a", { class: "btn primary", href: "/sites/new" }, icon("plus", 16), "Add website") : null),
-    list, sites.length ? homeNumbers() : null);
-}
-
-// Every site's numbers on the Websites page, live: a group of tiles for each site that has some, and where to send
-// them from (each site has its own key, on its Numbers page).
-function homeNumbers() {
-  let range = saved.homeNumbersRange ?? "today", data = null;
-  const tiles = new Map();
-  const rangeTabs = h("span");
-  const body = h("div", { class: "stack" });
-  const streams = [];
-  const load = async () => {
-    rangeTabs.replaceChildren(tabs(NUMBER_RANGES.slice(0, 4), range, (id) => { range = id; saved.homeNumbersRange = id; remember(); load(); }));
-    try {
-      data = await api(`/api/numbers?range=${range}`);
-      draw();
-    } catch (err) {
-      if (!(err instanceof SignedOut)) body.replaceChildren(failure(err));
-    }
-  };
-  const draw = () => {
-    tiles.clear();
-    const withNumbers = data.sites.filter((s) => s.numbers.length);
-    if (!withNumbers.length) {
-      const own = data.sites.find((s) => s.role === "owner") ?? data.sites[0];
-      body.replaceChildren(h("div", { class: "card status-card" }, h("span", { class: "icon wait" }, icon("hash", 20)),
-        h("div", { class: "what" }, h("b", { text: "Track any number" }),
-          h("span", { class: "muted", text: "Send any number from a script, a server or a device, or upload a file of them (match scores, installs, sales, sensor readings) and it shows here as a live tile." })),
-        own ? h("a", { class: "btn", href: `/sites/${own.key}/numbers` }, "Set it up") : null));
-      return;
-    }
-    body.replaceChildren(...withNumbers.map((s) => h("div", { class: "number-group" },
-      h("div", { class: "row-between" }, h("b", { text: s.name }), h("a", { class: "btn plain", href: `/sites/${s.key}/numbers`, text: s.role === "owner" ? "Send or upload numbers" : "All of them" })),
-      h("div", { class: "grid g4 numbers" }, s.numbers.slice(0, 8).map((n) => {
-        const tile = numberTile(n);
-        tiles.set(`${s.key}:${n.name}`, tile);
-        return tile;
-      })))));
-    // New values straight onto their tiles, for up to six sites at once.
-    if (!streams.length) {
-      for (const s of withNumbers.slice(0, 6)) {
-        const stream = new EventSource(`/api/sites/${s.key}/stream`);
-        stream.onmessage = (m) => {
-          const msg = JSON.parse(m.data);
-          if (msg.t !== "number") return;
-          const tile = tiles.get(`${s.key}:${msg.n.name}`);
-          if (tile) tile.update(msg.n.value, msg.n.ts);
-          else setTimeout(load, 1500);
-        };
-        streams.push(stream);
-      }
-    }
-  };
-  onLeave(() => streams.forEach((x) => x.close()));
-  every(60_000, load);
-  queueMicrotask(load);
-  return h("section", { class: "home-numbers" }, h("div", { class: "row-between section-head" }, h("h2", {}, icon("hash", 18), "Numbers"), rangeTabs), body);
+    list);
 }
 
 function siteCard(s) {
@@ -2189,24 +2137,33 @@ async function accountPage() {
       h("div", { class: "card", style: { borderColor: "#fbd5d0" } }, h("div", { class: "card-head" }, h("h2", { text: "Delete account" })), h("div", { class: "card-body" }, close))));
 }
 
-// ---------- Numbers ----------
-// Anything a site measures beyond its visits, sent with its secret key or uploaded: a tile each, live.
+// ---------- Trackers ----------
+// Anything a site sends from anywhere, with its secret key, or uploads in a file: a number (installs, a score, a
+// temperature), a word ("Online", the song playing) or a yes/no. Each tracker is a tile, live: the Trackers page has
+// every site's, and Add tracker has the key, the call that sends a value, and the upload.
 const num = (v) => (v == null ? "–" : Number(v).toLocaleString("en-US", { maximumFractionDigits: Math.abs(v) < 100 ? 2 : 0 }));
 const NUMBER_RANGES = [["today", "Today"], ["d7", "7 days"], ["d30", "30 days"], ["m12", "12 months"], ["all", "All time"]];
 
-// A number's tile: its value for the period (an "add" number's total, any other's latest), the change on the previous
-// period, its line, and when it last moved. update() takes a value as it arrives.
+// A tracker's tile: its value for the period (an "add" tracker's total, any other's latest), the change on the
+// previous period, its line (a word tracker's last few words instead), and when it last moved. update() takes a value
+// as it arrives.
 function numberTile(n, { owner = false, onDelete = null, big = false } = {}) {
-  const value = h("span", { class: "value" });
+  const words = n.kind === "text";
+  const value = h("span", { class: `value${words ? " word" : ""}` });
   const when = h("span", { class: "muted small" });
   const line = h("span", { class: "spark-host" });
   const tile = h("div", { class: `card kpi number-tile${big ? " big" : ""}` },
     h("span", { class: "label" }, h("span", { text: n.name }), h("span", { class: "kind", text: n.kind === "add" ? "Total" : "Latest" }),
       owner && onDelete ? h("button", { class: "btn plain icon-only", type: "button", "aria-label": `Delete ${n.name}`, title: "Delete", onclick: onDelete }, icon("trash", 14)) : null),
-    value, n.previous != null ? delta({}, n.value, n.previous) : h("span", { class: "delta", text: n.kind === "add" ? "In this period" : " " }), line, when);
+    value, !words && n.previous != null ? delta({}, n.value, n.previous) : h("span", { class: "delta", text: n.kind === "add" ? "In this period" : " " }), line, when);
   const paint = () => {
-    value.textContent = num(n.value ?? (n.kind === "add" ? 0 : n.last?.value));
+    value.textContent = words ? n.value ?? n.last?.value ?? "–" : num(n.value ?? (n.kind === "add" ? 0 : n.last?.value));
     when.textContent = n.last ? `Updated ${ago(n.last.ts)}` : "Nothing yet";
+    if (words) {
+      const before = (n.recent ?? []).slice(1, 4).map((r) => r.text);
+      line.replaceChildren(before.length ? h("span", { class: "before", text: `Before: ${before.join(" · ")}` }) : "");
+      return;
+    }
     // A latest-value number holds its value through the hours nothing was sent; a total is 0 then.
     let held = n.series.find((p) => p.v != null)?.v ?? 0;
     line.replaceChildren(sparkline(n.series.map((p) => (n.kind === "add" ? p.v ?? 0 : (held = p.v ?? held))), { ...(big ? { width: 320, height: 44 } : {}), fit: n.kind !== "add" }));
@@ -2214,10 +2171,15 @@ function numberTile(n, { owner = false, onDelete = null, big = false } = {}) {
   paint();
   tile.data = n;
   tile.update = (v, ts) => {
-    n.value = n.kind === "add" ? (n.value ?? 0) + v : v;
+    if (words) {
+      n.value = v;
+      n.recent = [{ ts, text: v }, ...(n.recent ?? [])].slice(0, 5);
+    } else {
+      n.value = n.kind === "add" ? (n.value ?? 0) + v : v;
+      const end = n.series.at(-1);
+      if (end) end.v = n.kind === "add" ? (end.v ?? 0) + v : v;
+    }
     n.last = { value: v, ts };
-    const end = n.series.at(-1);
-    if (end) end.v = n.kind === "add" ? (end.v ?? 0) + v : v;
     paint();
     tile.classList.remove("flash");
     void tile.offsetWidth;
@@ -2226,54 +2188,92 @@ function numberTile(n, { owner = false, onDelete = null, big = false } = {}) {
   return tile;
 }
 
-async function numbersPage(key) {
-  const site = state.sites.find((s) => s.key === key);
-  const owner = site?.role === "owner";
-  let range = saved.numbersRange ?? "today", data = null, shownKey = null;
+// Every site's trackers, a group of tiles each, live.
+function trackersPage() {
+  let range = saved.homeNumbersRange ?? "today", data = null;
   const tiles = new Map();
-  const grid = h("div", { class: "grid g4 numbers" });
-  const body = h("div", { class: "stack" }, h("p", { class: "muted", text: "Loading…" }));
   const rangeTabs = h("span");
-  const origin = location.origin;
-
-  async function load() {
-    rangeTabs.replaceChildren(tabs(NUMBER_RANGES, range, (id) => { range = id; saved.numbersRange = id; remember(); load(); }));
+  const body = h("div", { class: "stack" }, h("p", { class: "muted", text: "Loading…" }));
+  const streams = new Map();
+  const load = async () => {
+    rangeTabs.replaceChildren(tabs(NUMBER_RANGES, range, (id) => { range = id; saved.homeNumbersRange = id; remember(); load(); }));
     try {
-      data = await api(`/api/sites/${key}/numbers?range=${range}`);
+      data = await api(`/api/numbers?range=${range}`);
       draw();
     } catch (err) {
       if (!(err instanceof SignedOut)) body.replaceChildren(failure(err));
     }
-  }
-
-  const remove = (n) => async () => {
-    if (!(await confirmDialog({ title: `Delete ${n.name}?`, body: "Every value it has, sent or uploaded, is deleted. Sending it again starts it afresh.", confirm: "Delete", danger: true }))) return;
-    await api(`/api/sites/${key}/numbers/${encodeURIComponent(n.name)}`, { method: "DELETE" }).then(() => { toast(`${n.name} deleted`); load(); }, (e) => toast(e.message));
   };
-
-  function draw() {
+  const remove = (site, n) => async () => {
+    if (!(await confirmDialog({ title: `Delete ${n.name}?`, body: "Every value it has, sent or uploaded, is deleted. Sending it again starts it afresh.", confirm: "Delete", danger: true }))) return;
+    await api(`/api/sites/${site.key}/numbers/${encodeURIComponent(n.name)}`, { method: "DELETE" }).then(() => { toast(`${n.name} deleted`); load(); }, (e) => toast(e.message));
+  };
+  const draw = () => {
     tiles.clear();
-    grid.replaceChildren(...data.numbers.map((n) => {
-      const tile = numberTile(n, { owner, onDelete: remove(n) });
-      tiles.set(n.name, tile);
-      return tile;
-    }));
-    const empty = !data.numbers.length
-      ? h("div", { class: "card status-card" }, h("span", { class: "icon wait" }, icon("hash", 20)),
-        h("div", { class: "what" }, h("b", { text: "No numbers yet" }),
-          h("span", { class: "muted", text: "Send any number from a script, a server or a device, or upload a file of them: match scores, installs, sales, sensor readings. Each becomes a tile here, live." })))
-      : null;
-    body.replaceChildren(...[empty, data.numbers.length ? grid : null, owner ? sendCard() : null, owner ? uploadCard() : null].filter(Boolean));
-  }
+    const withTrackers = data.sites.filter((s) => s.numbers.length);
+    if (!withTrackers.length) {
+      body.replaceChildren(h("div", { class: "card status-card" }, h("span", { class: "icon wait" }, icon("track", 20)),
+        h("div", { class: "what" }, h("b", { text: "No trackers yet" }),
+          h("span", { class: "muted", text: "Track anything from a script, a server or a device, or upload a file of it: a number (installs, a score, a temperature), a word (\"Online\", the song playing) or a yes/no. Each one shows here, live." })),
+        h("a", { class: "btn primary", href: "/trackers/new" }, icon("plus", 16), "Add tracker")));
+      return;
+    }
+    body.replaceChildren(...withTrackers.map((s) => h("div", { class: "number-group" },
+      h("div", { class: "row-between" }, h("b", { text: s.name }), s.role === "owner" ? h("a", { class: "btn plain", href: `/trackers/new?site=${s.key}`, text: "Send or upload values" }) : null),
+      h("div", { class: "grid g4 numbers" }, s.numbers.map((n) => {
+        const tile = numberTile(n, { owner: s.role === "owner", onDelete: remove(s, n) });
+        tiles.set(`${s.key}:${n.name}`, tile);
+        return tile;
+      })))));
+    // New values straight onto their tiles, for up to six sites at once.
+    for (const s of withTrackers.slice(0, 6)) {
+      if (streams.has(s.key)) continue;
+      const stream = new EventSource(`/api/sites/${s.key}/stream`);
+      stream.onmessage = (m) => {
+        const msg = JSON.parse(m.data);
+        if (msg.t !== "number") return;
+        const tile = tiles.get(`${s.key}:${msg.n.name}`);
+        if (tile) tile.update(msg.n.value, msg.n.ts);
+        else setTimeout(load, 1500);
+      };
+      streams.set(s.key, stream);
+    }
+  };
+  onLeave(() => streams.forEach((x) => x.close()));
+  every(60_000, load);
+  queueMicrotask(load);
+  return h("div", { class: "page" },
+    pageHead([icon("track", 20), h("h1", { text: "Trackers" })], [rangeTabs, h("a", { class: "btn primary", href: "/trackers/new" }, icon("plus", 16), "Add tracker")]), body);
+}
 
-  // How to send one: the key (shown once, when it's made) and the same call in a few languages.
+// Adding a tracker to one of your sites: its key (shown once, when it's made), the same call in a few languages,
+// and a file upload. A tracker begins with its first value.
+async function addTrackerPage(preset = null) {
+  const owned = state.sites.filter((s) => s.role === "owner");
+  const asked = preset ?? new URLSearchParams(location.search).get("site");
+  let site = owned.find((s) => s.key === asked) ?? owned[0];
+  if (!site) {
+    return h("div", { class: "page narrow" }, pageHead([icon("track", 20), h("h1", { text: "Add a tracker" })]),
+      h("div", { class: "notice", text: "Trackers belong to a website you own. Add a website first, and its trackers will be here." }));
+  }
+  let hasKey = (await api(`/api/sites/${site.key}/numbers?range=today`).catch(() => ({ hasKey: false }))).hasKey, shownKey = null;
+  const origin = location.origin;
+  const body = h("div", { class: "stack" });
+  const pick = h("select", { class: "input", id: "t-site", "aria-label": "Website", onchange: async (e) => {
+    site = owned.find((s) => s.key === e.target.value);
+    shownKey = null;
+    hasKey = (await api(`/api/sites/${site.key}/numbers?range=today`).catch(() => ({ hasKey: false }))).hasKey;
+    history.replaceState({}, "", `/trackers/new?site=${site.key}`);
+    draw();
+  } }, owned.map((s) => h("option", { value: s.key, selected: s.key === site.key ? true : null, text: s.name === s.domains[0] ? s.name : `${s.name} (${s.domains[0]})` })));
+
   function sendCard() {
     const k = shownKey ?? "YOUR_KEY";
     const examples = {
-      curl: `curl ${origin}/v1/number \\\n  -H "Authorization: Bearer ${k}" \\\n  -d '{"name": "Home goals", "value": 2}'`,
-      JavaScript: `await fetch("${origin}/v1/number", {\n  method: "POST",\n  headers: { Authorization: "Bearer ${k}" },\n  body: JSON.stringify({ name: "Installs", value: 1, op: "add" }),\n});`,
-      Python: `import requests\n\nrequests.post("${origin}/v1/number",\n  headers={"Authorization": "Bearer ${k}"},\n  json={"name": "Temperature", "value": 21.5})`,
-      "An address": `${origin}/v1/number?key=${k}&name=Temperature&value=21.5`,
+      curl: `curl ${origin}/v1/track \\\n  -H "Authorization: Bearer ${k}" \\\n  -d '{"name": "Home goals", "value": 2}'`,
+      JavaScript: `await fetch("${origin}/v1/track", {\n  method: "POST",\n  headers: { Authorization: "Bearer ${k}" },\n  body: JSON.stringify({ name: "Status", value: "Online" }),\n});`,
+      Python: `import requests\n\nrequests.post("${origin}/v1/track",\n  headers={"Authorization": "Bearer ${k}"},\n  json={"name": "Installs", "value": 1, "op": "add"})`,
+      "An address": `${origin}/v1/track?key=${k}&name=Temperature&value=21.5`,
     };
     let tab = saved.numbersTab && examples[saved.numbersTab] ? saved.numbersTab : "curl";
     const code = h("div", { class: "code-block" });
@@ -2285,10 +2285,10 @@ async function numbersPage(key) {
     };
     show();
     const makeKey = async () => {
-      if (data.hasKey && !(await confirmDialog({ title: "Make a new key?", body: "The key you have now stops working at once. Anything sending numbers with it needs the new one.", confirm: "Make a new key", danger: true }))) return;
+      if (hasKey && !(await confirmDialog({ title: "Make a new key?", body: "The key you have now stops working at once. Anything sending values with it needs the new one.", confirm: "Make a new key", danger: true }))) return;
       try {
-        shownKey = (await api(`/api/sites/${key}/numbers/key`, { method: "POST" })).key;
-        data.hasKey = true;
+        shownKey = (await api(`/api/sites/${site.key}/numbers/key`, { method: "POST" })).key;
+        hasKey = true;
         draw();
       } catch (e) {
         toast(e.message);
@@ -2298,10 +2298,12 @@ async function numbersPage(key) {
     const keyPart = shownKey
       ? h("div", { class: "field" }, h("span", { style: { fontWeight: 550 }, text: "Your key. Copy it now: it's shown only this once." }), h("div", { class: "code-block" }, shownKey, keyCopy))
       : h("div", { class: "row-between" },
-        h("span", { class: "muted", text: data.hasKey ? "This site has a key. It was shown once, when it was made; make a new one if you've lost it." : "Numbers are sent with a secret key of the site's own." }),
-        h("button", { class: data.hasKey ? "btn" : "btn primary", type: "button", text: data.hasKey ? "Make a new key" : "Create a key", onclick: makeKey }));
-    return card("Send a number", h("div", { class: "form" }, keyPart, tabHost, code,
-      h("p", { class: "help" }, "Use ", h("code", { text: '"op": "add"' }), " for a number that counts up, such as installs or sales: each value is added to its total. Any other number keeps its latest value, like a score or a temperature. Add ", h("code", { text: '"ts"' }), " for a value from another time. Keep the key on servers and devices: on a web page anyone could read it."),
+        h("span", { class: "muted", text: hasKey ? "This site has a key. It was shown once, when it was made; make a new one if you've lost it." : "Values are sent with a secret key of the site's own." }),
+        h("button", { class: hasKey ? "btn" : "btn primary", type: "button", text: hasKey ? "Make a new key" : "Create a key", onclick: makeKey }));
+    return card("Send a value", h("div", { class: "form" }, keyPart, tabHost, code,
+      h("p", { class: "help" }, "A value is a number, a word or a yes/no, and a new name starts a new tracker. Use ", h("code", { text: '"op": "add"' }),
+        " for a number that counts up, such as installs or sales: each value is added to its total. Anything else keeps its latest value. Add ", h("code", { text: '"ts"' }),
+        " for a value from another time. Keep the key on servers and devices: on a web page anyone could read it."),
     ), { sub: "From a script, a server or a device" });
   }
 
@@ -2314,11 +2316,10 @@ async function numbersPage(key) {
       for (const f of files) form.append("file", f, f.name);
       choose.disabled = true;
       try {
-        const res = await fetch(`/api/sites/${key}/numbers/upload`, { method: "POST", body: form, credentials: "same-origin" });
+        const res = await fetch(`/api/sites/${site.key}/numbers/upload`, { method: "POST", body: form, credentials: "same-origin" });
         const out = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(out.error ?? "That file couldn't be read.");
-        toast(`${int(out.saved)} values of ${out.names.length === 1 ? out.names[0] : `${out.names.length} numbers`} uploaded`);
-        load();
+        toast(`${int(out.saved)} values for ${out.names.length === 1 ? out.names[0] : `${out.names.length} trackers`} uploaded`);
       } catch (e) {
         toast(e.message);
       } finally {
@@ -2330,25 +2331,20 @@ async function numbersPage(key) {
       class: "drop", ondragover: (e) => { e.preventDefault(); drop.classList.add("over"); }, ondragleave: () => drop.classList.remove("over"),
       ondrop: (e) => { e.preventDefault(); drop.classList.remove("over"); send([...e.dataTransfer.files]); },
     }, icon("file", 22), h("b", { text: "Drop a CSV file here" }), choose, input);
-    return card("Upload numbers", h("div", { class: "form" }, drop,
-      h("div", { class: "code-block small", text: "time,name,value\n2026-11-01,Home goals,1\n2026-11-01T21:40,Home goals,2" }),
-      h("p", { class: "help", text: 'A row for each value, with "time", "name" and "value" columns; or a "time" column and a column for each number. Times are dates (2026-11-01) or times (2026-11-01T21:40).' })),
+    return card("Upload values", h("div", { class: "form" }, drop,
+      h("div", { class: "code-block small", text: "time,name,value\n2026-11-01,Home goals,1\n2026-11-01T21:40,Status,Online" }),
+      h("p", { class: "help", text: 'A row for each value, with "time", "name" and "value" columns; or a "time" column and a column for each tracker. Times are dates (2026-11-01) or times (2026-11-01T21:40).' })),
     { sub: "Past results, readings, exports" });
   }
 
-  // Values as they're sent, straight onto their tiles; a new number brings the page up to date.
-  const stream = new EventSource(`/api/sites/${key}/stream`);
-  stream.onmessage = (m) => {
-    const msg = JSON.parse(m.data);
-    if (msg.t !== "number" || !data) return;
-    const tile = tiles.get(msg.n.name);
-    if (tile) tile.update(msg.n.value, msg.n.ts);
-    else setTimeout(load, 1500);
-  };
-  onLeave(() => stream.close());
-  every(60_000, load);
-  queueMicrotask(load);
-  return h("div", { class: "page" }, pageHead([icon("hash", 20), h("h1", { text: "Numbers" }), h("span", { class: "muted", text: site?.domains[0] })], [rangeTabs]), body);
+  function draw() {
+    body.replaceChildren(
+      h("div", { class: "card" }, h("div", { class: "card-body form" }, h("div", { class: "field" }, h("label", { for: "t-site", text: "Website" }), pick,
+        h("span", { class: "help", text: "Each website has its own key; its trackers show under its name on the Trackers page." })))),
+      sendCard(), uploadCard());
+  }
+  draw();
+  return h("div", { class: "page narrow" }, pageHead([icon("track", 20), h("h1", { text: "Add a tracker" })], h("a", { class: "btn", href: "/trackers" }, "See your trackers")), body);
 }
 
 // ---------- Heatmaps ----------
@@ -2884,10 +2880,12 @@ const ROUTES = [
   [/^\/sites\/(p_[a-z0-9]+)\/setup$/, (k) => ["setup", k, setupPage(k)]],
   [/^\/sites\/(p_[a-z0-9]+)\/settings$/, (k) => ["settings", k, siteSettingsPage(k)]],
   [/^\/sites\/(p_[a-z0-9]+)\/import$/, (k) => ["import", k, importPage(k)]],
-  [/^\/sites\/(p_[a-z0-9]+)\/numbers$/, (k) => ["numbers", k, numbersPage(k)]],
+  [/^\/trackers$/, () => ["trackers", null, trackersPage()]],
+  [/^\/trackers\/new$/, () => ["addTracker", null, addTrackerPage()]],
+  [/^\/sites\/(p_[a-z0-9]+)\/numbers$/, (k) => ["addTracker", null, addTrackerPage(k)]],
   [/^\/sites\/(p_[a-z0-9]+)\/heatmaps$/, (k) => ["heatmaps", k, heatmapsPage(k)]],
 ];
-const TITLES = { home: "Websites", account: "Settings", plan: "Plan", add: "Add a website", analytics: "Analytics", live: "Live view", setup: "Setup", settings: "Site settings", import: "Import history", numbers: "Numbers", heatmaps: "Heatmaps" };
+const TITLES = { home: "Websites", account: "Settings", plan: "Plan", add: "Add a website", analytics: "Analytics", live: "Live view", setup: "Setup", settings: "Site settings", import: "Import history", trackers: "Trackers", addTracker: "Add a tracker", heatmaps: "Heatmaps" };
 
 let rendering = 0;
 async function render() {

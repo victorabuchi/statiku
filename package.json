@@ -12,7 +12,7 @@
     "geo": "node scripts/geo.ts",
     "migrate": "node db/migrate.ts",
     "start": "node ingest/server.ts",
-    "dev": "node --watch --env-file-if-exists=.env ingest/server.ts",
+    "dev": "node --env-file-if-exists=.env db/migrate.ts && node --watch --env-file-if-exists=.env ingest/server.ts",
     "project": "node --env-file-if-exists=.env scripts/project.ts",
     "stats": "node --env-file-if-exists=.env scripts/stats.ts",
     "billing": "node --env-file-if-exists=.env scripts/billing.ts",

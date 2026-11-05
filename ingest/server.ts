@@ -4,7 +4,8 @@
 //   POST /e         one event (a plain-text JSON body, so browsers send it without a preflight)
 //   POST /v1/app    a batch of events from an app (see app.ts)
 //   GET  /v1/site   what the script needs to know about its site (whether to ask for a visitor's location)
-//   POST /v1/number numbers sent with a site's secret key, from anywhere (see numbers.ts); GET with ?key=&name=&value=
+//   POST /v1/track  a tracker's values, sent with a site's secret key from anywhere (see numbers.ts); also GET with
+//                   ?key=&name=&value=, and at /v1/number
 //   GET  /healthz   for Render; /healthz?deep=1 also asks the database, for an outside monitor
 // Nothing here logs or stores an IP.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -150,7 +151,7 @@ export async function createApp(options: Options) {
         const outcome = await collectApp(deps, body, clientIp(req, options.trustProxy));
         return send(res, outcome.status, outcome.message);
       }
-      if (path === "/v1/number" || path === "/v1/numbers") {
+      if (path === "/v1/track" || path === "/v1/number" || path === "/v1/numbers") {
         if (req.method === "OPTIONS") return send(res, 204, "");
         if (req.method !== "POST" && req.method !== "GET") return send(res, 405, "use POST");
         const body = req.method === "POST" ? await readBody(req, MAX_NUMBERS_BODY) : "";
