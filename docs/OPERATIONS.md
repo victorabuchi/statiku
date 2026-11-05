@@ -93,6 +93,14 @@ npm run billing -- trial someone@example.com 14   # the trial ends 14 days from 
 npm run billing -- show someone@example.com
 ```
 
+## Questions in plain words (Claude)
+
+On a site's Analytics page, "What changed?" always works: Statiku works it out from its own numbers. Questions in
+the owner's own words ("why did visits drop on Tuesday?") are answered by Claude from a summary of the site's numbers
+(no visitor's details), when the server has an API key: set `ANTHROPIC_API_KEY` in the server's `.env` (from
+console.anthropic.com) and run `update.sh --force`. Each question is one request to Claude Opus 5.5 at medium effort,
+billed to that key; each person can ask 30 an hour. Without a key, a question gets "what changed" instead.
+
 ## Knowing when it's down
 
 - **Statiku itself:** GitHub checks `/healthz?deep=1` every half hour (`.github/workflows/uptime.yml`). When it doesn't

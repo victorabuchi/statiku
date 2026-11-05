@@ -22,6 +22,7 @@ let pool: pg.Pool;
 let base: string;
 const mailbox: { to: string; subject: string; text: string }[] = [];
 const slack: { url: string; body: any }[] = [];
+const asked: { question: string; pack: any }[] = [];
 
 before(async () => {
   if (skip) return;
@@ -36,6 +37,11 @@ before(async () => {
     mailer: async (mail) => void mailbox.push(mail),
     probe: async () => ({ error: "ENOTFOUND" }),
     fetchIcon: async () => null,
+    // Instead of Claude: what it was asked, and a fixed answer.
+    asker: async (question, pack) => {
+      asked.push({ question, pack });
+      return "Fewer visits came from Google this week.";
+    },
     // Instead of Slack: what would have been posted.
     post: async (to, init) => {
       slack.push({ url: String(to), body: JSON.parse(init?.body ?? "{}") });
@@ -455,4 +461,38 @@ test("the weekly match report: last week against the week before, by email and t
   const now = await as(`/api/sites/${key}/report`, { method: "POST" });
   assert.equal(now.status, 200, JSON.stringify(now.data));
   assert.match(now.data.heading, /^report\.example: /);
+});
+
+
+test("ask your data: what changed in a period, and questions in plain words with the numbers behind them", { skip }, async () => {
+  const { as, key, id } = await siteOf("ask.example");
+  const day = 86400_000, now = Date.now();
+  // This week: Google three visits, Hacker News one. The week before: Google six.
+  for (let i = 0; i < 3; i++) await visitAt(id, 10 + i, "Google", new Date(now - (i + 1) * 3600_000), ["/"]);
+  await visitAt(id, 20, "Hacker News", new Date(now - 5 * 3600_000), ["/launch"], ["signup"]);
+  for (let i = 0; i < 6; i++) await visitAt(id, 30 + i, "Google", new Date(now - 8 * day - i * 3600_000), ["/"]);
+
+  const changed = await as(`/api/sites/${key}/ask`, { method: "POST", body: { range: "d7" } });
+  assert.equal(changed.status, 200, JSON.stringify(changed.data));
+  assert.equal(changed.data.ai, false);
+  const lines = changed.data.lines.join("\n");
+  assert.match(lines, /Visitors fell 33%, from 6 to 4\./);
+  assert.match(lines, /Most of the drop came from Google \(−3 visits\)\./);
+  assert.match(lines, /Against the trend, Hacker News grew \(\+1\)\.|Goals: 1, against 0 before\./);
+  assert.match(lines, /Goals: 1, against 0 before\./);
+
+  asked.length = 0;
+  const answer = await as(`/api/sites/${key}/ask`, { method: "POST", body: { range: "d7", question: "Why did traffic drop?" } });
+  assert.equal(answer.data.ai, true);
+  assert.equal(answer.data.answer, "Fewer visits came from Google this week.");
+  // Claude gets the site's numbers, not its visitors.
+  const pack = asked[0].pack;
+  assert.equal(asked[0].question, "Why did traffic drop?");
+  assert.equal(pack.now.visits, 4);
+  assert.equal(pack.before.visits, 6);
+  assert.deepEqual(pack.movers.source.find((m: any) => m.label === "Google"), { label: "Google", now: 3, before: 6, change: -3 });
+  assert.ok(pack.daily.length >= 1 && pack.daily.every((d: any) => d.day && d.visits >= 1));
+  assert.equal(JSON.stringify(pack).includes('"visitor"'), false);
+  // "What changed?" in words is the same as asking for it.
+  assert.equal((await as(`/api/sites/${key}/ask`, { method: "POST", body: { range: "d7", question: "What changed?" } })).data.ai, false);
 });

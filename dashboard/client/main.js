@@ -1019,6 +1019,7 @@ async function analyticsPage(key) {
   const exportButton = h("button", { class: "btn", type: "button", disabled: true, onclick: () => data && exportCsv(data) }, icon("export", 16), "Export");
   const chips = h("div", { class: "filters", hidden: true });
   const insightsHost = h("div", { class: "stack" });
+  const askHost = askCard(key, () => ({ range: state.range, from: state.from, to: state.to }));
   let data = null;
 
   const rangeLabel = () => (state.range === "custom" && state.from && state.to
@@ -1188,6 +1189,7 @@ async function analyticsPage(key) {
       historyNote,
       kpis,
       h("div", { class: "grid g-side" }, chartCard, breakdown),
+      askHost,
       h("div", { class: "grid g3" },
         card("Top sources", bars(d.sources, { head: ["Source", "Visitors"], ...by("source") }), { sub: "Click any row to filter" }),
         card("Top pages", bars(pageRows, { head: ["Page", state.pagesTab === "top" ? "Visitors" : "Visits"], ...by("page") }), {
@@ -1235,6 +1237,32 @@ async function analyticsPage(key) {
   return h("div", { class: "page" },
     pageHead([icon("chart", 20), h("h1", { text: "Analytics" }), h("span", { class: "muted", text: site?.domains[0] }), refreshed], [rangeButton, exportButton, liveButton]),
     chips, body);
+}
+
+// Ask your data: "what changed" in the period, worked out from the numbers, or a question in plain words, answered
+// by Claude from them when the server has a key. Built once, so an answer stays while the report refreshes.
+function askCard(key, period) {
+  const input = h("input", { class: "input", type: "text", maxlength: "500", placeholder: "Ask about this period, like \"why did visits drop on Tuesday?\"", "aria-label": "Your question" });
+  const answer = h("div", { class: "ask-answer", hidden: true, "aria-live": "polite" });
+  const ask = async (question) => {
+    answer.hidden = false;
+    answer.replaceChildren(h("p", { class: "muted", text: question ? "Looking at your numbers…" : "Working out what changed…" }));
+    try {
+      const r = await api(`/api/sites/${key}/ask`, { method: "POST", body: { ...period(), question } });
+      answer.replaceChildren(...[
+        r.ai ? h("p", { class: "ai", text: r.answer }) : null,
+        r.note ? h("p", { class: "notice", text: r.note }) : null,
+        r.ai ? h("p", { class: "help", text: "Answered by Claude from this period's numbers. It can be wrong: the figures below are Statiku's own." }) : h("b", { text: "What changed" }),
+        h("ul", { class: "changes" }, r.lines.map((l) => h("li", { text: l }))),
+      ].filter(Boolean));
+    } catch (e) {
+      if (!(e instanceof SignedOut)) answer.replaceChildren(failure(e));
+    }
+  };
+  const form = h("form", { class: "ask-row", onsubmit: (e) => { e.preventDefault(); const q = input.value.trim(); if (q) ask(q); } },
+    input, h("button", { class: "btn primary", type: "submit", text: "Ask" }),
+    h("button", { class: "btn", type: "button", text: "What changed?", onclick: () => ask("") }));
+  return card("Ask your data", h("div", { class: "stack tight" }, form, answer), { sub: "In plain words, about the period shown" });
 }
 
 // Assists and player ratings for the period, for the whole site (filters don't narrow them).

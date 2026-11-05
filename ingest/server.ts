@@ -16,6 +16,7 @@ import type { Polar } from "../dashboard/billing.ts";
 import type { fetchIcon, Outbound } from "../dashboard/check.ts";
 import type { Probe } from "../dashboard/monitor.ts";
 import { createDashboard, type ImportApis } from "../dashboard/server.ts";
+import type { Asker } from "../dashboard/ask.ts";
 import { buildTracker } from "../tracker/build.ts";
 import { collectApp, MAX_APP_BODY } from "./app.ts";
 import { collect, MAX_BODY, siteConfig, type Deps } from "./collect.ts";
@@ -42,6 +43,7 @@ export type Options = {
   probe?: Probe;
   fetchIcon?: typeof fetchIcon;
   post?: Outbound;
+  asker?: Asker | null;
 };
 
 const CORS = {
@@ -108,6 +110,7 @@ export async function createApp(options: Options) {
     probe: options.probe,
     fetchIcon: options.fetchIcon,
     post: options.post,
+    asker: options.asker,
   });
   const etag = `"${createHash("sha256").update(script).digest("base64url").slice(0, 16)}"`;
 

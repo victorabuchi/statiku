@@ -617,3 +617,10 @@ td.path { font-family: var(--mono); font-size: 12.5px; max-width: 240px; overflo
 .badge.ok { background: #cdfee1; color: #0c5132; }
 .input-row .secret { flex: 1; min-width: 0; }
 .row-gap { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* ---------- Ask your data ---------- */
+.ask-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.ask-row .input { flex: 1 1 280px; min-width: 0; }
+.ask-answer { display: grid; gap: 8px; }
+.ask-answer .ai { margin: 0; font-size: 15px; line-height: 1.55; }
+.changes { margin: 0; padding-left: 18px; display: grid; gap: 4px; }

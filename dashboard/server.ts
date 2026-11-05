@@ -24,6 +24,7 @@
 //   GET    /api/match/:token   GET /api/match/:token/stream   the match view at its public link, and its live feed
 //   GET    /api/sites/:key/momentum   who's attacking right now
 //   GET    /api/sites/:key/insights?range=   assists, player ratings, injuries and revenue by source for a period
+//   POST   /api/sites/:key/ask { question?, range }   what changed in a period, or an answer to a question about it
 //   POST   /api/sites/:key/report   last week's match report, now, to the person asking (and Slack)
 //   POST   /api/pay/stripe/:key   POST /api/pay/polar/:key   a site's payments, from its own Stripe or Polar webhook
 //   GET    /api/sites/:key/heatmap?range=&path=&device=   where a page's visitors click, and how far down they read
@@ -53,6 +54,7 @@ import { OWNER, ownerSetup } from "./owner.ts";
 import { cleanGoals, goalsOf, matchSummary, shareMatch, siteByMatchToken, stopSharingMatch } from "./match.ts";
 import { assists, heatmap, injuries, momentum, ratings, revenue } from "./insights.ts";
 import { createReports, slackHook } from "./reports.ts";
+import { askerFromEnv, numbersFor, whatChanged, type Asker } from "./ask.ts";
 import { paymentOf, payingSite, recordPayment, verifyPayment, type Provider } from "./payments.ts";
 import { deleteNumber, numbersReport, parseNumbersFile, renewNumbersKey, saveNumbers } from "./numbers.ts";
 import { access, applySubscription, BILLING_COLUMNS, checkoutUrl, planOf, PLANS, polarFromEnv, portalUrl, usage, verifyWebhook, type Polar } from "./billing.ts";
@@ -251,8 +253,9 @@ export async function createDashboard(options: {
   // How the site watcher looks at a site, and how icons are fetched; tests use stand-ins.
   probe?: Probe;
   fetchIcon?: typeof fetchIcon;
-  // How match reports reach Slack; tests use a stand-in.
+  // How match reports reach Slack, and who answers questions about a site's numbers; tests use stand-ins.
   post?: Outbound;
+  asker?: Asker | null;
 }) {
   const { pool, onSiteChanged, presence, hub, streets } = options;
   const mailer = options.mailer ?? smtpMailer();
@@ -267,6 +270,9 @@ export async function createDashboard(options: {
   const passwords = new Attempts(10, 10 * 60_000);
   // Reset links: a few per address an hour, so no one can fill a stranger's inbox.
   const resets = new Attempts(5, 15 * 60_000);
+  // Questions in plain words: Claude, if the server has a key; a few dozen an hour each.
+  const asker = options.asker === undefined ? askerFromEnv() : options.asker;
+  const questions = new Attempts(30, 60 * 60_000);
   const resetsTo = new Attempts(3, 60 * 60_000);
 
   function sendAsset(r: Request, asset: Asset, cache: string) {
@@ -975,7 +981,7 @@ export async function createDashboard(options: {
       return json(res, 200, await checkInstall(site.domains[0], site.key));
     }
     // After an unpaid trial the reports close until a plan is chosen; the site is still counted meanwhile.
-    if (["/stats", "/live", "/stream", "/match", "/momentum", "/insights", "/heatmap"].includes(action) && access(site.billing) === "locked") {
+    if (["/stats", "/live", "/stream", "/match", "/momentum", "/insights", "/heatmap", "/ask"].includes(action) && access(site.billing) === "locked") {
       throw new HttpError(402, site.role === "owner"
         ? "Your free trial has ended. Choose a plan to see your numbers again: Statiku has kept counting meanwhile."
         : "This team's free trial has ended. Its owner can choose a plan to open the reports again.");
@@ -991,6 +997,23 @@ export async function createDashboard(options: {
     if (action === "/live" && method === "GET") return json(res, 200, await live(pool, site, presence(site.id), streets));
     if (action === "/match" && method === "GET") return json(res, 200, await matchSummary(pool, site, presence(site.id)));
     if (action === "/momentum" && method === "GET") return json(res, 200, await momentum(pool, site));
+    if (action === "/ask" && method === "POST") {
+      const body = await readJson(req);
+      const range = typeof body.range === "string" && RANGE_IDS.includes(body.range) ? body.range : "d30";
+      const b = await bounds(pool, site.id, site.timezone, range, { from: typeof body.from === "string" ? body.from : null, to: typeof body.to === "string" ? body.to : null });
+      const numbers = await numbersFor(pool, site, b, goalsOf(site));
+      const lines = whatChanged(numbers);
+      const question = text(body.question, 500);
+      if (!question || /^what('?s| has)? changed\??$/i.test(question)) return json(res, 200, { ai: false, lines });
+      if (!asker) return json(res, 200, { ai: false, lines, note: "Questions in your own words need an AI key on this server. Here's what changed in the period instead." });
+      if (!questions.allow(user.id)) throw new HttpError(429, "That's a lot of questions for one hour. Try again a little later.");
+      try {
+        return json(res, 200, { ai: true, answer: await asker(question, numbers, { name: site.name, domain: site.domains[0] }), lines });
+      } catch (e) {
+        console.error("Ask:", (e as Error).message);
+        return json(res, 200, { ai: false, lines, note: "The answer couldn't be worked out just now. Here's what changed in the period instead." });
+      }
+    }
     if (action === "/report" && method === "POST") {
       if (!checks.allow(`report:${user.id}`)) throw new HttpError(429, "Wait a minute before sending another.");
       const { rows: [hook] } = await pool.query("select slack_webhook from projects where id = $1", [site.id]);
