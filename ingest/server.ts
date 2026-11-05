@@ -27,7 +27,8 @@ import { Sessions } from "./sessions.ts";
 import { Writer } from "./writer.ts";
 
 export type Options = {
-  databaseUrl: string; trustProxy: boolean; geoPath: string | URL; cityPath?: string | URL; flushMs?: number; dashboard?: boolean;
+  // How many proxies stand in front of the service (true is one): the client is the address the outermost one saw.
+  databaseUrl: string; trustProxy: boolean | number; geoPath: string | URL; cityPath?: string | URL; flushMs?: number; dashboard?: boolean;
   // Street names for shared locations; tests pass their own instead of asking OpenStreetMap.
   geocode?: Geocoder;
   // Email to the people who use the dashboard; tests keep what would be sent.
@@ -46,12 +47,15 @@ const CORS = {
   "access-control-max-age": "86400",
 };
 
-// Behind Render's proxy the client is the first address it forwards; anywhere else, the socket's.
-export function clientIp(req: IncomingMessage, trustProxy: boolean): string {
-  if (trustProxy) {
-    const header = (name: string) => [req.headers[name]].flat()[0];
-    const ip = header("cf-connecting-ip") ?? header("true-client-ip") ?? header("x-forwarded-for")?.split(",")[0];
-    if (ip?.trim()) return ip.trim();
+// Behind proxies (TRUST_PROXY=1 for Northflank's or Render's, 2 with Cloudflare's in front of it), each adds the
+// address it saw to the end of X-Forwarded-For, so the client is that many from the end. Anything earlier in the
+// header, and headers such as CF-Connecting-IP, the client could have written itself. Without a proxy: the socket.
+export function clientIp(req: IncomingMessage, trustProxy: boolean | number): string {
+  const proxies = trustProxy === true ? 1 : Number(trustProxy) || 0;
+  if (proxies > 0) {
+    const hops = String([req.headers["x-forwarded-for"]].flat()[0] ?? "").split(",").map((h) => h.trim()).filter(Boolean);
+    const ip = hops[hops.length - proxies] ?? hops[0];
+    if (ip) return ip;
   }
   return req.socket.remoteAddress ?? "";
 }
@@ -185,7 +189,7 @@ if (import.meta.main) {
   if (!databaseUrl) throw new Error("Set DATABASE_URL");
   const app = await createApp({
     databaseUrl,
-    trustProxy: process.env.TRUST_PROXY === "1",
+    trustProxy: Number(process.env.TRUST_PROXY) || 0,
     geoPath: process.env.GEO_DB ?? new URL("../data/country.mmdb", import.meta.url),
     cityPath: process.env.GEO_CITY_DB ?? new URL("../data/city.mmdb", import.meta.url),
   });

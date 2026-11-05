@@ -6,7 +6,7 @@ import { after, before, test } from "node:test";
 import pg from "pg";
 import { migrate } from "../db/migrate.ts";
 import { createProject } from "../scripts/project.ts";
-import { createApp } from "../ingest/server.ts";
+import { clientIp, createApp } from "../ingest/server.ts";
 
 const url = process.env.TEST_DATABASE_URL;
 const skip = !url ? "set TEST_DATABASE_URL to run" : !/test/.test(url) ? "TEST_DATABASE_URL must name a test database" : false;
@@ -43,7 +43,8 @@ after(async () => {
 function post(body: unknown, ua = SAFARI, ip = FINNISH_IP) {
   return fetch(`${base}/e`, {
     method: "POST",
-    headers: { "content-type": "text/plain;charset=UTF-8", "user-agent": ua, "x-forwarded-for": `${ip}, 10.0.0.1` },
+    // What the proxy in front adds to the end is the client; anything before it the client could have written.
+    headers: { "content-type": "text/plain;charset=UTF-8", "user-agent": ua, "x-forwarded-for": `10.0.0.1, ${ip}` },
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 }
@@ -138,4 +139,15 @@ test("refuses what doesn't belong and drops bots", { skip }, async () => {
   assert.equal((await post(hit("pageview", "https://notchlight.com/"), "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)")).status, 202);
   await app.writer.flush();
   assert.equal((await pool.query("select count(*)::int as n from events")).rows[0].n, before);
+});
+
+test("the client is the address the proxy saw, not one it wrote itself", () => {
+  const req = (headers: Record<string, string>) => ({ headers, socket: { remoteAddress: "10.9.9.9" } }) as unknown as import("node:http").IncomingMessage;
+  const sent = { "x-forwarded-for": "203.0.113.7, 91.152.40.1", "cf-connecting-ip": "203.0.113.8", "true-client-ip": "203.0.113.9" };
+  assert.equal(clientIp(req(sent), true), "91.152.40.1");
+  assert.equal(clientIp(req(sent), 1), "91.152.40.1");
+  // Cloudflare in front of the host: two proxies, so the client is second from the end.
+  assert.equal(clientIp(req({ "x-forwarded-for": "198.51.100.4, 91.152.40.1, 172.68.1.1" }), 2), "91.152.40.1");
+  assert.equal(clientIp(req(sent), 0), "10.9.9.9");
+  assert.equal(clientIp(req({}), 1), "10.9.9.9");
 });

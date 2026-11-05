@@ -57,7 +57,7 @@ const batch = (install: string, events: object[], extra: object = {}) => ({
 function post(body: unknown, ip = HOME) {
   return fetch(`${base}/v1/app`, {
     method: "POST",
-    headers: { "content-type": "application/json", "user-agent": "Statiku-Swift/0.1", "x-forwarded-for": `${ip}, 10.0.0.1` },
+    headers: { "content-type": "application/json", "user-agent": "Statiku-Swift/0.1", "x-forwarded-for": `10.0.0.1, ${ip}` },
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 }
