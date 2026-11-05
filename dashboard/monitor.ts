@@ -19,13 +19,14 @@ const probePublic: Probe = async (domain) => {
   }
 };
 
-// The usual page views in the hour before now, from the same hour on each of the last four weeks.
+// The usual page views in the hour before now, from the same hour on each of the last four weeks, in hours so that a
+// daylight saving change doesn't move the window.
 const WATCHED = `
   select p.id, p.key, p.name, p.domains, p.alert_kind as kind, p.alert_since as since, p.alert_quiet as quiet, p.alert_surge as surge, p.surge_at,
          (select count(*) from events e where e.project_id = p.id and e.ts > $1::timestamptz - interval '1 hour' and e.ts <= $1)::int as last_hour,
          (select count(*) from events e where e.project_id = p.id and e.name = 'pageview' and e.ts > $1::timestamptz - interval '15 minutes' and e.ts <= $1)::int as last_quarter,
          (select sum((select count(*) from events e where e.project_id = p.id and e.name = 'pageview'
-                        and e.ts > $1::timestamptz - make_interval(days => 7 * w, hours => 1) and e.ts <= $1::timestamptz - make_interval(days => 7 * w)))
+                        and e.ts > $1::timestamptz - make_interval(hours => 168 * w + 1) and e.ts <= $1::timestamptz - make_interval(hours => 168 * w)))
             from generate_series(1, 4) w)::float / 4 as usual_hour
     from projects p
    where (p.alert_quiet or p.alert_surge or p.alert_kind is not null)
