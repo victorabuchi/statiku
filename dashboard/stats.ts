@@ -160,14 +160,15 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 // A period's bounds and the previous period of the same length. A custom period runs from the start of its first
 // day to the end of its last (or now, if that's sooner), by hour for one day, by month past six months. All time runs
 // from the day of the site's first visit (or first imported day), and has nothing before it to compare with.
-async function bounds(pool: pg.Pool, siteId: string, tz: string, rangeId: string, custom: { from?: string | null; to?: string | null }) {
+export async function bounds(pool: pg.Pool, siteId: string, tz: string, rangeId: string, custom: { from?: string | null; to?: string | null }) {
   if (rangeId === "all") {
     const { rows: [b] } = await pool.query(
       `select f at time zone $1 as "from", now() as "to"
          from (select date_trunc('day', least(
                  coalesce((select min(ts) from events where project_id = $2), (select created_at from projects where id = $2)) at time zone $1,
                  coalesce((select min(d.day)::timestamp from imported_days d join imports i on i.id = d.import_id and i.status = 'done'
-                            where d.project_id = $2), 'infinity'))) as f) x`,
+                            where d.project_id = $2), 'infinity'),
+                 coalesce((select min(ts) from metric_points where project_id = $2) at time zone $1, 'infinity'))) as f) x`,
       [tz, siteId],
     );
     const days = (b.to - b.from) / 86400e3;

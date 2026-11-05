@@ -99,6 +99,20 @@ const SESSION_COLUMNS: [string, string, (s: Session) => unknown][] = [
   ["os", "text", (s) => s.os],
 ];
 
+// The tables beside events, written in the same batches: numbers sent with a site's key, clicks and scroll depths for
+// heatmaps, and page speed and errors. Rows are keyed by column name. Only numbers count towards a site's events.
+export const EXTRA = {
+  metric_points: { project_id: "uuid", name: "text", ts: "timestamptz", value: "float8" },
+  clicks: { project_id: "uuid", ts: "timestamptz", path: "text", device: "text", x: "real", y: "integer", page_h: "integer", target: "text" },
+  scrolls: { project_id: "uuid", ts: "timestamptz", path: "text", device: "text", depth: "smallint" },
+  vitals: { project_id: "uuid", ts: "timestamptz", path: "text", device: "text", lcp: "integer", inp: "integer", cls: "real", ttfb: "integer", status: "smallint" },
+  page_errors: { project_id: "uuid", ts: "timestamptz", path: "text", message: "text", source: "text", line: "integer", browser: "text" },
+} as const;
+export type ExtraTable = keyof typeof EXTRA;
+export type ExtraRow = Record<string, unknown> & { project_id: string; ts: Date };
+const extraColumns = (table: ExtraTable): [string, string, (row: ExtraRow) => unknown][] =>
+  Object.entries(EXTRA[table]).map(([column, type]) => [column, type, (row) => row[column] ?? null]);
+
 // insert … select from unnest($1::uuid[], $2::timestamptz[], …): one statement and one array per column.
 function unnestInsert<T>(table: string, columns: [string, string, (row: T) => unknown][], rows: T[]) {
   const names = columns.map(([name]) => name).join(", ");
@@ -114,6 +128,7 @@ export class Writer {
   sessions: Sessions;
   queue: EventRow[] = [];
   marks: MarkRow[] = [];
+  extras: [ExtraTable, ExtraRow][] = [];
   dropped = 0;
   flushing: Promise<void> | null = null;
   timer: NodeJS.Timeout | null = null;
@@ -137,6 +152,17 @@ export class Writer {
     this.marks.push(row);
   }
 
+  addRow(table: ExtraTable, row: ExtraRow) {
+    this.extras.push([table, row]);
+    // Like events: past the limit (the database has been down a while), the oldest go.
+    if (this.extras.length > MAX_QUEUE) this.extras.splice(0, this.extras.length - MAX_QUEUE);
+    if (this.extras.length >= BATCH * 4) this.flushQuietly();
+  }
+
+  get waiting() {
+    return this.queue.length || this.marks.length || this.extras.length || this.sessions.anyDirty;
+  }
+
   start(intervalMs = 1000) {
     this.timer = setInterval(() => this.flushQuietly(), intervalMs);
   }
@@ -154,18 +180,19 @@ export class Writer {
   // Writes everything waiting. Only one flush runs at a time; a call during one waits for it and then runs again.
   async flush(): Promise<void> {
     while (this.flushing) await this.flushing.catch(() => {});
-    if (!this.queue.length && !this.marks.length && !this.sessions.anyDirty) return;
+    if (!this.waiting) return;
     this.flushing = this.writeAll().finally(() => (this.flushing = null));
     return this.flushing;
   }
 
   async writeAll() {
-    while (this.queue.length || this.marks.length || this.sessions.anyDirty) {
+    while (this.waiting) {
       const events = this.queue.splice(0, BATCH * 4);
       const marks = this.marks.splice(0);
+      const extras = this.extras.splice(0, BATCH * 8);
       const { rows: sessions, sessions: live } = this.sessions.takeDirty();
       try {
-        await this.write(events, sessions, marks);
+        await this.write(events, sessions, marks, extras);
       } catch (e) {
         // A data error (SQLSTATE class 22 or 23) would fail on every retry and block the queue, so that batch goes.
         if (/^2[23]/.test((e as { code?: string }).code ?? "")) {
@@ -175,6 +202,7 @@ export class Writer {
         }
         this.sessions.requeue(live);
         this.marks.unshift(...marks);
+        this.extras.unshift(...extras);
         this.queue.unshift(...events);
         console.error(`Writing ${events.length} events failed; they stay queued.`, (e as Error).message);
         throw e;
@@ -182,11 +210,19 @@ export class Writer {
     }
   }
 
-  async write(events: EventRow[], sessions: Session[], marks: MarkRow[]) {
+  async write(events: EventRow[], sessions: Session[], marks: MarkRow[], extras: [ExtraTable, ExtraRow][] = []) {
     const usage = new Map<string, number>();
-    for (const e of events) {
-      const key = `${e.projectId} ${e.ts.toISOString().slice(0, 10)}`;
+    const count = (projectId: string, ts: Date) => {
+      const key = `${projectId} ${ts.toISOString().slice(0, 10)}`;
       usage.set(key, (usage.get(key) ?? 0) + 1);
+    };
+    for (const e of events) count(e.projectId, e.ts);
+    const byTable = new Map<ExtraTable, ExtraRow[]>();
+    for (const [table, row] of extras) {
+      const list = byTable.get(table);
+      if (list) list.push(row);
+      else byTable.set(table, [row]);
+      if (table === "metric_points") count(row.project_id, row.ts);
     }
     const client = await this.pool.connect();
     try {
@@ -203,6 +239,7 @@ export class Writer {
         });
       }
       if (marks.length) await client.query(unnestInsert("download_marks", MARK_COLUMNS, marks));
+      for (const [table, rows] of byTable) await client.query(unnestInsert(table, extraColumns(table), rows));
       if (usage.size) {
         const keys = [...usage.keys()].map((k) => k.split(" "));
         await client.query(

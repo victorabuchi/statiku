@@ -19,6 +19,7 @@
 //   GET    /api/sites/:key/imports   POST { kind: ga4 | plausible | github, … }   POST …/imports/file (form data)
 //   DELETE /api/sites/:key/imports/:id   GET …/imports/google/start → Google → /api/imports/google/callback
 //   GET    /api/sites/:key/imports/google/properties?grant=
+//   GET    /api/sites/:key/numbers?range=   POST …/numbers/key (a new key)   POST …/numbers/upload (CSV)   DELETE …/numbers/:name
 //   GET    /api/billing   POST /api/billing/checkout { plan, interval }   POST /api/billing/portal   POST /api/polar/webhook
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
@@ -42,6 +43,7 @@ import type { Billing } from "./billing.ts";
 import { letter, smtpMailer, type Mailer } from "./mail.ts";
 import { createMonitor, type Probe } from "./monitor.ts";
 import { OWNER, ownerSetup } from "./owner.ts";
+import { deleteNumber, numbersReport, parseNumbersFile, renewNumbersKey, saveNumbers } from "./numbers.ts";
 import { access, applySubscription, BILLING_COLUMNS, checkoutUrl, planOf, PLANS, polarFromEnv, portalUrl, usage, verifyWebhook, type Polar } from "./billing.ts";
 import { checkInstall, fetchIcon, imageType, openRequest, publicRequest, type Outbound } from "./check.ts";
 import {
@@ -232,7 +234,7 @@ function siteBundle(asset: (body: string | Uint8Array, type: string) => Asset, f
 export type ImportApis = { request?: Outbound; open?: Outbound; google?: Partial<Google>; github?: string };
 
 export async function createDashboard(options: {
-  pool: pg.Pool; onSiteChanged: (key: string) => void; presence: Presence; hub: Hub; streets: Streets; mailer?: Mailer; imports?: ImportApis;
+  pool: pg.Pool; onSiteChanged: (key: string) => void; onNumbersChanged?: (projectId: string) => void; presence: Presence; hub: Hub; streets: Streets; mailer?: Mailer; imports?: ImportApis;
   // Polar, for Statiku's own plans; tests use a stand-in.
   polar?: Polar & { request?: Outbound };
   // How the site watcher looks at a site, and how icons are fetched; tests use stand-ins.
@@ -419,6 +421,44 @@ export async function createDashboard(options: {
     const files = await Promise.all(form.getAll("file").filter((f): f is File => typeof f !== "string").map(async (f) => ({ name: f.name.slice(0, 200), data: Buffer.from(await f.arrayBuffer()) })));
     if (!files.length) throw new HttpError(400, "Choose a file to import.");
     return files;
+  }
+
+  // A site's numbers: the report, a new key to send them with, a file of them, and deleting one.
+  async function numbersApi(r: Request, site: Site, sub: string | undefined) {
+    const { req, res } = r;
+    const method = req.method ?? "GET";
+    if (!sub && method === "GET") {
+      if (access(site.billing) === "locked") throw new HttpError(402, "Your free trial has ended. Choose a plan to see your numbers again: Statiku has kept counting meanwhile.");
+      const url = new URL(req.url ?? "/", "http://x");
+      const range = url.searchParams.get("range") ?? "d30";
+      return json(res, 200, await numbersReport(pool, site, RANGE_IDS.includes(range) ? range : "d30", { from: url.searchParams.get("from"), to: url.searchParams.get("to") }));
+    }
+    ownerOnly(site);
+    const changed = () => options.onNumbersChanged?.(site.id);
+    if (sub === "key" && method === "POST") {
+      const key = await renewNumbersKey(pool, site.id);
+      changed();
+      return json(res, 200, { key });
+    }
+    if (sub === "upload" && method === "POST") {
+      let saved = 0;
+      const names = new Set<string>();
+      for (const file of await filesOf(req)) {
+        const parsed = parseNumbersFile(file.data.toString("utf8"));
+        if (typeof parsed === "string") throw new HttpError(400, `${file.name}: ${parsed}`);
+        const done = await saveNumbers(pool, site.id, parsed);
+        saved += done.saved;
+        done.names.forEach((n) => names.add(n));
+      }
+      changed();
+      return json(res, 200, { saved, names: [...names] });
+    }
+    if (sub && method === "DELETE") {
+      if (!(await deleteNumber(pool, site.id, sub))) throw new HttpError(404, "There's no such number on this site.");
+      changed();
+      return json(res, 200, { ok: true });
+    }
+    throw new HttpError(404, "Not found.");
   }
 
   async function importsApi(r: Request, user: User, site: Site, sub: string | undefined) {
@@ -790,6 +830,9 @@ export async function createDashboard(options: {
       void refreshIcon(site);
       return json(res, 201, { site: { key: site.key, name: site.name, domains: site.domains, timezone: site.timezone } });
     }
+
+    const numbersAt = path.match(/^\/api\/sites\/(p_[a-z0-9]{6,20})\/numbers(?:\/([^/]{1,200}))?$/);
+    if (numbersAt) return numbersApi(r, await mySite(user, numbersAt[1]), numbersAt[2] ? decodeURIComponent(numbersAt[2]) : undefined);
 
     const match = path.match(/^\/api\/sites\/(p_[a-z0-9]{6,20})(\/[a-z]+)?$/);
     if (!match) throw new HttpError(404, "Not found.");

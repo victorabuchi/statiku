@@ -41,7 +41,7 @@ export async function deleteProject(pool: pg.Pool, projectId: string) {
   const client = await pool.connect();
   try {
     await client.query("begin");
-    for (const table of ["events", "sessions", "download_marks"]) await client.query(`delete from ${table} where project_id = $1`, [projectId]);
+    for (const table of ["events", "sessions", "download_marks", "metric_points", "clicks", "scrolls", "vitals", "page_errors"]) await client.query(`delete from ${table} where project_id = $1`, [projectId]);
     const { rows: [gone] } = await client.query("delete from projects where id = $1 returning workspace_id", [projectId]);
     if (gone) {
       await client.query(

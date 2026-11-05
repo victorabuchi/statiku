@@ -4,7 +4,9 @@
 
 export type LiveMessage =
   | { t: "event"; e: { ts: Date; name: string; path: string | null; country: string | null; source: string | null; device: string | null; browser: string | null; os: string | null; app: boolean } }
-  | { t: "presence" };
+  | { t: "presence" }
+  // A number sent with the site's key: for an "add" number, the value is what it went up by.
+  | { t: "number"; n: { name: string; value: number; ts: Date; kind: "set" | "add" } };
 
 export class Hub {
   subscribers = new Map<string, Set<(message: string) => void>>();

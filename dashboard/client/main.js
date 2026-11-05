@@ -35,6 +35,8 @@ const ICONS = {
   chart: '<path d="M4 16.5v-4M8 16.5v-8M12 16.5v-6M16 16.5V4"/>',
   live: '<circle cx="10" cy="10" r="1.8"/><path d="M6.8 13.2a4.5 4.5 0 0 1 0-6.4M13.2 6.8a4.5 4.5 0 0 1 0 6.4M4.3 15.7a8 8 0 0 1 0-11.4M15.7 4.3a8 8 0 0 1 0 11.4"/>',
   code: '<path d="m7 6-4 4 4 4M13 6l4 4-4 4"/>',
+  // A number sign: anything a site counts beyond its visits.
+  hash: '<path d="M8 3.5 6.5 16.5M13.5 3.5 12 16.5M4 7.5h12.5M3.5 12.5H16"/>',
   // A cog (after Feather's, MIT), drawn on a 24 grid and scaled to this one.
   settings: '<g transform="scale(0.8333)" stroke-width="1.9"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></g>',
   person: '<circle cx="10" cy="7.3" r="3.1"/><path d="M4.2 16.6c.9-2.9 3.1-4.4 5.8-4.4s4.9 1.5 5.8 4.4"/>',
@@ -350,6 +352,7 @@ function shell(site, active, content) {
         navItem(`/sites/${site.key}`, "chart", "Analytics", active === "analytics"),
         navItem(`/sites/${site.key}/live`, "live", "Live view", active === "live",
           h("span", { class: "count", id: "nav-live", hidden: !site.live }, h("i", { class: "dot pulse" }), h("span", { text: String(site.live) }))),
+        navItem(`/sites/${site.key}/numbers`, "hash", "Numbers", active === "numbers"),
         navItem(`/sites/${site.key}/setup`, "code", "Setup", active === "setup"),
         navItem(`/sites/${site.key}/import`, "history", "Import history", active === "import"),
       ] : null),
@@ -1892,6 +1895,167 @@ async function accountPage() {
       h("div", { class: "card", style: { borderColor: "#fbd5d0" } }, h("div", { class: "card-head" }, h("h2", { text: "Delete account" })), h("div", { class: "card-body" }, close))));
 }
 
+// ---------- Numbers ----------
+// Anything a site measures beyond its visits, sent with its secret key or uploaded: a tile each, live.
+const num = (v) => (v == null ? "–" : Number(v).toLocaleString("en-US", { maximumFractionDigits: Math.abs(v) < 100 ? 2 : 0 }));
+const NUMBER_RANGES = [["today", "Today"], ["d7", "7 days"], ["d30", "30 days"], ["m12", "12 months"], ["all", "All time"]];
+
+// A number's tile: its value for the period (an "add" number's total, any other's latest), the change on the previous
+// period, its line, and when it last moved. update() takes a value as it arrives.
+function numberTile(n, { owner = false, onDelete = null, big = false } = {}) {
+  const value = h("span", { class: "value" });
+  const when = h("span", { class: "muted small" });
+  const line = h("span", { class: "spark-host" });
+  const tile = h("div", { class: `card kpi number-tile${big ? " big" : ""}` },
+    h("span", { class: "label" }, h("span", { text: n.name }), h("span", { class: "kind", text: n.kind === "add" ? "Total" : "Latest" }),
+      owner && onDelete ? h("button", { class: "btn plain icon-only", type: "button", "aria-label": `Delete ${n.name}`, title: "Delete", onclick: onDelete }, icon("trash", 14)) : null),
+    value, n.previous != null ? delta({}, n.value, n.previous) : h("span", { class: "delta", text: n.kind === "add" ? "In this period" : " " }), line, when);
+  const paint = () => {
+    value.textContent = num(n.value ?? (n.kind === "add" ? 0 : n.last?.value));
+    when.textContent = n.last ? `Updated ${ago(n.last.ts)}` : "Nothing yet";
+    // A latest-value number holds its value through the hours nothing was sent; a total is 0 then.
+    let held = n.series.find((p) => p.v != null)?.v ?? 0;
+    line.replaceChildren(sparkline(n.series.map((p) => (n.kind === "add" ? p.v ?? 0 : (held = p.v ?? held))), big ? { width: 220, height: 44 } : {}));
+  };
+  paint();
+  tile.update = (v, ts) => {
+    n.value = n.kind === "add" ? (n.value ?? 0) + v : v;
+    n.last = { value: v, ts };
+    const end = n.series.at(-1);
+    if (end) end.v = n.kind === "add" ? (end.v ?? 0) + v : v;
+    paint();
+    tile.classList.remove("flash");
+    void tile.offsetWidth;
+    tile.classList.add("flash");
+  };
+  return tile;
+}
+
+async function numbersPage(key) {
+  const site = state.sites.find((s) => s.key === key);
+  const owner = site?.role === "owner";
+  let range = saved.numbersRange ?? "today", data = null, shownKey = null;
+  const tiles = new Map();
+  const grid = h("div", { class: "grid g4 numbers" });
+  const body = h("div", { class: "stack" }, h("p", { class: "muted", text: "Loading…" }));
+  const rangeTabs = h("span");
+  const origin = location.origin;
+
+  async function load() {
+    rangeTabs.replaceChildren(tabs(NUMBER_RANGES, range, (id) => { range = id; saved.numbersRange = id; remember(); load(); }));
+    try {
+      data = await api(`/api/sites/${key}/numbers?range=${range}`);
+      draw();
+    } catch (err) {
+      if (!(err instanceof SignedOut)) body.replaceChildren(failure(err));
+    }
+  }
+
+  const remove = (n) => async () => {
+    if (!(await confirmDialog({ title: `Delete ${n.name}?`, body: "Every value it has, sent or uploaded, is deleted. Sending it again starts it afresh.", confirm: "Delete", danger: true }))) return;
+    await api(`/api/sites/${key}/numbers/${encodeURIComponent(n.name)}`, { method: "DELETE" }).then(() => { toast(`${n.name} deleted`); load(); }, (e) => toast(e.message));
+  };
+
+  function draw() {
+    tiles.clear();
+    grid.replaceChildren(...data.numbers.map((n) => {
+      const tile = numberTile(n, { owner, onDelete: remove(n) });
+      tiles.set(n.name, tile);
+      return tile;
+    }));
+    const empty = !data.numbers.length
+      ? h("div", { class: "card status-card" }, h("span", { class: "icon wait" }, icon("hash", 20)),
+        h("div", { class: "what" }, h("b", { text: "No numbers yet" }),
+          h("span", { class: "muted", text: "Send any number from a script, a server or a device, or upload a file of them: match scores, installs, sales, sensor readings. Each becomes a tile here, live." })))
+      : null;
+    body.replaceChildren(...[empty, data.numbers.length ? grid : null, owner ? sendCard() : null, owner ? uploadCard() : null].filter(Boolean));
+  }
+
+  // How to send one: the key (shown once, when it's made) and the same call in a few languages.
+  function sendCard() {
+    const k = shownKey ?? "YOUR_KEY";
+    const examples = {
+      curl: `curl ${origin}/v1/number \\\n  -H "Authorization: Bearer ${k}" \\\n  -d '{"name": "Home goals", "value": 2}'`,
+      JavaScript: `await fetch("${origin}/v1/number", {\n  method: "POST",\n  headers: { Authorization: "Bearer ${k}" },\n  body: JSON.stringify({ name: "Installs", value: 1, op: "add" }),\n});`,
+      Python: `import requests\n\nrequests.post("${origin}/v1/number",\n  headers={"Authorization": "Bearer ${k}"},\n  json={"name": "Temperature", "value": 21.5})`,
+      "An address": `${origin}/v1/number?key=${k}&name=Temperature&value=21.5`,
+    };
+    let tab = saved.numbersTab && examples[saved.numbersTab] ? saved.numbersTab : "curl";
+    const code = h("div", { class: "code-block" });
+    const copyButton = h("button", { class: "btn copy", type: "button", onclick: () => copy(examples[tab], copyButton) }, icon("copy", 14), "Copy");
+    const tabHost = h("span");
+    const show = () => {
+      code.replaceChildren(examples[tab], copyButton);
+      tabHost.replaceChildren(tabs(Object.keys(examples).map((t) => [t, t]), tab, (t) => { tab = t; saved.numbersTab = t; remember(); show(); }));
+    };
+    show();
+    const makeKey = async () => {
+      if (data.hasKey && !(await confirmDialog({ title: "Make a new key?", body: "The key you have now stops working at once. Anything sending numbers with it needs the new one.", confirm: "Make a new key", danger: true }))) return;
+      try {
+        shownKey = (await api(`/api/sites/${key}/numbers/key`, { method: "POST" })).key;
+        data.hasKey = true;
+        draw();
+      } catch (e) {
+        toast(e.message);
+      }
+    };
+    const keyCopy = h("button", { class: "btn copy", type: "button", onclick: () => copy(shownKey, keyCopy) }, icon("copy", 14), "Copy");
+    const keyPart = shownKey
+      ? h("div", { class: "field" }, h("span", { style: { fontWeight: 550 }, text: "Your key. Copy it now: it's shown only this once." }), h("div", { class: "code-block" }, shownKey, keyCopy))
+      : h("div", { class: "row-between" },
+        h("span", { class: "muted", text: data.hasKey ? "This site has a key. It was shown once, when it was made; make a new one if you've lost it." : "Numbers are sent with a secret key of the site's own." }),
+        h("button", { class: data.hasKey ? "btn" : "btn primary", type: "button", text: data.hasKey ? "Make a new key" : "Create a key", onclick: makeKey }));
+    return card("Send a number", h("div", { class: "form" }, keyPart, tabHost, code,
+      h("p", { class: "help" }, "Use ", h("code", { text: '"op": "add"' }), " for a number that counts up, such as installs or sales: each value is added to its total. Any other number keeps its latest value, like a score or a temperature. Add ", h("code", { text: '"ts"' }), " for a value from another time. Keep the key on servers and devices: on a web page anyone could read it."),
+    ), { sub: "From a script, a server or a device" });
+  }
+
+  function uploadCard() {
+    const input = h("input", { type: "file", accept: ".csv,.tsv,.txt", hidden: true });
+    const choose = h("button", { class: "btn", type: "button", text: "Choose a file", onclick: () => input.click() });
+    const send = async (files) => {
+      if (!files.length) return;
+      const form = new FormData();
+      for (const f of files) form.append("file", f, f.name);
+      choose.disabled = true;
+      try {
+        const res = await fetch(`/api/sites/${key}/numbers/upload`, { method: "POST", body: form, credentials: "same-origin" });
+        const out = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(out.error ?? "That file couldn't be read.");
+        toast(`${int(out.saved)} values of ${out.names.length === 1 ? out.names[0] : `${out.names.length} numbers`} uploaded`);
+        load();
+      } catch (e) {
+        toast(e.message);
+      } finally {
+        choose.disabled = false;
+      }
+    };
+    input.onchange = () => send([...input.files]);
+    const drop = h("div", {
+      class: "drop", ondragover: (e) => { e.preventDefault(); drop.classList.add("over"); }, ondragleave: () => drop.classList.remove("over"),
+      ondrop: (e) => { e.preventDefault(); drop.classList.remove("over"); send([...e.dataTransfer.files]); },
+    }, icon("file", 22), h("b", { text: "Drop a CSV file here" }), choose, input);
+    return card("Upload numbers", h("div", { class: "form" }, drop,
+      h("div", { class: "code-block small", text: "time,name,value\n2026-11-01,Home goals,1\n2026-11-01T21:40,Home goals,2" }),
+      h("p", { class: "help", text: 'A row for each value, with "time", "name" and "value" columns; or a "time" column and a column for each number. Times are dates (2026-11-01) or times (2026-11-01T21:40).' })),
+    { sub: "Past results, readings, exports" });
+  }
+
+  // Values as they're sent, straight onto their tiles; a new number brings the page up to date.
+  const stream = new EventSource(`/api/sites/${key}/stream`);
+  stream.onmessage = (m) => {
+    const msg = JSON.parse(m.data);
+    if (msg.t !== "number" || !data) return;
+    const tile = tiles.get(msg.n.name);
+    if (tile) tile.update(msg.n.value, msg.n.ts);
+    else setTimeout(load, 1500);
+  };
+  onLeave(() => stream.close());
+  every(60_000, load);
+  queueMicrotask(load);
+  return h("div", { class: "page" }, pageHead([icon("hash", 20), h("h1", { text: "Numbers" }), h("span", { class: "muted", text: site?.domains[0] })], [rangeTabs]), body);
+}
+
 // ---------- Rendering ----------
 const ROUTES = [
   [/^\/$/, () => ["home", null, homePage()]],
@@ -1903,8 +2067,9 @@ const ROUTES = [
   [/^\/sites\/(p_[a-z0-9]+)\/setup$/, (k) => ["setup", k, setupPage(k)]],
   [/^\/sites\/(p_[a-z0-9]+)\/settings$/, (k) => ["settings", k, siteSettingsPage(k)]],
   [/^\/sites\/(p_[a-z0-9]+)\/import$/, (k) => ["import", k, importPage(k)]],
+  [/^\/sites\/(p_[a-z0-9]+)\/numbers$/, (k) => ["numbers", k, numbersPage(k)]],
 ];
-const TITLES = { home: "Websites", account: "Settings", plan: "Plan", add: "Add a website", analytics: "Analytics", live: "Live view", setup: "Setup", settings: "Site settings", import: "Import history" };
+const TITLES = { home: "Websites", account: "Settings", plan: "Plan", add: "Add a website", analytics: "Analytics", live: "Live view", setup: "Setup", settings: "Site settings", import: "Import history", numbers: "Numbers" };
 
 let rendering = 0;
 async function render() {

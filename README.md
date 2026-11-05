@@ -113,6 +113,22 @@ An install is matched to the website by its network: when the app first starts, 
 from the same network in the day before, and gets that visit's source. Installs with no download before them (Homebrew,
 another network, a link passed on) show as not matched. The match is an estimate, and the dashboard says so.
 
+## Send any number
+
+Anything a site measures beyond its visits (match scores, installs, sales, sensor readings) can be sent from a script,
+a server or a device, with the secret key from the site's **Numbers** page, and shows there as a live tile:
+
+```sh
+curl https://statiku.victorabuchi.com/v1/number \
+  -H "Authorization: Bearer sn_…" \
+  -d '{"name": "Home goals", "value": 2}'
+```
+
+`"op": "add"` makes a number that counts up (each value is added to its total); any other keeps its latest value.
+`"ts"` (ISO time or Unix seconds) sends a value from another time, a body can hold a list of up to 100, and a device
+that can only open an address can use `/v1/number?key=…&name=…&value=…`. Numbers also come in CSV files on the same
+page: `time,name,value` rows, or a `time` column and a column for each number. They count towards the site's events.
+
 ## Run it locally
 
 Needs Node 24 or later and Postgres.

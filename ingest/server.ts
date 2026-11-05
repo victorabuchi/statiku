@@ -4,6 +4,7 @@
 //   POST /e         one event (a plain-text JSON body, so browsers send it without a preflight)
 //   POST /v1/app    a batch of events from an app (see app.ts)
 //   GET  /v1/site   what the script needs to know about its site (whether to ask for a visitor's location)
+//   POST /v1/number numbers sent with a site's secret key, from anywhere (see numbers.ts); GET with ?key=&name=&value=
 //   GET  /healthz   for Render; /healthz?deep=1 also asks the database, for an outside monitor
 // Nothing here logs or stores an IP.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -21,6 +22,7 @@ import { collect, MAX_BODY, siteConfig, type Deps } from "./collect.ts";
 import { Geo } from "./geo.ts";
 import { Installs } from "./installs.ts";
 import { Hub } from "./live.ts";
+import { MAX_NUMBERS_BODY, Numbers } from "./numbers.ts";
 import { Streets, type Geocoder } from "./streets.ts";
 import { Projects } from "./projects.ts";
 import { Salts } from "./salts.ts";
@@ -43,8 +45,8 @@ export type Options = {
 
 const CORS = {
   "access-control-allow-origin": "*",
-  "access-control-allow-methods": "POST, OPTIONS",
-  "access-control-allow-headers": "content-type",
+  "access-control-allow-methods": "GET, POST, OPTIONS",
+  "access-control-allow-headers": "content-type, authorization",
   "access-control-max-age": "86400",
 };
 
@@ -89,11 +91,13 @@ export async function createApp(options: Options) {
   const salts = new Salts(pool);
   const deps: Deps = { projects: new Projects(pool), salts, sessions, installs: new Installs(pool, salts), writer, geo: new Geo(options.geoPath, options.cityPath), hub: new Hub(), streets: new Streets(options.geocode) };
 
+  const numbers = new Numbers(pool, writer, deps.hub);
   const script = await buildTracker();
   // The dashboard tells the ingest side when a site's domains change, so the cached copy goes at once.
   const dashboard = options.dashboard === false ? null : await createDashboard({
     pool,
     onSiteChanged: (key) => deps.projects.cache.delete(key),
+    onNumbersChanged: (projectId) => numbers.forget(projectId),
     presence: (projectId) => sessions.present(projectId),
     hub: deps.hub,
     streets: deps.streets,
@@ -141,6 +145,15 @@ export async function createApp(options: Options) {
         const outcome = await collectApp(deps, body, clientIp(req, options.trustProxy));
         return send(res, outcome.status, outcome.message);
       }
+      if (path === "/v1/number" || path === "/v1/numbers") {
+        if (req.method === "OPTIONS") return send(res, 204, "");
+        if (req.method !== "POST" && req.method !== "GET") return send(res, 405, "use POST");
+        const body = req.method === "POST" ? await readBody(req, MAX_NUMBERS_BODY) : "";
+        if (body === null) return send(res, 413, "body too large");
+        const auth = req.headers.authorization ?? null;
+        const outcome = await numbers.collect(auth, body, new URL(req.url ?? "/", "http://x").searchParams);
+        return send(res, outcome.status, outcome.message, outcome.status === 202 ? { "content-type": "application/json" } : {});
+      }
       if (path === "/healthz") {
         if (!/[?&]deep=1\b/.test(req.url ?? "")) return send(res, 200, `ok, ${writer.queue.length} queued`);
         const answered = await Promise.race([pool.query("select 1").then(() => true, () => false), new Promise<boolean>((r) => setTimeout(() => r(false), 5000))]);
@@ -184,7 +197,7 @@ export async function createApp(options: Options) {
     await pool.end();
   }
 
-  return { server, pool, deps, writer, dropMarks, close, jobs: dashboard?.jobs };
+  return { server, pool, deps, writer, numbers, dropMarks, close, jobs: dashboard?.jobs };
 }
 
 if (import.meta.main) {

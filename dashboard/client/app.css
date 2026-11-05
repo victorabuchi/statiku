@@ -477,3 +477,17 @@ details.more .card-body { padding-top: 0; display: grid; gap: 12px; }
 .included li { display: flex; gap: 8px; align-items: flex-start; }
 .included svg { flex: none; margin-top: 2px; color: var(--green); }
 @media (max-width: 767px) { .plan-summary { grid-template-columns: 1fr; } }
+
+/* ---------- Numbers ---------- */
+.number-tile .label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.number-tile .label > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.number-tile .kind { flex: none; font-size: 11px; font-weight: 650; color: var(--text-3); text-transform: uppercase; letter-spacing: .04em; }
+.number-tile .label .btn { margin-left: auto; height: 24px; padding: 0 4px; color: var(--text-3); }
+.number-tile .value { font-size: 28px; line-height: 34px; font-variant-numeric: tabular-nums; }
+.number-tile .spark-host { grid-column: 2; grid-row: 2 / span 2; align-self: center; }
+.number-tile .small { grid-column: 1 / -1; font-size: 12px; }
+.number-tile.flash { animation: number-flash 1.2s ease-out; }
+@keyframes number-flash { from { box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 45%, transparent); } to { box-shadow: 0 0 0 0 transparent; } }
+.row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.code-block.small { padding-right: 16px; font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { .number-tile.flash { animation: none; } }
