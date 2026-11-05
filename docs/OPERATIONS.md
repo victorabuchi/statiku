@@ -1,7 +1,7 @@
 # Running Statiku
 
 What to set up once outside the code, and what to do when something goes wrong. Statiku runs on a free Oracle Cloud
-server at `statiku.victorabuchi.com`: the service, its Postgres and Caddy (for HTTPS) in Docker, set up by
+server in Stockholm at `statiku.victorabuchi.com`: the service, its Postgres and Caddy (for HTTPS) in Docker, set up by
 `deploy/oracle/first-boot.sh`. Extra settings (email, Google, Polar) go in `/opt/statiku/deploy/oracle/.env` on the
 server, followed by `sudo /opt/statiku/deploy/oracle/update.sh --force`.
 

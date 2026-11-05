@@ -59,7 +59,7 @@ The full plan, the stack and the data model are in [docs/PLAN.md](docs/PLAN.md).
 - **Apps send no personal data:** an install is a random ID kept in the app's preferences, with no account, name or
   hardware ID. Its IP is used for the country and to match the install to a download from the same network, then
   dropped. The app can offer an opt-out.
-- **Data stays in the EU:** the service and its database run in Frankfurt.
+- **Data stays in the EU:** the service and its database run in Stockholm, Sweden.
 
 ## Add it to a website
 
@@ -161,7 +161,7 @@ With the ingest service running, the Swift package's live test sends a real inst
 
 ## Deploy
 
-Statiku runs on a free Oracle Cloud server at `statiku.victorabuchi.com`: the `Dockerfile`'s service, Postgres and
+Statiku runs on a free Oracle Cloud server in Stockholm at `statiku.victorabuchi.com`: the `Dockerfile`'s service, Postgres and
 Caddy in Docker (`deploy/oracle/`), rebuilt after each push to main; migrations run before the service starts. [docs/OPERATIONS.md](docs/OPERATIONS.md) has the steps, sets up email,
 Google sign-in for imports and Polar for payments, and covers alerts, backups and the monthly restore drill.
 `render.yaml` is the Render Blueprint it ran on until October 2026.

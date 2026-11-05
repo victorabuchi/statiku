@@ -21,8 +21,8 @@ services:
     environment:
       DATABASE_URL: postgres://statiku:${DB_PASSWORD}@db:5432/statiku
       PUBLIC_URL: https://${DOMAIN}
-      # Caddy is the one proxy in front.
-      TRUST_PROXY: "1"
+      # Caddy is the one proxy in front; TRUST_PROXY=2 in .env with Cloudflare's proxy in front of it as well.
+      TRUST_PROXY: ${TRUST_PROXY:-1}
       GIT_COMMIT: ${GIT_COMMIT:-}
   caddy:
     image: caddy:2
