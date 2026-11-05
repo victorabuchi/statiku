@@ -2,7 +2,7 @@
 // live visitors sent from addresses around the world, photographed scene by scene in its desktop and phone layouts,
 // and where each thing the cursor points at sits in each picture. Needs Chrome and a database named *demo*:
 //   DATABASE_URL=postgres://localhost/statiku_demo node scripts/shots.ts
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { createRequire } from "node:module";
 import { letter } from "../dashboard/mail.ts";
@@ -12,7 +12,9 @@ import { DEMO, demo } from "./demo.ts";
 
 const databaseUrl = process.env.DATABASE_URL ?? "";
 if (!/demo/.test(databaseUrl)) throw new Error("Set DATABASE_URL to a database named *demo*: its data is replaced.");
-const OUT = new URL("../site/film/", import.meta.url).pathname;
+// Pictures are made in a folder of their own and swapped in at the end, so a run that fails leaves the film there was.
+const FILM = new URL("../site/film/", import.meta.url).pathname;
+const OUT = new URL("../site/film.new/", import.meta.url).pathname;
 const CHROME = process.env.CHROME ?? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary"]
   .find((p) => { try { return readdirSync(p.replace(/\/[^/]+$/, "")).length > 0; } catch { return false; } });
 const SAFARI = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15";
@@ -173,6 +175,8 @@ async function capture(set: "desktop" | "phone") {
   await fetch(`${BASE}/e`, { method: "POST", headers: { "user-agent": SAFARI, "x-forwarded-for": visitors[0].ip }, body: JSON.stringify({ k: newSite, n: "pageview", u: "https://victorabuchi.com/", w: 1440 }) });
   await sleep(2500);
   await shot("setup-ok");
+  // Gone again, so the next layout can add it afresh (an address can't be in an account twice).
+  await fetch(`${BASE}/api/sites/${newSite}`, { method: "DELETE", headers: { cookie: `${cookieName}=${cookieValue}`, "content-type": "application/json" }, body: JSON.stringify({ confirm: "victorabuchi.com" }) });
 
   // Alerts: the site's settings, and the email a rush brings.
   await open(`/sites/${siteKey}/settings`);
@@ -193,6 +197,8 @@ async function capture(set: "desktop" | "phone") {
 await capture("desktop");
 await capture("phone");
 writeFileSync(`${OUT}film.json`, JSON.stringify(film, null, 1));
+rmSync(FILM, { recursive: true, force: true });
+renameSync(OUT, FILM);
 clearInterval(beats);
 await browser.close();
 await app.close();

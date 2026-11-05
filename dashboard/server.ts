@@ -21,7 +21,7 @@
 //   GET    /api/sites/:key/imports/google/properties?grant=
 //   GET    /api/billing   POST /api/billing/checkout { plan, interval }   POST /api/billing/portal   POST /api/polar/webhook
 import { createHash, randomBytes } from "node:crypto";
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { Readable, Transform } from "node:stream";
 import * as icons from "simple-icons";
 import { readFileSync } from "node:fs";
@@ -198,9 +198,10 @@ function siteBundle(asset: (body: string | Uint8Array, type: string) => Asset, f
   };
   // The film's pictures share film.json's version, so a new set of pictures gets new addresses.
   const filmDir = new URL("film/", dir);
-  const filmData = asset(readFileSync(new URL("film.json", filmDir)), "application/json");
+  // Without its pictures (scripts/shots.ts makes them) the film is empty, and everything else still works.
+  const filmData = asset(existsSync(new URL("film.json", filmDir)) ? readFileSync(new URL("film.json", filmDir)) : "{}", "application/json");
   files["/site/film/film.json"] = filmData;
-  for (const name of readdirSync(filmDir).filter((n) => n.endsWith(".webp"))) {
+  for (const name of existsSync(filmDir) ? readdirSync(filmDir).filter((n) => n.endsWith(".webp")) : []) {
     files[`/site/film/${name}`] = { ...asset(readFileSync(new URL(name, filmDir)), "image/webp"), hash: filmData.hash };
   }
   const logo = (i: { title: string; hex: string; path: string }, size = 20) =>
