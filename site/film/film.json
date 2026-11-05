@@ -26,6 +26,7 @@
    "heat-read": "d-heat-read.webp",
    "numbers": "d-numbers.webp",
    "numbers-live": "d-numbers-live.webp",
+   "tracker-pie": "d-tracker-pie.webp",
    "numbers-send": "d-numbers-send.webp",
    "conv": "d-conv.webp",
    "app": "d-app.webp",
@@ -94,8 +95,8 @@
     "h": 167
    },
    "kickLabel": {
-    "x": 711,
-    "y": 274,
+    "x": 830,
+    "y": 231,
     "w": 92,
     "h": 21
    },
@@ -172,14 +173,26 @@
     "h": 12
    },
    "tileWidgets": {
-    "x": 1017,
-    "y": 431,
+    "x": 264,
+    "y": 314,
     "w": 239,
-    "h": 134
+    "h": 138
+   },
+   "pieChart": {
+    "x": 285,
+    "y": 343,
+    "w": 950,
+    "h": 200
+   },
+   "splitPick": {
+    "x": 1101,
+    "y": 279,
+    "w": 134,
+    "h": 32
    },
    "copyCurl": {
-    "x": 1149,
-    "y": 299,
+    "x": 1017,
+    "y": 279,
     "w": 76,
     "h": 32
    },
@@ -284,6 +297,7 @@
    "heat-read": "p-heat-read.webp",
    "numbers": "p-numbers.webp",
    "numbers-live": "p-numbers-live.webp",
+   "tracker-pie": "p-tracker-pie.webp",
    "numbers-send": "p-numbers-send.webp",
    "conv": "p-conv.webp",
    "app": "p-app.webp",
@@ -334,8 +348,8 @@
     "h": 107
    },
    "kickLabel": {
-    "x": 84,
-    "y": 333,
+    "x": 148,
+    "y": 304,
     "w": 92,
     "h": 21
    },
@@ -395,9 +409,21 @@
    },
    "tileWidgets": {
     "x": 16,
-    "y": 548,
+    "y": 230,
     "w": 173,
-    "h": 126
+    "h": 130
+   },
+   "pieChart": {
+    "x": 33,
+    "y": 651,
+    "w": 324,
+    "h": 200
+   },
+   "splitPick": {
+    "x": 223,
+    "y": 587,
+    "w": 134,
+    "h": 32
    },
    "copyCurl": {
     "x": 271,
@@ -425,7 +451,7 @@
    },
    "wordpress": {
     "x": 166,
-    "y": 625,
+    "y": 605,
     "w": 120,
     "h": 36
    },
@@ -449,7 +475,7 @@
    },
    "reportButton": {
     "x": 45,
-    "y": 551,
+    "y": 574,
     "w": 207,
     "h": 43
    }

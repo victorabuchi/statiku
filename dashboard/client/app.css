@@ -685,3 +685,4 @@ a.number-tile.link:hover { border-color: var(--text-3); box-shadow: 0 4px 14px r
 .donut-legend i { width: 12px; height: 12px; border-radius: 3px; }
 .donut-legend span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .donut-legend small { color: var(--text-3); text-align: right; }
+.goal-card .amount { margin-top: 14px; }
