@@ -1,35 +1,45 @@
 # Running Statiku
 
-What to set up once outside the code, and what to do when something goes wrong. Statiku runs on Northflank at
-`statiku.victorabuchi.com`; every setting below goes in the service's environment there.
+What to set up once outside the code, and what to do when something goes wrong. Statiku runs on Koyeb, with its
+database on Aiven, at `statiku.victorabuchi.com`; every setting below goes in the Koyeb service's environment.
 
-## Deploying on Northflank
+## Deploying: Koyeb and Aiven, both free
 
-Statiku is one service (the `Dockerfile` in this repository) and one Postgres database. The free Sandbox plan has
-room for both; it may ask for a card to verify you.
+Statiku is one service, built from the `Dockerfile` in this repository, and one Postgres database. Koyeb's free web
+service runs the first and Aiven's free PostgreSQL the second, both in Europe. Koyeb's free service sleeps after an
+hour without any request; the uptime check (every half hour) and your sites' visitors keep it awake.
 
-1. Create a project, in a region in Europe.
-2. Add a **PostgreSQL** addon on the smallest plan.
-3. Add a **combined service** from the GitHub repository `victorabuchi/statiku`, branch `main`, built with the
-   `Dockerfile`. Choose the 512 MB plan (nf-compute-20). With `GEO_CITY_DB=off` in its environment it fits in 256 MB,
-   without cities on the live globe.
-4. Under **Networking**, expose port `8080` over HTTP, publicly. Add a health check: HTTP `GET /healthz` on port 8080.
-5. Under **Environment**:
-   - `DATABASE_URL`: link it to the Postgres addon's connection string (its `POSTGRES_URI`). If the service then can't
-     connect because of the certificate, add `?sslmode=no-verify` to the end of it.
+**The database, on Aiven**
+
+1. Sign up at aiven.io and create a **PostgreSQL** service on the **Free** plan, in a European region (Frankfurt or
+   Amsterdam).
+2. When it's running, copy its **Service URI** from the service's overview, and download its **CA certificate**
+   (`ca.pem`).
+
+**The service, on Koyeb**
+
+1. Sign up at koyeb.com (it may hold $1 on a card to check it, and cancels the hold at once).
+2. Create a **Web Service** from GitHub: the repository `victorabuchi/statiku`, branch `main`, built with the
+   **Dockerfile**. Choose the **Free** instance, in **Frankfurt**.
+3. Expose port `8080` over HTTP, and add a health check: HTTP on port 8080, path `/healthz`.
+4. Environment variables (the last two as secrets):
    - `PUBLIC_URL`: `https://statiku.victorabuchi.com`
-   - `SECRET_KEY`: any long random text, made once, such as the output of `openssl rand -base64 32` in Terminal.
-     Keep it: it seals the tokens people give Statiku.
-   - `TRUST_PROXY` is already 1 in the Dockerfile, for Northflank's proxy.
-6. Under **Domains**, add `statiku.victorabuchi.com`. In Cloudflare's DNS for victorabuchi.com, add the CNAME record
-   Northflank shows, with the proxy **off** (a grey cloud), so Northflank can issue its certificate. If you turn
-   Cloudflare's proxy on later, set `TRUST_PROXY=2`.
-7. Deploy. Migrations run before the service starts. Then sign up at https://statiku.victorabuchi.com with
-   contact@victorabuchi.com: the account is unlimited at once, with Notchlight, Knewler and victorabuchi.com already in
-   it under the keys their pages carry, and their visits start counting.
+   - `DATABASE_URL`: Aiven's Service URI
+   - `DATABASE_CA`: the whole text of `ca.pem`, from `-----BEGIN CERTIFICATE-----` to `-----END CERTIFICATE-----`
+   - `SECRET_KEY`: any long random text, made once, such as the output of `openssl rand -base64 32` in Terminal. Keep
+     it: it seals the tokens people give Statiku.
+   - `TRUST_PROXY` is already 1 in the Dockerfile. If the free instance runs out of memory, add `GEO_CITY_DB=off`:
+     Statiku then places live visitors by country only.
+5. Deploy. Migrations run before the service starts.
+6. Under **Domains**, add `statiku.victorabuchi.com`, and in Cloudflare's DNS for victorabuchi.com add the CNAME record
+   Koyeb shows, with the proxy **off** (a grey cloud). If you turn Cloudflare's proxy on later, set `TRUST_PROXY=2`.
+7. Open `https://statiku.victorabuchi.com/healthz?deep=1`: it should say the database is answering and name the
+   country you're in. Another country means `TRUST_PROXY` doesn't match Koyeb's proxies.
+8. Sign up at `https://statiku.victorabuchi.com` with contact@victorabuchi.com: the account is unlimited at once, with
+   Notchlight, Knewler and victorabuchi.com already in it under the keys their pages carry.
 
 Notchlight, Knewler, victorabuchi.com and the Swift SDK already point at `statiku.victorabuchi.com`, so moving to
-another host later is only a new CNAME record.
+another host later is only a new CNAME record. The same `Dockerfile` runs on any host that builds one.
 
 ## Email
 
@@ -101,15 +111,15 @@ npm run billing -- show someone@example.com
 
 ## Backups
 
-Turn on scheduled backups for the Postgres addon in Northflank (its Backups page), if your plan has them, and keep a
-copy of your own now and then: a backup only counts once you've restored one.
+Aiven backs up its databases; on the free plan, keep a copy of your own now and then too, with `pg_dump` and the
+Service URI, as a backup only counts once you've restored one.
 
 Try a restore once a month:
 
-1. Restore the latest backup into a new Postgres addon.
+1. Restore the latest backup or copy into a new database.
 2. In the service's shell, compare the copy with the live database:
    `npm run restore-check -- "<the new database's connection string>"`.
-3. Every table should be there, with rows up to the backup. Then delete the new addon.
+3. Every table should be there, with rows up to the backup. Then delete the new database.
 
 When you really need it: restore, check the copy the same way, then link the service's `DATABASE_URL` to the new
 database and redeploy.

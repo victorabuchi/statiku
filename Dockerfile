@@ -1,5 +1,6 @@
-# Statiku as a container, for Northflank or any host that builds a Dockerfile: the service with its location
-# databases. Set DATABASE_URL and PUBLIC_URL (see docs/OPERATIONS.md); migrations run before it starts.
+# Statiku as a container, for Koyeb or any host that builds a Dockerfile: the service with its location
+# databases. Set DATABASE_URL (and DATABASE_CA), PUBLIC_URL and SECRET_KEY (see docs/OPERATIONS.md); migrations
+# run before it starts.
 FROM node:24-slim
 WORKDIR /app
 ENV NODE_ENV=production PORT=8080 TRUST_PROXY=1

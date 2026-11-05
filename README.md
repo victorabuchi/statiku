@@ -161,7 +161,7 @@ With the ingest service running, the Swift package's live test sends a real inst
 
 ## Deploy
 
-Statiku runs on Northflank at `statiku.victorabuchi.com`, built from the `Dockerfile`, with its Postgres;
+Statiku runs on Koyeb at `statiku.victorabuchi.com`, built from the `Dockerfile`, with its Postgres on Aiven;
 migrations run before the service starts. [docs/OPERATIONS.md](docs/OPERATIONS.md) has the steps, sets up email,
 Google sign-in for imports and Polar for payments, and covers alerts, backups and the monthly restore drill.
 `render.yaml` is the Render Blueprint it ran on until October 2026.
