@@ -64,7 +64,7 @@ The full plan, the stack and the data model are in [docs/PLAN.md](docs/PLAN.md).
 ## Add it to a website
 
 ```html
-<script defer data-project="p_…" src="https://<ingest host>/s.js"></script>
+<script defer data-project="p_…" src="https://statiku.victorabuchi.com/s.js"></script>
 ```
 
 Page views count on their own, including single-page navigation, and the live view shows a visitor the moment they
@@ -161,9 +161,10 @@ With the ingest service running, the Swift package's live test sends a real inst
 
 ## Deploy
 
-`render.yaml` is a Render Blueprint for the service and Postgres, both in Frankfurt. Migrations run before each
-deploy, and the dashboard is at the service's own address. [docs/OPERATIONS.md](docs/OPERATIONS.md) sets up email,
+Statiku runs on Northflank at `statiku.victorabuchi.com`, built from the `Dockerfile`, with its Postgres;
+migrations run before the service starts. [docs/OPERATIONS.md](docs/OPERATIONS.md) has the steps, sets up email,
 Google sign-in for imports and Polar for payments, and covers alerts, backups and the monthly restore drill.
+`render.yaml` is the Render Blueprint it ran on until October 2026.
 
 The film on the landing page plays real screens on demo data. After a change to the dashboard, take its pictures
 again with `DATABASE_URL=postgres://localhost/statiku_demo node scripts/shots.ts` (it needs Chrome). A project made in the service's Shell before accounts
