@@ -3,7 +3,7 @@
 # repository; the issue is closed when Statiku answers again, which is one more email. The run itself never fails:
 # GitHub would email about every failed run, every half hour for as long as an outage lasts. Every half hour, because this repository is private and
 # GitHub counts each run as a minute: about 1,500 of the 2,000 free minutes a month. Render emails about crashes too.
-# The address is the repository variable STATIKU_URL, or else Render's address.
+# The address is the repository variable STATIKU_URL, or else statiku.victorabuchi.com.
 name: Uptime
 on:
   schedule:
@@ -21,7 +21,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          URL: ${{ vars.STATIKU_URL || 'https://statiku-ingest.onrender.com' }}
+          URL: ${{ vars.STATIKU_URL || 'https://statiku.victorabuchi.com' }}
         run: |
           open=$(gh issue list --label down --state open --json number --jq '.[0].number // empty')
           # Three tries a minute apart, so a deploy or a blip isn't taken for an outage.

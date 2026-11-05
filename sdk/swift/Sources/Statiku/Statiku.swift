@@ -10,7 +10,7 @@ import Foundation
 
 public enum Statiku {
     /// The Statiku service. Pass another to `start` to send events elsewhere, such as through your own domain.
-    public static let defaultEndpoint = URL(string: "https://statiku-ingest.onrender.com")!
+    public static let defaultEndpoint = URL(string: "https://statiku.victorabuchi.com")!
 
     /// Starts Statiku. Call it once, early in launch. The first launch sends `install`, each day the app runs sends
     /// `active`, and a new version sends `update`.

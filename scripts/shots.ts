@@ -19,7 +19,7 @@ const SAFARI = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // The tracking code in the pictures shows Statiku's real address, not this run's.
-process.env.PUBLIC_URL ??= "https://statiku-ingest.onrender.com";
+process.env.PUBLIC_URL ??= "https://statiku.victorabuchi.com";
 const { siteKey } = await demo(databaseUrl);
 const geoPath = new URL("../data/country.mmdb", import.meta.url), cityPath = new URL("../data/city.mmdb", import.meta.url);
 const app = await createApp({
