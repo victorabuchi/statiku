@@ -289,8 +289,9 @@ code { font: 12px var(--mono); background: var(--surface-2); border: 1px solid v
 /* ---------- Sign in ---------- */
 .auth { min-height: 100vh; display: grid; place-items: center; padding: 32px 16px; background: var(--page); }
 .auth .box { width: min(420px, 100%); display: grid; gap: 18px; }
-.auth .logo { display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
-.auth .logo img { width: 30px; height: 30px; }
+.auth .logo { display: flex; align-items: center; gap: 10px; width: fit-content; margin-inline: auto; color: var(--text); font-size: 21px; font-weight: 800; letter-spacing: -0.03em; text-decoration: none; }
+.auth .logo img { width: 30px; height: 30px; flex: none; border-radius: 8px; }
+.auth .logo:hover span { text-decoration: underline; text-underline-offset: 3px; }
 .auth .card { padding: 28px; display: grid; gap: 18px; }
 .auth h1 { font-size: 22px; }
 .auth .sub { color: var(--text-2); margin-top: 4px; }

@@ -87,6 +87,9 @@ function revealable(input, what = "password") {
   return h("div", { class: "secret" }, input, button);
 }
 
+// The logo at the versioned address the page's own icon link carries, so a new logo shows at once.
+const LOGO = document.querySelector('link[rel="icon"]')?.getAttribute("href") ?? "/favicon.svg";
+
 const int = (n) => Math.round(n ?? 0).toLocaleString("en-US");
 const compact = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, "") + "K" : String(Math.round(n * 10) / 10));
 const pct = (a, b, d = 1) => (b ? ((100 * a) / b).toFixed(d) + "%" : "–");
@@ -333,7 +336,7 @@ function shell(site, active, content) {
 
   const topbar = h("header", { class: "topbar" },
     h("button", { class: "menu-button", type: "button", "aria-label": "Menu", "aria-controls": "sidebar", onclick: () => toggleMenu(!sidebar.classList.contains("open")) }, icon("menu", 22)),
-    h("a", { class: "brand", href: "/" }, h("img", { src: "/favicon.svg", alt: "" }), h("span", { text: "Statiku" })),
+    h("a", { class: "brand", href: "/" }, h("img", { src: LOGO, alt: "" }), h("span", { text: "Statiku" })),
     h("div", { class: "center" }, switcher),
     h("div", { class: "actions" }, avatar));
 
@@ -507,7 +510,8 @@ function authForm(mode, { invite = null, onDone } = {}) {
 
 function authLayout(...kids) {
   return h("div", { class: "auth" }, h("div", { class: "box" },
-    h("div", { class: "logo" }, h("img", { src: "/favicon.svg", alt: "" }), "Statiku"), kids,
+    // Back to the landing page, loaded whole: the server shows it to whoever isn't signed in.
+    h("a", { class: "logo", href: "/", "data-external": true, "aria-label": "Statiku home" }, h("img", { src: LOGO, alt: "" }), h("span", { text: "Statiku" })), kids,
     h("p", { class: "promise" }, h("span", { text: "No cookies on your visitors" }), h("span", { text: "No IP addresses stored" }), h("span", { text: "Data kept in the EU" }))));
 }
 

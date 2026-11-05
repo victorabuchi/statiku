@@ -176,16 +176,17 @@ async function bundle() {
   const map = asset(readFileSync(require.resolve("world-atlas/countries-50m.json")), "application/json");
   const html = asset(
     readFileSync(new URL("index.html", dir), "utf8")
-      .replace("/app.js", `/app.js?v=${js.hash}`).replace("/app.css", `/app.css?v=${css.hash}`).replace("/fonts/latin.woff2", `/fonts/latin.woff2?v=${fonts["/fonts/latin.woff2"].hash}`),
+      .replace("/app.js", `/app.js?v=${js.hash}`).replace("/app.css", `/app.css?v=${css.hash}`).replace("/fonts/latin.woff2", `/fonts/latin.woff2?v=${fonts["/fonts/latin.woff2"].hash}`)
+      .replaceAll('"/favicon.svg"', `"/favicon.svg?v=${icon.hash}"`),
     "text/html; charset=utf-8",
   );
-  return { js, css, icon, html, map, fonts, site: siteBundle(asset, fonts) };
+  return { js, css, icon, html, map, fonts, site: siteBundle(asset, fonts, icon.hash) };
 }
 
 // Statiku's own pages, filled in once: the files' versions, the website builders' and tools' logos, and the plans'
 // prices from billing.ts, so the landing page never disagrees with Settings.
 type Asset = { data: Buffer; gzip: Buffer; type: string; hash: string };
-function siteBundle(asset: (body: string | Uint8Array, type: string) => Asset, fonts: Record<string, { hash: string }>) {
+function siteBundle(asset: (body: string | Uint8Array, type: string) => Asset, fonts: Record<string, { hash: string }>, iconHash: string) {
   const dir = new URL("../site/", import.meta.url);
   const read = (name: string) => readFileSync(new URL(name, dir), "utf8");
   let styles = read("site.css");
@@ -220,7 +221,9 @@ function siteBundle(asset: (body: string | Uint8Array, type: string) => Asset, f
     .replaceAll("{{V_CSS}}", files["/site/site.css"].hash).replaceAll("{{V_JS}}", files["/site/site.js"].hash)
     .replaceAll("{{V_FILM}}", files["/site/film.js"].hash).replaceAll("{{V_SCENES}}", files["/site/film-scenes.js"].hash)
     .replaceAll("{{V_FILMDATA}}", filmData.hash).replaceAll("{{FONT}}", `/fonts/latin.woff2?v=${fonts["/fonts/latin.woff2"].hash}`)
-    .replace("{{BUILDERS}}", builders).replace("{{SOURCES}}", sources).replace("{{PLANS}}", plans).replace("{{YEAR}}", String(new Date().getFullYear()));
+    .replace("{{BUILDERS}}", builders).replace("{{SOURCES}}", sources).replace("{{PLANS}}", plans).replace("{{YEAR}}", String(new Date().getFullYear()))
+    // The logo by its version too, so browsers show a new one at once rather than the one they kept.
+    .replaceAll('"/favicon.svg"', `"/favicon.svg?v=${iconHash}"`);
   const pages = Object.fromEntries((["index", "pricing", "terms", "privacy", "dpa"] as const).map((name) => [name, asset(fill(read(`${name}.html`)), "text/html; charset=utf-8")]));
   return { files, pages };
 }
@@ -894,7 +897,8 @@ export async function createDashboard(options: {
       if (req.method !== "GET" && req.method !== "HEAD") throw new HttpError(405, "Not allowed.");
       if (path === "/app.js") return sendAsset(r, assets.js, "public, max-age=31536000, immutable");
       if (path === "/app.css") return sendAsset(r, assets.css, "public, max-age=31536000, immutable");
-      if (path === "/favicon.svg") return sendAsset(r, assets.icon, "public, max-age=86400");
+      // Pages ask for the logo by its version, which never changes; asked for without one, it's kept for an hour.
+      if (path === "/favicon.svg") return sendAsset(r, assets.icon, /[?&]v=/.test(req.url ?? "") ? "public, max-age=31536000, immutable" : "public, max-age=3600");
       if (path === "/geo/countries-50m.json") return sendAsset(r, assets.map, "public, max-age=604800");
       if (Object.hasOwn(assets.fonts, path)) return sendAsset(r, assets.fonts[path as keyof typeof assets.fonts], "public, max-age=31536000, immutable");
       if (Object.hasOwn(assets.site.files, path)) return sendAsset(r, assets.site.files[path], "public, max-age=31536000, immutable");
